@@ -454,58 +454,63 @@ export default function ProgressionTracker() {
 
           const activity = await detailResponse.json();
 
+          // CRITICAL: intervals.icu wraps the detailed activity in an array
+          // We need to extract the first element
+          const activityData = Array.isArray(activity) ? activity[0] : activity;
+
           // Log first detailed activity for debugging
           if (i === 0) {
             console.log('=== DETAILED ACTIVITY SAMPLE ===');
-            console.log('Full activity object:', activity);
-            console.log('Available fields:', Object.keys(activity));
+            console.log('Raw response:', activity);
+            console.log('Extracted activity:', activityData);
+            console.log('Available fields:', Object.keys(activityData || {}));
             console.log('Power-related fields:');
-            console.log('  icu_np:', activity.icu_np);
-            console.log('  normalized_power:', activity.normalized_power);
-            console.log('  average_watts:', activity.average_watts);
-            console.log('  avg_watts:', activity.avg_watts);
-            console.log('  power:', activity.power);
-            console.log('  watts_avg:', activity.watts_avg);
-            console.log('  np:', activity.np);
-            console.log('  icu_average_watts:', activity.icu_average_watts);
+            console.log('  icu_np:', activityData?.icu_np);
+            console.log('  normalized_power:', activityData?.normalized_power);
+            console.log('  average_watts:', activityData?.average_watts);
+            console.log('  avg_watts:', activityData?.avg_watts);
+            console.log('  power:', activityData?.power);
+            console.log('  watts_avg:', activityData?.watts_avg);
+            console.log('  np:', activityData?.np);
+            console.log('  icu_average_watts:', activityData?.icu_average_watts);
             console.log('================================');
           }
 
           // Try MANY field name variations for power data
-          const np = activity.icu_np ||
-                     activity.normalized_power ||
-                     activity.average_watts ||
-                     activity.avg_watts ||
-                     activity.watts_avg ||
-                     activity.icu_average_watts ||
-                     activity.np ||
-                     activity.power?.np ||
-                     activity.power?.avg ||
-                     activity.power?.average ||
+          const np = activityData?.icu_np ||
+                     activityData?.normalized_power ||
+                     activityData?.average_watts ||
+                     activityData?.avg_watts ||
+                     activityData?.watts_avg ||
+                     activityData?.icu_average_watts ||
+                     activityData?.np ||
+                     activityData?.power?.np ||
+                     activityData?.power?.avg ||
+                     activityData?.power?.average ||
                      0;
 
           // If no power data, skip
           if (!np || np === 0) {
             skippedNoPower++;
             if (skipReasons.length < 3) {
-              const activityName = activity.name || activity.id || 'Unnamed';
-              const availableFields = Object.keys(activity).slice(0, 10).join(', ');
+              const activityName = activityData?.name || activityData?.id || 'Unnamed';
+              const availableFields = Object.keys(activityData || {}).slice(0, 10).join(', ');
               skipReasons.push(`"${activityName}" - no power. Available fields: ${availableFields}...`);
             }
             // Log first failed activity completely for debugging
             if (skippedNoPower === 1) {
               console.log('=== FIRST ACTIVITY WITH NO POWER ===');
-              console.log('Activity name:', activity.name);
-              console.log('Activity ID:', activity.id);
-              console.log('All fields:', Object.keys(activity));
-              console.log('Full object:', activity);
+              console.log('Activity name:', activityData?.name);
+              console.log('Activity ID:', activityData?.id);
+              console.log('All fields:', Object.keys(activityData || {}));
+              console.log('Full object:', activityData);
               console.log('====================================');
             }
             continue;
           }
 
           // Check for duplicates (same date)
-          const activityDate = activity.start_date_local.split('T')[0];
+          const activityDate = activityData.start_date_local.split('T')[0];
           const isDuplicate = history.some(w => w.date === activityDate && Math.abs(w.normalizedPower - np) < 5);
 
           if (isDuplicate) {
@@ -514,11 +519,11 @@ export default function ProgressionTracker() {
           }
 
           // Get TSS (intervals.icu already calculates this!)
-          const tss = activity.icu_training_load || activity.training_load || activity.tss ||
-                      calculateTSS(np, Math.round((activity.moving_time || activity.elapsed_time || 0) / 60));
+          const tss = activityData.icu_training_load || activityData.training_load || activityData.tss ||
+                      calculateTSS(np, Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60));
 
           // Map to our zone
-          const zone = mapWorkoutTypeToZone(activity);
+          const zone = mapWorkoutTypeToZone(activityData);
           const currentLevel = levels[zone];
 
           // Estimate workout level from IF
@@ -526,7 +531,7 @@ export default function ProgressionTracker() {
           const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
 
           // Get RPE if available (wellness data)
-          const rpe = activity.feel || activity.perceived_exertion || 5; // Default to 5 if not available
+          const rpe = activityData.feel || activityData.perceived_exertion || 5; // Default to 5 if not available
 
           // Calculate new level
           const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
@@ -539,9 +544,9 @@ export default function ProgressionTracker() {
             workoutLevel: parseFloat(workoutLevel.toFixed(1)),
             rpe: rpe,
             completed: true,
-            duration: Math.round((activity.moving_time || activity.elapsed_time || 0) / 60),
+            duration: Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60),
             normalizedPower: Math.round(np),
-            notes: `Imported from intervals.icu: ${activity.name || 'Ride'}`,
+            notes: `Imported from intervals.icu: ${activityData.name || 'Ride'}`,
             previousLevel: currentLevel,
             newLevel: newLevel,
             change: newLevel - currentLevel,
