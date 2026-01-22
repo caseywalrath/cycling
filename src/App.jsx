@@ -408,87 +408,130 @@ export default function ProgressionTracker() {
       }
 
       const activities = await response.json();
-      setSyncStatus(`Found ${activities.length} activities. Processing...`);
+      setSyncStatus(`Found ${activities.length} activities. Fetching detailed data...`);
 
       // Debug: Log first activity to understand structure
       if (activities.length > 0) {
-        console.log('Sample activity:', activities[0]);
+        console.log('Sample activity summary:', activities[0]);
         console.log('Available fields:', Object.keys(activities[0]));
       }
 
       // Filter to only cycling activities and map to our format
       let imported = 0;
-      let skippedNonRide = 0;
       let skippedNoPower = 0;
       let skippedDuplicate = 0;
+      let fetchErrors = 0;
       const newWorkouts = [];
       const skipReasons = [];
 
-      for (const activity of activities) {
-        // Try multiple fields for power data - be more flexible
-        const np = activity.icu_np || activity.normalized_power || activity.average_watts || activity.avg_watts || 0;
+      // Process activities in smaller batches to avoid overwhelming the API
+      for (let i = 0; i < activities.length; i++) {
+        const activitySummary = activities[i];
 
-        // If no power data, skip
-        if (!np || np === 0) {
-          skippedNoPower++;
-          if (skipReasons.length < 5) {
-            const activityName = activity.name || activity.id || 'Unnamed';
-            skipReasons.push(`"${activityName}" - no power (icu_np=${activity.icu_np}, avg_watts=${activity.average_watts})`);
+        // Update progress every 10 activities
+        if (i > 0 && i % 10 === 0) {
+          setSyncStatus(`Processing activity ${i + 1} of ${activities.length}...`);
+        }
+
+        try {
+          // Fetch detailed activity data which includes power metrics
+          const detailResponse = await fetch(
+            `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities/${activitySummary.id}`,
+            {
+              headers: {
+                'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
+              },
+            }
+          );
+
+          if (!detailResponse.ok) {
+            fetchErrors++;
+            if (skipReasons.length < 5) {
+              skipReasons.push(`Activity ${activitySummary.id} - fetch failed (${detailResponse.status})`);
+            }
+            continue;
           }
-          continue;
+
+          const activity = await detailResponse.json();
+
+          // Log first detailed activity for debugging
+          if (i === 0) {
+            console.log('Sample detailed activity:', activity);
+            console.log('Detailed fields:', Object.keys(activity));
+          }
+
+          // Try multiple fields for power data - be more flexible
+          const np = activity.icu_np || activity.normalized_power || activity.average_watts || activity.avg_watts || 0;
+
+          // If no power data, skip
+          if (!np || np === 0) {
+            skippedNoPower++;
+            if (skipReasons.length < 5) {
+              const activityName = activity.name || activity.id || 'Unnamed';
+              skipReasons.push(`"${activityName}" - no power (icu_np=${activity.icu_np}, avg_watts=${activity.average_watts})`);
+            }
+            continue;
+          }
+
+          // Check for duplicates (same date)
+          const activityDate = activity.start_date_local.split('T')[0];
+          const isDuplicate = history.some(w => w.date === activityDate && Math.abs(w.normalizedPower - np) < 5);
+
+          if (isDuplicate) {
+            skippedDuplicate++;
+            continue;
+          }
+
+          // Get TSS (intervals.icu already calculates this!)
+          const tss = activity.icu_training_load || activity.training_load || activity.tss ||
+                      calculateTSS(np, Math.round((activity.moving_time || activity.elapsed_time || 0) / 60));
+
+          // Map to our zone
+          const zone = mapWorkoutTypeToZone(activity);
+          const currentLevel = levels[zone];
+
+          // Estimate workout level from IF
+          const intensityFactor = np / FTP;
+          const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
+
+          // Get RPE if available (wellness data)
+          const rpe = activity.feel || activity.perceived_exertion || 5; // Default to 5 if not available
+
+          // Calculate new level
+          const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
+
+          // Create workout entry
+          const entry = {
+            id: Date.now() + imported, // Unique ID
+            date: activityDate,
+            zone: zone,
+            workoutLevel: parseFloat(workoutLevel.toFixed(1)),
+            rpe: rpe,
+            completed: true,
+            duration: Math.round((activity.moving_time || activity.elapsed_time || 0) / 60),
+            normalizedPower: Math.round(np),
+            notes: `Imported from intervals.icu: ${activity.name || 'Ride'}`,
+            previousLevel: currentLevel,
+            newLevel: newLevel,
+            change: newLevel - currentLevel,
+            tss: tss,
+            intensityFactor: intensityFactor,
+          };
+
+          newWorkouts.push(entry);
+
+          // Update level for next workout calculation
+          levels[zone] = newLevel;
+
+          imported++;
+
+        } catch (error) {
+          console.error(`Error fetching activity ${activitySummary.id}:`, error);
+          fetchErrors++;
+          if (skipReasons.length < 5) {
+            skipReasons.push(`Activity ${activitySummary.id} - error: ${error.message}`);
+          }
         }
-
-        // Check for duplicates (same date)
-        const activityDate = activity.start_date_local.split('T')[0];
-        const isDuplicate = history.some(w => w.date === activityDate && Math.abs(w.normalizedPower - np) < 5);
-
-        if (isDuplicate) {
-          skippedDuplicate++;
-          continue;
-        }
-
-        // Get TSS (intervals.icu already calculates this!)
-        const tss = activity.icu_training_load || activity.training_load || activity.tss ||
-                    calculateTSS(np, Math.round((activity.moving_time || activity.elapsed_time || 0) / 60));
-
-        // Map to our zone
-        const zone = mapWorkoutTypeToZone(activity);
-        const currentLevel = levels[zone];
-
-        // Estimate workout level from IF
-        const intensityFactor = np / FTP;
-        const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
-
-        // Get RPE if available (wellness data)
-        const rpe = activity.feel || activity.perceived_exertion || 5; // Default to 5 if not available
-
-        // Calculate new level
-        const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
-
-        // Create workout entry
-        const entry = {
-          id: Date.now() + imported, // Unique ID
-          date: activityDate,
-          zone: zone,
-          workoutLevel: parseFloat(workoutLevel.toFixed(1)),
-          rpe: rpe,
-          completed: true,
-          duration: Math.round((activity.moving_time || activity.elapsed_time || 0) / 60),
-          normalizedPower: Math.round(np),
-          notes: `Imported from intervals.icu: ${activity.name || 'Ride'}`,
-          previousLevel: currentLevel,
-          newLevel: newLevel,
-          change: newLevel - currentLevel,
-          tss: tss,
-          intensityFactor: intensityFactor,
-        };
-
-        newWorkouts.push(entry);
-
-        // Update level for next workout calculation
-        levels[zone] = newLevel;
-
-        imported++;
       }
 
       if (imported > 0) {
@@ -514,27 +557,23 @@ export default function ProgressionTracker() {
         });
         setRecentChanges(changes);
 
-        setSyncStatus(`✓ Imported ${imported} activities! Skipped: ${skippedNoPower} without power, ${skippedDuplicate} duplicates.`);
+        let statusMsg = `✓ Imported ${imported} activities!`;
+        if (skippedNoPower > 0 || skippedDuplicate > 0 || fetchErrors > 0) {
+          statusMsg += ` Skipped: ${skippedNoPower} without power, ${skippedDuplicate} duplicates, ${fetchErrors} fetch errors.`;
+        }
+        setSyncStatus(statusMsg);
       } else {
-        const totalSkipped = skippedNoPower + skippedDuplicate;
+        const totalSkipped = skippedNoPower + skippedDuplicate + fetchErrors;
         let statusMsg = `No activities imported. Skipped ${totalSkipped} total:\n`;
         statusMsg += `- ${skippedNoPower} missing power data\n`;
         statusMsg += `- ${skippedDuplicate} duplicates\n`;
+        statusMsg += `- ${fetchErrors} fetch errors\n`;
         if (skipReasons.length > 0) {
-          statusMsg += `\nFirst few activities:\n${skipReasons.join('\n')}`;
+          statusMsg += `\nFirst few issues:\n${skipReasons.join('\n')}`;
         }
-        if (activities.length > 0) {
-          statusMsg += `\n\nAPI returned ${activities.length} activities. Check console for details.`;
-        }
+        statusMsg += `\n\nCheck console for detailed logs.`;
         setSyncStatus(statusMsg);
-        console.log('All activities skipped.');
-        console.log('First activity sample:', activities[0]);
-        console.log('Sample power values:', {
-          icu_np: activities[0]?.icu_np,
-          average_watts: activities[0]?.average_watts,
-          avg_watts: activities[0]?.avg_watts,
-          normalized_power: activities[0]?.normalized_power
-        });
+        console.log('Sync completed with no imports.');
       }
 
       // Save config for next time
