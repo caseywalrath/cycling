@@ -40,7 +40,10 @@ export default function ProgressionTracker() {
 
   // intervals.icu integration state
   const [showIntervalsSyncModal, setShowIntervalsSyncModal] = useState(false);
-  const [intervalsConfig, setIntervalsConfig] = useState({ athleteId: '', apiKey: '' });
+  const [intervalsConfig, setIntervalsConfig] = useState({
+    athleteId: 'i259740',
+    apiKey: '4ocowoxwxjf0lknxweavsalps'
+  });
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -407,22 +410,38 @@ export default function ProgressionTracker() {
       const activities = await response.json();
       setSyncStatus(`Found ${activities.length} activities. Processing...`);
 
+      // Debug: Log first activity to understand structure
+      if (activities.length > 0) {
+        console.log('Sample activity:', activities[0]);
+      }
+
       // Filter to only cycling activities and map to our format
       let imported = 0;
-      let skipped = 0;
+      let skippedNonRide = 0;
+      let skippedNoPower = 0;
+      let skippedDuplicate = 0;
       const newWorkouts = [];
+      const skipReasons = [];
 
       for (const activity of activities) {
-        // Skip if not a ride/cycling
-        if (activity.type !== 'Ride' && activity.type !== 'VirtualRide') {
-          skipped++;
+        // Check activity type - be more lenient
+        const activityType = activity.type || '';
+        if (!activityType.toLowerCase().includes('ride') && activityType !== 'Ride' && activityType !== 'VirtualRide') {
+          skippedNonRide++;
+          if (skipReasons.length < 3) {
+            skipReasons.push(`"${activity.name || 'Unnamed'}" - not a ride (type: ${activityType})`);
+          }
           continue;
         }
 
-        // Skip if no power data
-        const np = activity.icu_np || activity.normalized_power || activity.average_watts || 0;
-        if (np === 0) {
-          skipped++;
+        // Try multiple fields for power data - be more flexible
+        const np = activity.icu_np || activity.normalized_power || activity.average_watts || activity.avg_watts || 0;
+
+        if (np === 0 || !np) {
+          skippedNoPower++;
+          if (skipReasons.length < 3) {
+            skipReasons.push(`"${activity.name || 'Unnamed'}" - no power data (checked: icu_np, normalized_power, average_watts)`);
+          }
           continue;
         }
 
@@ -431,13 +450,13 @@ export default function ProgressionTracker() {
         const isDuplicate = history.some(w => w.date === activityDate && Math.abs(w.normalizedPower - np) < 5);
 
         if (isDuplicate) {
-          skipped++;
+          skippedDuplicate++;
           continue;
         }
 
         // Get TSS (intervals.icu already calculates this!)
-        const tss = activity.icu_training_load || activity.tss ||
-                    calculateTSS(np, Math.round(activity.moving_time / 60));
+        const tss = activity.icu_training_load || activity.training_load || activity.tss ||
+                    calculateTSS(np, Math.round((activity.moving_time || activity.elapsed_time || 0) / 60));
 
         // Map to our zone
         const zone = mapWorkoutTypeToZone(activity);
@@ -448,7 +467,7 @@ export default function ProgressionTracker() {
         const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
 
         // Get RPE if available (wellness data)
-        const rpe = activity.feel || 5; // Default to 5 if not available
+        const rpe = activity.feel || activity.perceived_exertion || 5; // Default to 5 if not available
 
         // Calculate new level
         const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
@@ -461,7 +480,7 @@ export default function ProgressionTracker() {
           workoutLevel: parseFloat(workoutLevel.toFixed(1)),
           rpe: rpe,
           completed: true,
-          duration: Math.round(activity.moving_time / 60),
+          duration: Math.round((activity.moving_time || activity.elapsed_time || 0) / 60),
           normalizedPower: Math.round(np),
           notes: `Imported from intervals.icu: ${activity.name || 'Ride'}`,
           previousLevel: currentLevel,
@@ -502,9 +521,18 @@ export default function ProgressionTracker() {
         });
         setRecentChanges(changes);
 
-        setSyncStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data).`);
+        setSyncStatus(`✓ Imported ${imported} activities! Skipped: ${skippedNonRide} non-rides, ${skippedNoPower} without power, ${skippedDuplicate} duplicates.`);
       } else {
-        setSyncStatus(`No new activities to import. Skipped ${skipped} (duplicates or missing data).`);
+        const totalSkipped = skippedNonRide + skippedNoPower + skippedDuplicate;
+        let statusMsg = `No activities imported. Skipped ${totalSkipped} total:\n`;
+        statusMsg += `- ${skippedNonRide} non-ride activities\n`;
+        statusMsg += `- ${skippedNoPower} missing power data\n`;
+        statusMsg += `- ${skippedDuplicate} duplicates\n`;
+        if (skipReasons.length > 0) {
+          statusMsg += `\nExamples:\n${skipReasons.join('\n')}`;
+        }
+        setSyncStatus(statusMsg);
+        console.log('All activities skipped. First activity sample:', activities[0]);
       }
 
       // Save config for next time
