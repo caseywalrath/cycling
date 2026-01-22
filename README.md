@@ -11,6 +11,7 @@ A Progressive Web App (PWA) for tracking cycling training with TrainerRoad-style
 - **TSS & IF Calculations**: Automatic Training Stress Score and Intensity Factor calculations
 - **Workout Logging**: Log workouts with power, duration, RPE, and notes
 - **Smart Insights**: Automated training analysis and recommendations
+- **intervals.icu Integration**: Sync your ride history directly from intervals.icu with one click
 - **Data Persistence**: All data stored locally in your browser
 - **Export/Import**: Backup and restore your training data
 - **PWA Support**: Install on your iPhone home screen like a native app
@@ -204,6 +205,37 @@ To change your FTP from the default 235W:
 
 ### Copy for AI Analysis
 On the Dashboard tab, click "Copy for Claude" to get a formatted summary you can paste into Claude for personalized training advice.
+
+### Sync from intervals.icu
+
+Automatically import your ride history from intervals.icu:
+
+1. **Get your credentials**:
+   - Log in to [intervals.icu](https://intervals.icu/)
+   - Go to Settings → Developer
+   - Copy your **Athlete ID** (e.g., `i12345`)
+   - Copy your **API Key** (long string of characters)
+
+2. **Sync your rides**:
+   - Click "Sync from intervals.icu" button
+   - Enter your Athlete ID and API Key
+   - Click "Sync Now"
+   - All rides from December 29, 2024 onwards will be imported
+
+**What gets imported:**
+- Power data (Normalized Power, TSS, Intensity Factor)
+- Duration and date
+- Workout type automatically mapped to training zones
+- RPE if logged in intervals.icu
+- Workout names as notes
+
+**Smart features:**
+- Duplicates are automatically skipped
+- Zone assignment based on power data
+- Progression levels automatically calculated
+- Your credentials are saved for future syncs
+
+**Note:** This is a one-way sync - changes in this app won't sync back to intervals.icu.
 
 ## Development Scripts
 

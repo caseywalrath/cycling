@@ -19,7 +19,9 @@ const DEFAULT_LEVELS = {
 };
 
 const STORAGE_KEY = 'cycling-progression-data-v2';
+const INTERVALS_CONFIG_KEY = 'intervals-icu-config';
 const FTP = 235;
+const START_DATE = '2024-12-29'; // Import rides from this date onwards
 
 export default function ProgressionTracker() {
   const [levels, setLevels] = useState(DEFAULT_LEVELS);
@@ -35,6 +37,13 @@ export default function ProgressionTracker() {
   const [recentChanges, setRecentChanges] = useState({});
   const [animatingZone, setAnimatingZone] = useState(null);
   const animationRef = useRef(null);
+
+  // intervals.icu integration state
+  const [showIntervalsSyncModal, setShowIntervalsSyncModal] = useState(false);
+  const [intervalsConfig, setIntervalsConfig] = useState({ athleteId: '', apiKey: '' });
+  const [syncStatus, setSyncStatus] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
@@ -75,6 +84,14 @@ export default function ProgressionTracker() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history }));
   }, [levels, history]);
+
+  // Load intervals.icu config from localStorage
+  useEffect(() => {
+    const savedConfig = localStorage.getItem(INTERVALS_CONFIG_KEY);
+    if (savedConfig) {
+      setIntervalsConfig(JSON.parse(savedConfig));
+    }
+  }, []);
 
   // Animate level changes
   const animateLevel = (zone, fromLevel, toLevel, duration = 800) => {
@@ -331,6 +348,173 @@ export default function ProgressionTracker() {
       } else {
         return Math.min(10, currentLevel + 0.5);
       }
+    }
+  };
+
+  // Map intervals.icu workout type to our zone
+  const mapWorkoutTypeToZone = (activity) => {
+    // intervals.icu uses type field and average_watts
+    const avgWatts = activity.average_watts || activity.icu_average_watts || 0;
+    const workoutType = (activity.type || '').toLowerCase();
+    const description = (activity.description || '').toLowerCase();
+
+    // Map by power zones if we have power data
+    if (avgWatts > 0) {
+      if (avgWatts >= 280) return 'anaerobic';
+      if (avgWatts >= 235) return 'vo2max';
+      if (avgWatts >= 220) return 'threshold';
+      if (avgWatts >= 195) return 'sweetspot';
+      if (avgWatts >= 165) return 'tempo';
+      return 'endurance';
+    }
+
+    // Fallback to workout type keywords
+    if (workoutType.includes('vo2') || description.includes('vo2')) return 'vo2max';
+    if (workoutType.includes('threshold') || description.includes('ftp')) return 'threshold';
+    if (workoutType.includes('sweet') || workoutType.includes('ss')) return 'sweetspot';
+    if (workoutType.includes('tempo')) return 'tempo';
+    if (workoutType.includes('sprint') || workoutType.includes('anaerobic')) return 'anaerobic';
+
+    // Default to endurance for rides
+    return 'endurance';
+  };
+
+  // Sync workouts from intervals.icu
+  const syncFromIntervalsICU = async () => {
+    if (!intervalsConfig.athleteId || !intervalsConfig.apiKey) {
+      setSyncStatus('Please enter your Athlete ID and API Key');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncStatus('Fetching activities from intervals.icu...');
+
+    try {
+      // Fetch activities from intervals.icu API
+      const response = await fetch(
+        `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities?oldest=${START_DATE}`,
+        {
+          headers: {
+            'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const activities = await response.json();
+      setSyncStatus(`Found ${activities.length} activities. Processing...`);
+
+      // Filter to only cycling activities and map to our format
+      let imported = 0;
+      let skipped = 0;
+      const newWorkouts = [];
+
+      for (const activity of activities) {
+        // Skip if not a ride/cycling
+        if (activity.type !== 'Ride' && activity.type !== 'VirtualRide') {
+          skipped++;
+          continue;
+        }
+
+        // Skip if no power data
+        const np = activity.icu_np || activity.normalized_power || activity.average_watts || 0;
+        if (np === 0) {
+          skipped++;
+          continue;
+        }
+
+        // Check for duplicates (same date)
+        const activityDate = activity.start_date_local.split('T')[0];
+        const isDuplicate = history.some(w => w.date === activityDate && Math.abs(w.normalizedPower - np) < 5);
+
+        if (isDuplicate) {
+          skipped++;
+          continue;
+        }
+
+        // Get TSS (intervals.icu already calculates this!)
+        const tss = activity.icu_training_load || activity.tss ||
+                    calculateTSS(np, Math.round(activity.moving_time / 60));
+
+        // Map to our zone
+        const zone = mapWorkoutTypeToZone(activity);
+        const currentLevel = levels[zone];
+
+        // Estimate workout level from IF
+        const intensityFactor = np / FTP;
+        const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
+
+        // Get RPE if available (wellness data)
+        const rpe = activity.feel || 5; // Default to 5 if not available
+
+        // Calculate new level
+        const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
+
+        // Create workout entry
+        const entry = {
+          id: Date.now() + imported, // Unique ID
+          date: activityDate,
+          zone: zone,
+          workoutLevel: parseFloat(workoutLevel.toFixed(1)),
+          rpe: rpe,
+          completed: true,
+          duration: Math.round(activity.moving_time / 60),
+          normalizedPower: Math.round(np),
+          notes: `Imported from intervals.icu: ${activity.name || 'Ride'}`,
+          previousLevel: currentLevel,
+          newLevel: newLevel,
+          change: newLevel - currentLevel,
+          tss: tss,
+          intensityFactor: intensityFactor,
+        };
+
+        newWorkouts.push(entry);
+
+        // Update level for next workout calculation
+        levels[zone] = newLevel;
+
+        imported++;
+      }
+
+      if (imported > 0) {
+        // Merge with existing history and sort by date
+        const mergedHistory = [...newWorkouts, ...history].sort((a, b) =>
+          new Date(b.date) - new Date(a.date)
+        );
+
+        setHistory(mergedHistory);
+        setLevels({ ...levels });
+        setDisplayLevels({ ...levels });
+
+        // Recalculate recent changes
+        const changes = {};
+        ZONES.forEach(zone => {
+          const lastWorkout = mergedHistory.find(w => w.zone === zone.id);
+          if (lastWorkout && lastWorkout.change !== 0) {
+            changes[zone.id] = {
+              change: lastWorkout.change,
+              date: lastWorkout.date,
+            };
+          }
+        });
+        setRecentChanges(changes);
+
+        setSyncStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data).`);
+      } else {
+        setSyncStatus(`No new activities to import. Skipped ${skipped} (duplicates or missing data).`);
+      }
+
+      // Save config for next time
+      localStorage.setItem(INTERVALS_CONFIG_KEY, JSON.stringify(intervalsConfig));
+
+    } catch (error) {
+      console.error('Sync error:', error);
+      setSyncStatus(`Error: ${error.message}. Check your credentials and try again.`);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -684,6 +868,96 @@ Please analyze my current training status and provide personalized insights.`;
                   className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition"
                 >
                   Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* intervals.icu Sync Modal */}
+        {showIntervalsSyncModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg">
+              <h2 className="font-bold mb-3 text-lg">Sync from intervals.icu</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Import your rides from intervals.icu starting from December 29, 2024
+              </p>
+
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-1">
+                  Athlete ID
+                  <span className="text-xs ml-2">(e.g., i12345)</span>
+                </label>
+                <input
+                  type="text"
+                  value={intervalsConfig.athleteId}
+                  onChange={(e) => setIntervalsConfig({ ...intervalsConfig, athleteId: e.target.value })}
+                  placeholder="i12345"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  disabled={isSyncing}
+                />
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-1">
+                  API Key
+                  <span className="text-xs ml-2">(Settings → Developer)</span>
+                </label>
+                <input
+                  type="password"
+                  value={intervalsConfig.apiKey}
+                  onChange={(e) => setIntervalsConfig({ ...intervalsConfig, apiKey: e.target.value })}
+                  placeholder="Your API key"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm font-mono"
+                  disabled={isSyncing}
+                />
+              </div>
+
+              {syncStatus && (
+                <div className={`p-3 rounded mb-4 text-sm ${
+                  syncStatus.startsWith('✓')
+                    ? 'bg-green-900/50 text-green-400'
+                    : syncStatus.startsWith('Error')
+                    ? 'bg-red-900/50 text-red-400'
+                    : 'bg-blue-900/50 text-blue-400'
+                }`}>
+                  {syncStatus}
+                </div>
+              )}
+
+              <div className="bg-gray-700/50 rounded p-3 mb-4 text-xs text-gray-400">
+                <p className="mb-2"><strong>What will be imported:</strong></p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Rides from December 29, 2024 onwards</li>
+                  <li>Power data (NP), TSS, Intensity Factor</li>
+                  <li>Duration and workout type</li>
+                  <li>Automatic zone mapping based on power</li>
+                  <li>RPE if available</li>
+                </ul>
+                <p className="mt-2 text-gray-500">Duplicates will be skipped automatically.</p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={syncFromIntervalsICU}
+                  disabled={isSyncing}
+                  className={`flex-1 px-4 py-2 rounded font-medium transition ${
+                    isSyncing
+                      ? 'bg-gray-600 cursor-not-allowed'
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                >
+                  {isSyncing ? 'Syncing...' : 'Sync Now'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowIntervalsSyncModal(false);
+                    setSyncStatus('');
+                  }}
+                  disabled={isSyncing}
+                  className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition disabled:cursor-not-allowed"
+                >
+                  Close
                 </button>
               </div>
             </div>
@@ -1056,6 +1330,12 @@ Please analyze my current training status and provide personalized insights.`;
             className="text-blue-400 hover:text-blue-300 transition"
           >
             Paste JSON
+          </button>
+          <button
+            onClick={() => setShowIntervalsSyncModal(true)}
+            className="text-green-400 hover:text-green-300 transition font-medium"
+          >
+            Sync from intervals.icu
           </button>
         </div>
       </div>
