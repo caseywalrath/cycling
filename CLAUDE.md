@@ -29,13 +29,22 @@ This file serves as a comprehensive guide for AI assistants (like Claude) workin
 ## Project Overview
 
 ### About
-**Status:** 🚧 New Project - In Development
+**Status:** ✅ Active Development - PWA Training Tracker
 
-This repository is for the Cycling project. As the project develops, this section should be updated with:
-- Project description and goals
-- Target audience/users
-- Key features and functionality
-- Business context and requirements
+**Gran Fondo Utah Training Tracker** - A Progressive Web App for tracking cycling training with TrainerRoad-style progression levels, TSS calculations, and training load analytics.
+
+**Event Goal:** Gran Fondo Utah - June 13, 2026
+**Target User:** Solo cyclist training for Gran Fondo Utah
+**FTP:** 235W (configurable in src/App.jsx)
+
+**Key Features:**
+- Progression level tracking across 6 training zones
+- Training load metrics (CTL, ATL, TSB)
+- TSS and Intensity Factor calculations
+- Smart training insights and recommendations
+- Export/import workout data
+- PWA support for iPhone installation
+- All data stored locally in browser
 
 ### Quick Start
 ```bash
@@ -43,77 +52,102 @@ This repository is for the Cycling project. As the project develops, this sectio
 git clone <repository-url>
 cd cycling
 
-# Install dependencies (update when package.json exists)
+# Install dependencies
 npm install
 
-# Run development server (update when scripts are defined)
+# Run development server
 npm run dev
+# Opens at http://localhost:3000
+# Access from iPhone via Network URL (e.g., http://192.168.1.x:3000)
 
-# Run tests (update when test framework is configured)
-npm test
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
 ```
 
 ---
 
 ## Codebase Structure
 
-### Current State
-The repository is currently empty. As the project develops, document the directory structure here.
-
-### Expected Structure (Template)
+### Current Structure
 ```
 cycling/
-├── src/                    # Source code
-│   ├── components/         # Reusable UI components
-│   ├── pages/             # Page components/routes
-│   ├── services/          # Business logic and API calls
-│   ├── utils/             # Utility functions
-│   ├── hooks/             # Custom React hooks (if React)
-│   ├── types/             # TypeScript type definitions
-│   ├── styles/            # Global styles and themes
-│   └── config/            # Configuration files
-├── public/                # Static assets
-├── tests/                 # Test files
-│   ├── unit/             # Unit tests
-│   ├── integration/      # Integration tests
-│   └── e2e/              # End-to-end tests
-├── docs/                  # Documentation
-├── scripts/               # Build and utility scripts
-└── [config files]         # Root-level configuration
+├── src/
+│   ├── App.jsx              # Main application component (all logic here)
+│   ├── main.jsx             # React entry point
+│   └── index.css            # Global styles with Tailwind directives
+├── public/
+│   ├── pwa-192x192.png      # PWA icon (192x192)
+│   ├── pwa-512x512.png      # PWA icon (512x512)
+│   ├── apple-touch-icon.png # iOS home screen icon
+│   └── vite.svg             # Favicon
+├── index.html               # HTML entry point
+├── vite.config.js           # Vite + PWA configuration
+├── tailwind.config.js       # Tailwind CSS configuration
+├── postcss.config.js        # PostCSS configuration
+├── package.json             # Dependencies and scripts
+├── .gitignore              # Git ignore rules
+├── README.md               # User-facing documentation
+└── CLAUDE.md               # This file (AI assistant guide)
 ```
 
-### Key Directories
-*Update this section as the project structure emerges*
+### Key Files
+
+**src/App.jsx** (Main Component)
+- Single-file React component (~600 lines)
+- Contains all application logic
+- State management with useState
+- LocalStorage for data persistence
+- Four main tabs: Levels, Dashboard, Log, History
+
+**Key Constants:**
+- `ZONES`: Training zone definitions with colors and power ranges
+- `FTP`: Functional Threshold Power (235W - line 22)
+- `STORAGE_KEY`: LocalStorage key for data persistence
+
+**Core Functions:**
+- `calculateTSS()`: Training Stress Score calculation
+- `calculateTrainingLoads()`: CTL/ATL/TSB calculations
+- `calculateNewLevel()`: Progression level algorithm
+- `generateInsights()`: AI-like training recommendations
 
 ---
 
 ## Tech Stack
 
 ### Current Stack
-*To be determined - Update as technologies are chosen*
-
-### Recommended Stack Options
 
 #### Frontend
-- **Framework:** React, Vue, Angular, or Svelte
-- **Language:** TypeScript (strongly recommended)
-- **Styling:** Tailwind CSS, CSS Modules, Styled Components, or SASS
-- **State Management:** Redux, Zustand, Jotai, or React Context
+- **Framework:** React 18.3.1
+- **Language:** JavaScript (JSX)
+- **Styling:** Tailwind CSS 3.4
+- **State Management:** React useState hooks (no external library)
+- **Data Persistence:** Browser LocalStorage
 
-#### Backend (if applicable)
-- **Runtime:** Node.js, Deno, or Bun
-- **Framework:** Express, Fastify, NestJS, or Next.js API routes
-- **Database:** PostgreSQL, MongoDB, or SQLite
-- **ORM:** Prisma, Drizzle, or TypeORM
+#### Build & Development
+- **Bundler:** Vite 5.4
+- **Dev Server:** Vite dev server with HMR
+- **Package Manager:** npm
+- **PWA:** vite-plugin-pwa 0.20
 
-#### Testing
-- **Unit/Integration:** Jest, Vitest, or Mocha
-- **E2E:** Playwright, Cypress, or Puppeteer
-- **Assertions:** Testing Library, Chai
+#### Styling
+- **CSS Framework:** Tailwind CSS
+- **PostCSS:** Autoprefixer for browser compatibility
+- **Custom CSS:** Minimal custom styles in index.css
 
-#### Build Tools
-- **Bundler:** Vite, Webpack, or esbuild
-- **Package Manager:** npm, yarn, or pnpm
+#### No Backend
+- This is a pure frontend app
+- All data stored in browser LocalStorage
+- No database or API calls
+- Completely offline-capable once installed
+
+#### Browser APIs Used
+- LocalStorage API (data persistence)
+- Clipboard API (copy for analysis feature)
+- File API (import/export workout data)
+- Service Worker (PWA offline support)
 
 ---
 
@@ -363,29 +397,75 @@ When working as an AI assistant:
 
 ### Environments
 
-- **Development:** Local development environment
-- **Staging:** Pre-production testing (if applicable)
-- **Production:** Live production environment
+- **Local Development:** `npm run dev` - http://localhost:3000
+- **Production:** Deployed to static hosting (Netlify, Vercel, or GitHub Pages)
 
 ### Deployment Process
-*Update when deployment pipeline is configured*
 
+This is a static PWA with no backend, so deployment is straightforward:
+
+#### Option 1: Netlify (Recommended)
 ```bash
-# Build production bundle
+# Build
 npm run build
 
-# Run production server
-npm run start
+# Deploy via CLI
+npm install -g netlify-cli
+netlify deploy --prod
+
+# Or connect GitHub repo for automatic deploys
 ```
 
-### Environment Variables
-*Document required environment variables here*
+#### Option 2: Vercel
+```bash
+# Deploy
+npm install -g vercel
+vercel
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `API_URL` | Backend API URL | Yes |
-| `DATABASE_URL` | Database connection string | Yes |
-| ... | ... | ... |
+# Auto-deploys on git push when connected
+```
+
+#### Option 3: GitHub Pages
+```bash
+# Install gh-pages
+npm install -D gh-pages
+
+# Add to package.json:
+# "homepage": "https://username.github.io/cycling"
+# "scripts": { "deploy": "gh-pages -d dist" }
+
+# Update vite.config.js base to '/cycling/'
+
+# Deploy
+npm run deploy
+```
+
+### Build Output
+- Build command: `npm run build`
+- Output directory: `dist/`
+- All assets are static (HTML, CSS, JS, images)
+- Service worker generated automatically for PWA
+
+### Environment Variables
+**No environment variables required!**
+
+This app has:
+- No backend API
+- No database connections
+- No external services
+- No secrets or API keys
+
+All configuration is in the source code:
+- FTP value in `src/App.jsx` line 22
+- Storage key in `src/App.jsx` line 24
+- Training zones in `src/App.jsx` lines 3-10
+
+### PWA Installation
+After deployment, users can install the PWA:
+1. Visit the deployed URL on iPhone Safari
+2. Tap Share → Add to Home Screen
+3. App icon appears on home screen
+4. Works offline after first visit
 
 ---
 
@@ -569,16 +649,39 @@ When working on tasks:
 
 ### Domain Knowledge: Cycling
 
-This project is related to cycling. Relevant domain concepts may include:
+This project implements cycling training concepts inspired by TrainerRoad:
 
-- **Activities/Rides:** GPS tracking, routes, distance, elevation
-- **Performance Metrics:** Speed, cadence, heart rate, power
-- **Equipment:** Bikes, components, maintenance
-- **Routes:** Maps, elevation profiles, waypoints
-- **Social Features:** Challenges, leaderboards, clubs
-- **Training:** Workouts, plans, goals
+**Training Zones (Power-Based):**
+- **Z2 Endurance:** 130-165W - Aerobic base building
+- **Z3 Tempo:** 165-185W - Sustainable aerobic power
+- **Sweet Spot:** 195-220W - Between tempo and threshold (not a formal zone)
+- **Z4 Threshold:** 220-235W - Lactate threshold/FTP work
+- **Z5 VO2max:** 235-280W - Maximum aerobic capacity
+- **Z6 Anaerobic:** 280W+ - Anaerobic capacity
 
-*Update this section with actual project-specific domain knowledge*
+**Key Metrics:**
+- **FTP (Functional Threshold Power):** Maximum sustainable power for ~1 hour (235W for this user)
+- **TSS (Training Stress Score):** Quantifies training load based on intensity and duration
+- **NP (Normalized Power):** Weighted average power accounting for variability
+- **IF (Intensity Factor):** Ratio of NP to FTP (intensity of workout)
+- **RPE (Rate of Perceived Exertion):** 1-10 subjective difficulty scale
+
+**Training Load (Performance Management Chart):**
+- **CTL (Chronic Training Load):** 42-day exponentially weighted average of daily TSS (fitness)
+- **ATL (Acute Training Load):** 7-day exponentially weighted average of daily TSS (fatigue)
+- **TSB (Training Stress Balance):** CTL - ATL (form/freshness)
+
+**Progression Level System:**
+- Scale of 1-10 for each training zone
+- Increases when completing workouts harder than current level
+- RPE vs difficulty determines progression rate
+- Similar to TrainerRoad's adaptive training
+
+**Event Context:**
+- Target event: Gran Fondo Utah (June 13, 2026)
+- Long endurance event requiring high CTL (80-100 target)
+- Emphasis on sustained power and endurance
+- Training should peak ~2 weeks before event
 
 ### External APIs and Services
 *Document any external services used (Strava, MapBox, etc.)*
