@@ -456,19 +456,50 @@ export default function ProgressionTracker() {
 
           // Log first detailed activity for debugging
           if (i === 0) {
-            console.log('Sample detailed activity:', activity);
-            console.log('Detailed fields:', Object.keys(activity));
+            console.log('=== DETAILED ACTIVITY SAMPLE ===');
+            console.log('Full activity object:', activity);
+            console.log('Available fields:', Object.keys(activity));
+            console.log('Power-related fields:');
+            console.log('  icu_np:', activity.icu_np);
+            console.log('  normalized_power:', activity.normalized_power);
+            console.log('  average_watts:', activity.average_watts);
+            console.log('  avg_watts:', activity.avg_watts);
+            console.log('  power:', activity.power);
+            console.log('  watts_avg:', activity.watts_avg);
+            console.log('  np:', activity.np);
+            console.log('  icu_average_watts:', activity.icu_average_watts);
+            console.log('================================');
           }
 
-          // Try multiple fields for power data - be more flexible
-          const np = activity.icu_np || activity.normalized_power || activity.average_watts || activity.avg_watts || 0;
+          // Try MANY field name variations for power data
+          const np = activity.icu_np ||
+                     activity.normalized_power ||
+                     activity.average_watts ||
+                     activity.avg_watts ||
+                     activity.watts_avg ||
+                     activity.icu_average_watts ||
+                     activity.np ||
+                     activity.power?.np ||
+                     activity.power?.avg ||
+                     activity.power?.average ||
+                     0;
 
           // If no power data, skip
           if (!np || np === 0) {
             skippedNoPower++;
-            if (skipReasons.length < 5) {
+            if (skipReasons.length < 3) {
               const activityName = activity.name || activity.id || 'Unnamed';
-              skipReasons.push(`"${activityName}" - no power (icu_np=${activity.icu_np}, avg_watts=${activity.average_watts})`);
+              const availableFields = Object.keys(activity).slice(0, 10).join(', ');
+              skipReasons.push(`"${activityName}" - no power. Available fields: ${availableFields}...`);
+            }
+            // Log first failed activity completely for debugging
+            if (skippedNoPower === 1) {
+              console.log('=== FIRST ACTIVITY WITH NO POWER ===');
+              console.log('Activity name:', activity.name);
+              console.log('Activity ID:', activity.id);
+              console.log('All fields:', Object.keys(activity));
+              console.log('Full object:', activity);
+              console.log('====================================');
             }
             continue;
           }
