@@ -413,6 +413,7 @@ export default function ProgressionTracker() {
       // Debug: Log first activity to understand structure
       if (activities.length > 0) {
         console.log('Sample activity:', activities[0]);
+        console.log('Available fields:', Object.keys(activities[0]));
       }
 
       // Filter to only cycling activities and map to our format
@@ -424,23 +425,15 @@ export default function ProgressionTracker() {
       const skipReasons = [];
 
       for (const activity of activities) {
-        // Check activity type - be more lenient
-        const activityType = activity.type || '';
-        if (!activityType.toLowerCase().includes('ride') && activityType !== 'Ride' && activityType !== 'VirtualRide') {
-          skippedNonRide++;
-          if (skipReasons.length < 3) {
-            skipReasons.push(`"${activity.name || 'Unnamed'}" - not a ride (type: ${activityType})`);
-          }
-          continue;
-        }
-
         // Try multiple fields for power data - be more flexible
         const np = activity.icu_np || activity.normalized_power || activity.average_watts || activity.avg_watts || 0;
 
-        if (np === 0 || !np) {
+        // If no power data, skip
+        if (!np || np === 0) {
           skippedNoPower++;
-          if (skipReasons.length < 3) {
-            skipReasons.push(`"${activity.name || 'Unnamed'}" - no power data (checked: icu_np, normalized_power, average_watts)`);
+          if (skipReasons.length < 5) {
+            const activityName = activity.name || activity.id || 'Unnamed';
+            skipReasons.push(`"${activityName}" - no power (icu_np=${activity.icu_np}, avg_watts=${activity.average_watts})`);
           }
           continue;
         }
@@ -521,18 +514,27 @@ export default function ProgressionTracker() {
         });
         setRecentChanges(changes);
 
-        setSyncStatus(`✓ Imported ${imported} activities! Skipped: ${skippedNonRide} non-rides, ${skippedNoPower} without power, ${skippedDuplicate} duplicates.`);
+        setSyncStatus(`✓ Imported ${imported} activities! Skipped: ${skippedNoPower} without power, ${skippedDuplicate} duplicates.`);
       } else {
-        const totalSkipped = skippedNonRide + skippedNoPower + skippedDuplicate;
+        const totalSkipped = skippedNoPower + skippedDuplicate;
         let statusMsg = `No activities imported. Skipped ${totalSkipped} total:\n`;
-        statusMsg += `- ${skippedNonRide} non-ride activities\n`;
         statusMsg += `- ${skippedNoPower} missing power data\n`;
         statusMsg += `- ${skippedDuplicate} duplicates\n`;
         if (skipReasons.length > 0) {
-          statusMsg += `\nExamples:\n${skipReasons.join('\n')}`;
+          statusMsg += `\nFirst few activities:\n${skipReasons.join('\n')}`;
+        }
+        if (activities.length > 0) {
+          statusMsg += `\n\nAPI returned ${activities.length} activities. Check console for details.`;
         }
         setSyncStatus(statusMsg);
-        console.log('All activities skipped. First activity sample:', activities[0]);
+        console.log('All activities skipped.');
+        console.log('First activity sample:', activities[0]);
+        console.log('Sample power values:', {
+          icu_np: activities[0]?.icu_np,
+          average_watts: activities[0]?.average_watts,
+          avg_watts: activities[0]?.avg_watts,
+          normalized_power: activities[0]?.normalized_power
+        });
       }
 
       // Save config for next time
