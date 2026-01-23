@@ -168,7 +168,160 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 7. Strava Integration Alternative
+### 7. Dynamic FTP Tracking from intervals.icu
+**Priority:** MEDIUM
+**Complexity:** Medium
+**Description:** Pull current eFTP from intervals.icu and detect changes
+
+**Features:**
+- Fetch current eFTP (estimated FTP) from intervals.icu
+- Detect when FTP increases by 10W or more
+- Congratulate user on FTP gains
+- Prompt to recalculate progression levels for new FTP
+- Option to auto-adjust zones or manually confirm
+- Track FTP history over time
+
+**Implementation:**
+```javascript
+// Fetch eFTP from intervals.icu athlete data
+const athleteResponse = await fetch(
+  `https://intervals.icu/api/v1/athlete/${athleteId}`,
+  { headers: { 'Authorization': `Basic ${apiKey}` } }
+);
+const athlete = await athleteResponse.json();
+const currentFTP = athlete.ftp;
+
+// Compare with stored FTP
+if (currentFTP >= storedFTP + 10) {
+  showCongratulations();
+  promptLevelReset();
+}
+```
+
+**Why:**
+- Keeps app in sync with training progress
+- Automatic detection of fitness improvements
+- Zones stay accurate as FTP changes
+- Motivating to see FTP gains recognized
+
+**UI Flow:**
+1. Sync button pulls eFTP alongside activities
+2. If FTP increased by 10W+: "🎉 Congrats! Your FTP increased from 235W to 245W!"
+3. Offer options:
+   - "Recalculate Levels" (reset all to 1.0 with new zones)
+   - "Adjust Zones Only" (keep progression levels, update power ranges)
+   - "Ignore" (manual FTP management)
+
+---
+
+### 8. Workout Creator (.mrc File Builder)
+**Priority:** MEDIUM
+**Complexity:** Medium
+**Description:** Create simple interval-based workouts in .mrc format
+
+**Features:**
+- Visual workout builder interface
+- Define intervals with power targets and duration
+- Preview workout structure
+- Export as .mrc file for Zwift/TrainerRoad/etc.
+- Save custom workouts to library
+- Templates for common workout types
+
+**Workout Structure:**
+```
+[COURSE HEADER]
+FTP=235
+MINUTES PERCENT
+
+[COURSE DATA]
+0    50      # Warmup
+10   50
+10   100     # First interval
+15   100
+15   50      # Recovery
+20   50
+```
+
+**Example Workouts to Template:**
+- Sweet Spot: 3x10min @ 90% (5min recovery)
+- VO2max: 5x3min @ 120% (3min recovery)
+- Threshold: 2x20min @ 95% (10min recovery)
+- Over-Unders: 3x8min alternating 95%/105% every 2min
+
+**Why:**
+- Create custom workouts for Zwift/indoor training
+- Share workouts with others
+- Build structured training blocks
+- Export workouts designed in the app
+
+---
+
+### 9. Outdoor Ride Tracking Strategies
+**Priority:** MEDIUM
+**Complexity:** Low-Medium
+**Description:** Better methods for tracking outdoor rides with varied effort
+
+**Challenges:**
+- Outdoor rides don't follow set intervals
+- Power varies with terrain, traffic, wind
+- Hard to assign single "workout level"
+- Multiple zones hit in one ride
+
+**Proposed Solutions:**
+
+**Option A: Time-in-Zone Analysis**
+- Import power file or manually enter time in each zone
+- Calculate "dominant zone" (most time spent)
+- TSS already accounts for variability via NP
+- Assign workout level based on IF and duration
+
+**Option B: Segment-Based Logging**
+- Break ride into segments (e.g., climbing section, intervals, endurance)
+- Log each segment separately with its zone
+- Aggregate TSS and progression across segments
+
+**Option C: Ride Type Classification**
+- Pre-defined ride types: "Long Endurance", "Hilly Ride", "Group Ride", "Mixed Tempo"
+- Each type maps to primary zone and estimated workout level
+- User selects type, enters duration/NP/TSS
+- System suggests zone and level based on IF
+
+**Option D: Workout Level from IF**
+- Current approach (already implemented)
+- IF < 0.65: Endurance, Level 1-3
+- IF 0.65-0.75: Tempo/Sweet Spot, Level 3-5
+- IF 0.75-0.85: Threshold, Level 5-7
+- IF 0.85-0.95: VO2max, Level 7-9
+- IF > 0.95: Anaerobic, Level 9-10
+- Adjust based on RPE
+
+**Recommendation:**
+- Enhance Option D (current approach) with Option C (ride types)
+- Add "Ride Type" dropdown in Log tab
+- Preset ride types suggest zone, user can override
+- Keep it simple - outdoor rides focus on TSS/IF, indoor workouts focus on progression
+
+**UI Enhancement:**
+```
+Log Outdoor Ride:
+- Ride Type: [Dropdown] Long Endurance / Hilly Mixed / Group Ride / Tempo Intervals
+- Duration: 120 min
+- NP: 165W
+- IF: 0.70 (auto-calculated)
+- Suggested Zone: Tempo
+- Suggested Level: 4.5
+- RPE: 6
+```
+
+**Why:**
+- Most real-world rides are outdoors
+- Need flexibility for varied efforts
+- Should still contribute to progression tracking
+- TSS is more important than specific zone assignment
+
+---
+
+### 10. Strava Integration Alternative
 **Priority:** MEDIUM
 **Complexity:** High
 **Description:** Work around Strava API limitations
@@ -185,42 +338,9 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 8. Workout Reminders/Notifications
-**Priority:** LOW-MEDIUM
-**Complexity:** Low
-**Description:** Push notifications for scheduled workouts
-
-**Features:**
-- Daily workout reminders
-- TSB-based recovery alerts ("Take a rest day!")
-- Milestone celebrations (CTL targets, level ups)
-- Weekly summary notifications
-
-**Implementation:**
-- Use PWA notification API
-- User configures notification times
-- Smart suggestions based on training patterns
-
----
-
 ## Low Priority / Nice to Have
 
-### 9. Social/Sharing Features
-**Priority:** LOW
-**Complexity:** Medium
-**Description:** Share progress and compete with friends
-
-**Features:**
-- Export weekly summary as image
-- Share progression level achievements
-- Compare with other riders (optional)
-- Training partner features
-
-**Why:** Motivation and accountability
-
----
-
-### 10. Weather Integration
+### 11. Weather Integration
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Log weather conditions with rides
@@ -233,7 +353,7 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 11. Equipment Tracking
+### 12. Equipment Tracking
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Track mileage on bikes and components
@@ -246,7 +366,7 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 12. Nutrition/Hydration Tracking
+### 13. Nutrition/Hydration Tracking
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Log fueling strategy per workout
@@ -259,7 +379,7 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 13. Heart Rate Training
+### 14. Heart Rate Training
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Add HR-based training for riders without power
@@ -272,7 +392,7 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 14. Multi-Sport Support
+### 15. Multi-Sport Support
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Track running, swimming for cross-training
@@ -285,7 +405,7 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 15. Advanced FTP Tracking
+### 16. Advanced FTP Tracking
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Automatic FTP detection and adjustment
@@ -298,7 +418,7 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ---
 
-### 16. Race Day Features
+### 17. Race Day Features
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Tools for event day
@@ -313,18 +433,18 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 
 ## Technical Improvements
 
-### 17. Performance Optimizations
+### 18. Performance Optimizations
 - Lazy load history (pagination)
 - Service worker caching improvements
 - Reduce bundle size
 - Database migration (LocalStorage → IndexedDB for large datasets)
 
-### 18. Testing
+### 19. Testing
 - Unit tests for calculations
 - Integration tests for UI
 - E2E tests for critical flows
 
-### 19. Code Refactoring
+### 20. Code Refactoring
 - Break App.jsx into smaller components
 - Add TypeScript for type safety
 - State management library (Zustand/Redux)
@@ -343,21 +463,23 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 4. Workout templates/library
 5. Calendar view
 6. Basic analytics charts
+7. Dynamic FTP tracking from intervals.icu
 
 **Phase 3: Planning & Structure**
-7. Training plan builder
-8. Notifications/reminders
+8. Training plan builder
 9. Advanced analytics
+10. Workout creator (.mrc files)
 
 **Phase 4: Integrations**
-10. Alternative to Strava sync (Garmin/Wahoo)
-11. Weather integration
-12. Equipment tracking
+11. Alternative to Strava sync (Garmin/Wahoo)
+12. Outdoor ride tracking strategies
+13. Weather integration
+14. Equipment tracking
 
 **Phase 5: Polish & Nice-to-Haves**
-13. Social features
-14. Multi-sport support
-15. Advanced features (HR training, race tools)
+15. Multi-sport support
+16. Advanced features (HR training, race tools)
+17. Nutrition/hydration tracking
 
 ---
 
@@ -369,7 +491,7 @@ These can be implemented quickly for immediate benefit:
 2. **Export Improvements** - Add filename with date, better formatting
 3. **Quick Log** - Tap yesterday's date to auto-fill
 4. **Zone Presets** - Save common NP values for each zone
-5. **Weekly Summary** - Email/notification with week's stats
+5. **Weekly Summary** - View/export week's stats summary
 6. **Dark/Light Mode Toggle** - Better display options
 7. **Keyboard Shortcuts** - Fast navigation (on desktop)
 8. **Recent Workouts Widget** - Quick re-log similar workouts
