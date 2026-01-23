@@ -57,6 +57,7 @@ export default function ProgressionTracker() {
   const [showFTPModal, setShowFTPModal] = useState(false);
   const [detectedFTP, setDetectedFTP] = useState(null);
   const [currentFTP, setCurrentFTP] = useState(FTP);
+  const [intervalsFTP, setIntervalsFTP] = useState(null); // eFTP from intervals.icu
 
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -115,20 +116,24 @@ export default function ProgressionTracker() {
       if (parsed.ftp) {
         setCurrentFTP(parsed.ftp);
       }
+      if (parsed.intervalsFTP) {
+        setIntervalsFTP(parsed.intervalsFTP);
+      }
     }
   }, []);
 
-  // Save FTP to localStorage when it changes
+  // Save FTP and intervalsFTP to localStorage when they change
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       parsed.ftp = currentFTP;
+      parsed.intervalsFTP = intervalsFTP;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history, ftp: currentFTP }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history, ftp: currentFTP, intervalsFTP }));
     }
-  }, [currentFTP]);
+  }, [currentFTP, intervalsFTP]);
 
   // Animate level changes
   // Calculate zone descriptions dynamically based on current FTP
@@ -504,6 +509,9 @@ export default function ProgressionTracker() {
       if (athleteResponse.ok) {
         const athleteData = await athleteResponse.json();
         const fetchedFTP = athleteData.ftp || athleteData.icu_ftp || currentFTP;
+
+        // Store intervals.icu FTP
+        setIntervalsFTP(fetchedFTP);
 
         // Check if FTP has increased by 10W or more
         if (fetchedFTP >= currentFTP + 10) {
@@ -1129,8 +1137,14 @@ Please analyze my current training status and provide personalized insights.`;
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-xl font-bold mb-1">Gran Fondo Utah Training</h1>
-        <p className="text-gray-400 text-sm mb-4">FTP: {currentFTP}W • Event: June 13, 2026</p>
+        <h1 className="text-xl font-bold mb-1">Casey Rides</h1>
+        <p className="text-gray-400 text-sm mb-4">
+          FTP: {currentFTP}W
+          {intervalsFTP && intervalsFTP !== currentFTP && (
+            <span className="ml-2">• eFTP: {intervalsFTP}W</span>
+          )}
+          {' • Event: June 13, 2026'}
+        </p>
 
         {/* Tabs */}
         <div className="flex gap-1 mb-4 bg-gray-800 rounded-lg p-1">

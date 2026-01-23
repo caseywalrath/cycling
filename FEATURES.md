@@ -321,7 +321,54 @@ Log Outdoor Ride:
 
 ---
 
-### 10. Strava Integration Alternative
+### 10. Dynamic Event/Goal Management
+**Priority:** MEDIUM
+**Complexity:** Low
+**Description:** Make event information configurable instead of hardcoded
+
+**Features:**
+- Editable event name (currently "Gran Fondo Utah")
+- Configurable event date (currently June 13, 2026)
+- Multiple events/goals support
+- Show days until event
+- Show countdown to taper start
+- Event-specific training targets (target CTL, TSB on race day)
+- Archive past events
+- Set primary/active event
+
+**Current State:**
+- Event hardcoded in header: "Event: June 13, 2026"
+- Single event assumption throughout app
+
+**Proposed UI:**
+```
+Settings/Events Tab:
+- Primary Event: [Gran Fondo Utah]
+- Event Date: [June 13, 2026]
+- Target CTL: [80-100]
+- Target TSB: [+10 to +20]
+- Taper Start: [Auto-calculated or manual]
+
+Header Display:
+- Event: Gran Fondo Utah (142 days) • CTL Target: 85
+```
+
+**Why:**
+- Support multiple training goals
+- Reuse app for future events
+- Better countdown visibility
+- Motivating to see progress toward goal date
+
+**Implementation:**
+- Add event object to localStorage
+- Settings UI for event management
+- Dynamic header display
+- Calculate days until event
+- Integrate with training plan recommendations
+
+---
+
+### 11. Strava Integration Alternative
 **Priority:** MEDIUM
 **Complexity:** High
 **Description:** Work around Strava API limitations
@@ -340,7 +387,7 @@ Log Outdoor Ride:
 
 ## Low Priority / Nice to Have
 
-### 11. Weather Integration
+### 12. Weather Integration
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Log weather conditions with rides
@@ -353,7 +400,7 @@ Log Outdoor Ride:
 
 ---
 
-### 12. Equipment Tracking
+### 13. Equipment Tracking
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Track mileage on bikes and components
@@ -366,7 +413,7 @@ Log Outdoor Ride:
 
 ---
 
-### 13. Nutrition/Hydration Tracking
+### 14. Nutrition/Hydration Tracking
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Log fueling strategy per workout
@@ -379,7 +426,7 @@ Log Outdoor Ride:
 
 ---
 
-### 14. Heart Rate Training
+### 15. Heart Rate Training
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Add HR-based training for riders without power
@@ -392,7 +439,7 @@ Log Outdoor Ride:
 
 ---
 
-### 15. Multi-Sport Support
+### 16. Multi-Sport Support
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Track running, swimming for cross-training
@@ -405,7 +452,7 @@ Log Outdoor Ride:
 
 ---
 
-### 16. Advanced FTP Tracking
+### 17. Advanced FTP Tracking
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Automatic FTP detection and adjustment
@@ -418,7 +465,7 @@ Log Outdoor Ride:
 
 ---
 
-### 17. Race Day Features
+### 18. Race Day Features
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Tools for event day
@@ -433,18 +480,18 @@ Log Outdoor Ride:
 
 ## Technical Improvements
 
-### 18. Performance Optimizations
+### 19. Performance Optimizations
 - Lazy load history (pagination)
 - Service worker caching improvements
 - Reduce bundle size
 - Database migration (LocalStorage → IndexedDB for large datasets)
 
-### 19. Testing
+### 20. Testing
 - Unit tests for calculations
 - Integration tests for UI
 - E2E tests for critical flows
 
-### 20. Code Refactoring
+### 21. Code Refactoring
 - Break App.jsx into smaller components
 - Add TypeScript for type safety
 - State management library (Zustand/Redux)
