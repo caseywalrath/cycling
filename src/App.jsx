@@ -47,6 +47,12 @@ export default function ProgressionTracker() {
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // CSV import state
+  const [showCSVImport, setShowCSVImport] = useState(false);
+  const [csvContent, setCSVContent] = useState('');
+  const [csvImportStatus, setCSVImportStatus] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
@@ -390,9 +396,33 @@ export default function ProgressionTracker() {
     }
 
     setIsSyncing(true);
-    setSyncStatus('Fetching activities from intervals.icu...');
+    setSyncStatus('Checking current FTP...');
 
     try {
+      // First, fetch athlete data to get current eFTP
+      const athleteResponse = await fetch(
+        `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}`,
+        {
+          headers: {
+            'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
+          },
+        }
+      );
+
+      if (athleteResponse.ok) {
+        const athleteData = await athleteResponse.json();
+        const currentFTP = athleteData.ftp || athleteData.icu_ftp || FTP;
+
+        // Check if FTP has increased by 10W or more
+        if (currentFTP >= FTP + 10) {
+          setSyncStatus(`🎉 Congrats! Your FTP increased from ${FTP}W to ${currentFTP}W! Consider updating your zones and recalculating progression levels.`);
+          console.log('FTP Increase Detected:', { old: FTP, new: currentFTP });
+          // TODO: Add UI prompt to reset levels/adjust zones
+        }
+      }
+
+      setSyncStatus('Fetching activities from intervals.icu...');
+
       // Fetch activities from intervals.icu API
       const response = await fetch(
         `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities?oldest=${START_DATE}`,
@@ -623,6 +653,155 @@ export default function ProgressionTracker() {
     }
   };
 
+  // Parse and import CSV from intervals.icu
+  const handleCSVImport = () => {
+    setCSVImportStatus('');
+    setIsImporting(true);
+
+    try {
+      // Split by lines
+      const lines = csvContent.trim().split('\n');
+
+      if (lines.length < 2) {
+        setCSVImportStatus('Error: CSV appears empty or invalid');
+        setIsImporting(false);
+        return;
+      }
+
+      // Parse header row (tab-separated)
+      const headers = lines[0].split('\t');
+      setCSVImportStatus(`Found ${lines.length - 1} activities. Processing...`);
+
+      // Find column indices
+      const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
+      const npIdx = headers.findIndex(h => h.toLowerCase().includes('norm') && h.toLowerCase().includes('power'));
+      const intensityIdx = headers.findIndex(h => h.toLowerCase().includes('intensity'));
+      const loadIdx = headers.findIndex(h => h.toLowerCase().includes('load'));
+      const timeIdx = headers.findIndex(h => h.toLowerCase().includes('moving') && h.toLowerCase().includes('time'));
+      const nameIdx = headers.findIndex(h => h.toLowerCase().includes('name'));
+      const typeIdx = headers.findIndex(h => h.toLowerCase() === 'type');
+
+      console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx });
+
+      let imported = 0;
+      let skipped = 0;
+      const newWorkouts = [];
+      const tempLevels = { ...levels };
+
+      // Process each data row
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split('\t');
+
+        // Skip if missing critical data
+        if (!cols[dateIdx] || !cols[npIdx] || !cols[loadIdx]) {
+          skipped++;
+          continue;
+        }
+
+        const np = parseInt(cols[npIdx]);
+        const tss = parseInt(cols[loadIdx]);
+        const duration = parseInt(cols[timeIdx]) / 60; // Convert seconds to minutes
+        const intensityFactor = parseFloat(cols[intensityIdx]) / 100; // Convert percentage to decimal
+        const activityDate = cols[dateIdx].split('T')[0]; // Extract date part
+        const activityName = cols[nameIdx] || 'Imported Ride';
+
+        // Skip if no power data
+        if (!np || np === 0) {
+          skipped++;
+          continue;
+        }
+
+        // Check for duplicates
+        const isDuplicate = history.some(w => w.date === activityDate && Math.abs(w.normalizedPower - np) < 5);
+        if (isDuplicate) {
+          skipped++;
+          continue;
+        }
+
+        // Map to zone based on NP
+        let zone = 'endurance';
+        if (np >= 280) zone = 'anaerobic';
+        else if (np >= 235) zone = 'vo2max';
+        else if (np >= 220) zone = 'threshold';
+        else if (np >= 195) zone = 'sweetspot';
+        else if (np >= 165) zone = 'tempo';
+
+        const currentLevel = tempLevels[zone];
+
+        // Estimate workout level from IF
+        const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
+
+        // Default RPE to 5 (no RPE data in CSV)
+        const rpe = 5;
+
+        // Calculate new level
+        const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
+
+        // Create workout entry
+        const entry = {
+          id: Date.now() + imported,
+          date: activityDate,
+          zone: zone,
+          workoutLevel: parseFloat(workoutLevel.toFixed(1)),
+          rpe: rpe,
+          completed: true,
+          duration: Math.round(duration),
+          normalizedPower: Math.round(np),
+          notes: `${activityName}`,
+          previousLevel: currentLevel,
+          newLevel: newLevel,
+          change: newLevel - currentLevel,
+          tss: tss,
+          intensityFactor: intensityFactor,
+        };
+
+        newWorkouts.push(entry);
+        tempLevels[zone] = newLevel;
+        imported++;
+      }
+
+      if (imported > 0) {
+        // Merge with existing history and sort by date
+        const mergedHistory = [...newWorkouts, ...history].sort((a, b) =>
+          new Date(b.date) - new Date(a.date)
+        );
+
+        setHistory(mergedHistory);
+        setLevels(tempLevels);
+        setDisplayLevels(tempLevels);
+
+        // Recalculate recent changes
+        const changes = {};
+        ZONES.forEach(zone => {
+          const lastWorkout = mergedHistory.find(w => w.zone === zone.id);
+          if (lastWorkout && lastWorkout.change !== 0) {
+            changes[zone.id] = {
+              change: lastWorkout.change,
+              date: lastWorkout.date,
+            };
+          }
+        });
+        setRecentChanges(changes);
+
+        setCSVImportStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data).`);
+
+        // Clear CSV content after successful import
+        setTimeout(() => {
+          setCSVContent('');
+          setShowCSVImport(false);
+        }, 3000);
+      } else {
+        setCSVImportStatus(`No activities imported. All ${skipped} were duplicates or missing data.`);
+      }
+
+    } catch (error) {
+      console.error('CSV import error:', error);
+      setCSVImportStatus(`Error: ${error.message}. Please check CSV format.`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleLogWorkout = () => {
     const zone = formData.zone;
     const currentLevel = levels[zone];
@@ -700,7 +879,9 @@ export default function ProgressionTracker() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'progression-data.json';
+    // Add timestamp to filename
+    const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    a.download = `cycling-data-${timestamp}.json`;
     a.click();
   };
 
@@ -979,6 +1160,64 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
+        {/* CSV Import Modal */}
+        {showCSVImport && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg">
+              <h2 className="font-bold mb-3 text-lg">Import CSV from intervals.icu</h2>
+              <p className="text-sm text-gray-400 mb-3">
+                Paste your CSV export from intervals.icu below (tab-separated format):
+              </p>
+              <textarea
+                value={csvContent}
+                onChange={(e) => setCSVContent(e.target.value)}
+                placeholder="id	Type	Date	Distance	Moving Time	Name	Avg HR	Norm Power	Intensity	Load..."
+                className="w-full bg-gray-700 rounded px-3 py-2 text-sm h-48 font-mono mb-3"
+              />
+              {csvImportStatus && (
+                <div className={`p-3 rounded mb-3 text-sm ${
+                  csvImportStatus.startsWith('✓')
+                    ? 'bg-green-900/50 text-green-400'
+                    : csvImportStatus.startsWith('Error')
+                    ? 'bg-red-900/50 text-red-400'
+                    : 'bg-blue-900/50 text-blue-400'
+                }`}>
+                  {csvImportStatus}
+                </div>
+              )}
+              <div className="bg-gray-700/50 rounded p-3 mb-4 text-xs text-gray-400">
+                <p className="mb-2"><strong>Expected columns (tab-separated):</strong></p>
+                <p className="font-mono">Date, Norm Power, Intensity, Load, Moving Time, Name</p>
+                <p className="mt-2">From intervals.icu: Activities → Export → CSV</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCSVImport}
+                  disabled={isImporting || !csvContent.trim()}
+                  className={`flex-1 px-4 py-2 rounded font-medium transition ${
+                    isImporting || !csvContent.trim()
+                      ? 'bg-gray-600 cursor-not-allowed'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
+                >
+                  {isImporting ? 'Importing...' : 'Import CSV'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCSVImport(false);
+                    setCSVContent('');
+                    setCSVImportStatus('');
+                  }}
+                  disabled={isImporting}
+                  className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition disabled:cursor-not-allowed"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* intervals.icu Sync Modal */}
         {showIntervalsSyncModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -1242,7 +1481,19 @@ Please analyze my current training status and provide personalized insights.`;
 
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Date</label>
+                <label className="block text-sm text-gray-400 mb-1 flex justify-between items-center">
+                  Date
+                  <button
+                    onClick={() => {
+                      const yesterday = new Date();
+                      yesterday.setDate(yesterday.getDate() - 1);
+                      setFormData({ ...formData, date: yesterday.toISOString().split('T')[0] });
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    Yesterday
+                  </button>
+                </label>
                 <input
                   type="date"
                   value={formData.date}
@@ -1435,6 +1686,12 @@ Please analyze my current training status and provide personalized insights.`;
             className="text-blue-400 hover:text-blue-300 transition"
           >
             Paste JSON
+          </button>
+          <button
+            onClick={() => setShowCSVImport(true)}
+            className="text-purple-400 hover:text-purple-300 transition font-medium"
+          >
+            Import CSV
           </button>
           <button
             onClick={() => setShowIntervalsSyncModal(true)}
