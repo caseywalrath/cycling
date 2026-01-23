@@ -53,6 +53,11 @@ export default function ProgressionTracker() {
   const [csvImportStatus, setCSVImportStatus] = useState('');
   const [isImporting, setIsImporting] = useState(false);
 
+  // FTP modal state
+  const [showFTPModal, setShowFTPModal] = useState(false);
+  const [detectedFTP, setDetectedFTP] = useState(null);
+  const [currentFTP, setCurrentFTP] = useState(FTP);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
@@ -102,7 +107,60 @@ export default function ProgressionTracker() {
     }
   }, []);
 
+  // Load FTP from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.ftp) {
+        setCurrentFTP(parsed.ftp);
+      }
+    }
+  }, []);
+
+  // Save FTP to localStorage when it changes
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      parsed.ftp = currentFTP;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history, ftp: currentFTP }));
+    }
+  }, [currentFTP]);
+
   // Animate level changes
+  // Calculate zone descriptions dynamically based on current FTP
+  const getZoneDescription = (zoneId, ftp) => {
+    const zones = {
+      endurance: { min: Math.round(ftp * 0.55), max: Math.round(ftp * 0.70), label: 'Z2' },
+      tempo: { min: Math.round(ftp * 0.70), max: Math.round(ftp * 0.79), label: 'Z3' },
+      sweetspot: { min: Math.round(ftp * 0.83), max: Math.round(ftp * 0.94), label: '' },
+      threshold: { min: Math.round(ftp * 0.94), max: ftp, label: 'Z4' },
+      vo2max: { min: ftp, max: Math.round(ftp * 1.19), label: 'Z5' },
+      anaerobic: { min: Math.round(ftp * 1.19), max: null, label: 'Z6' },
+    };
+
+    const zone = zones[zoneId];
+    if (!zone) return '';
+
+    if (zone.max === null) {
+      return `${zone.label}: ${zone.min}W+`;
+    }
+    return `${zone.label ? zone.label + ': ' : ''}${zone.min}-${zone.max}W`;
+  };
+
+  // Get zone power ranges for mapping activities
+  const getZonePowerRanges = (ftp) => ({
+    endurance: { min: 0, max: Math.round(ftp * 0.70) },
+    tempo: { min: Math.round(ftp * 0.70), max: Math.round(ftp * 0.79) },
+    sweetspot: { min: Math.round(ftp * 0.83), max: Math.round(ftp * 0.94) },
+    threshold: { min: Math.round(ftp * 0.94), max: ftp },
+    vo2max: { min: ftp, max: Math.round(ftp * 1.19) },
+    anaerobic: { min: Math.round(ftp * 1.19), max: Infinity },
+  });
+
   const animateLevel = (zone, fromLevel, toLevel, duration = 800) => {
     setAnimatingZone(zone);
     const startTime = performance.now();
@@ -132,13 +190,13 @@ export default function ProgressionTracker() {
   };
 
   const calculateTSS = (normalizedPower, durationMinutes) => {
-    const intensityFactor = normalizedPower / FTP;
-    const tss = (durationMinutes * normalizedPower * intensityFactor) / (FTP * 60) * 100;
+    const intensityFactor = normalizedPower / currentFTP;
+    const tss = (durationMinutes * normalizedPower * intensityFactor) / (currentFTP * 60) * 100;
     return Math.round(tss);
   };
 
   const calculateIF = (normalizedPower) => {
-    return normalizedPower / FTP;
+    return normalizedPower / currentFTP;
   };
 
   const calculateTrainingLoads = () => {
@@ -360,6 +418,39 @@ export default function ProgressionTracker() {
     }
   };
 
+  // FTP modal handlers
+  const handleRecalculateLevels = () => {
+    // Reset all progression levels to 1.0
+    setLevels(DEFAULT_LEVELS);
+    setDisplayLevels(DEFAULT_LEVELS);
+
+    // Update FTP
+    setCurrentFTP(detectedFTP);
+
+    // Close modal
+    setShowFTPModal(false);
+
+    // Show success message
+    setSyncStatus(`✓ FTP updated to ${detectedFTP}W and all progression levels reset to 1.0`);
+  };
+
+  const handleAdjustZonesOnly = () => {
+    // Update FTP only, keep progression levels
+    setCurrentFTP(detectedFTP);
+
+    // Close modal
+    setShowFTPModal(false);
+
+    // Show success message
+    setSyncStatus(`✓ FTP updated to ${detectedFTP}W. Progression levels maintained.`);
+  };
+
+  const handleIgnoreFTP = () => {
+    // Just close the modal without any changes
+    setShowFTPModal(false);
+    setSyncStatus('FTP change ignored. Continuing with current settings.');
+  };
+
   // Map intervals.icu workout type to our zone
   const mapWorkoutTypeToZone = (activity) => {
     // intervals.icu uses type field and average_watts
@@ -369,11 +460,12 @@ export default function ProgressionTracker() {
 
     // Map by power zones if we have power data
     if (avgWatts > 0) {
-      if (avgWatts >= 280) return 'anaerobic';
-      if (avgWatts >= 235) return 'vo2max';
-      if (avgWatts >= 220) return 'threshold';
-      if (avgWatts >= 195) return 'sweetspot';
-      if (avgWatts >= 165) return 'tempo';
+      const ranges = getZonePowerRanges(currentFTP);
+      if (avgWatts >= ranges.anaerobic.min) return 'anaerobic';
+      if (avgWatts >= ranges.vo2max.min) return 'vo2max';
+      if (avgWatts >= ranges.threshold.min) return 'threshold';
+      if (avgWatts >= ranges.sweetspot.min) return 'sweetspot';
+      if (avgWatts >= ranges.tempo.min) return 'tempo';
       return 'endurance';
     }
 
@@ -411,13 +503,14 @@ export default function ProgressionTracker() {
 
       if (athleteResponse.ok) {
         const athleteData = await athleteResponse.json();
-        const currentFTP = athleteData.ftp || athleteData.icu_ftp || FTP;
+        const fetchedFTP = athleteData.ftp || athleteData.icu_ftp || currentFTP;
 
         // Check if FTP has increased by 10W or more
-        if (currentFTP >= FTP + 10) {
-          setSyncStatus(`🎉 Congrats! Your FTP increased from ${FTP}W to ${currentFTP}W! Consider updating your zones and recalculating progression levels.`);
-          console.log('FTP Increase Detected:', { old: FTP, new: currentFTP });
-          // TODO: Add UI prompt to reset levels/adjust zones
+        if (fetchedFTP >= currentFTP + 10) {
+          console.log('FTP Increase Detected:', { old: currentFTP, new: fetchedFTP });
+          setDetectedFTP(fetchedFTP);
+          setShowFTPModal(true);
+          setSyncStatus(`🎉 FTP increase detected: ${currentFTP}W → ${fetchedFTP}W`);
         }
       }
 
@@ -557,7 +650,7 @@ export default function ProgressionTracker() {
           const currentLevel = levels[zone];
 
           // Estimate workout level from IF
-          const intensityFactor = np / FTP;
+          const intensityFactor = np / currentFTP;
           const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
 
           // Get RPE if available (wellness data)
@@ -719,12 +812,13 @@ export default function ProgressionTracker() {
         }
 
         // Map to zone based on NP
+        const ranges = getZonePowerRanges(currentFTP);
         let zone = 'endurance';
-        if (np >= 280) zone = 'anaerobic';
-        else if (np >= 235) zone = 'vo2max';
-        else if (np >= 220) zone = 'threshold';
-        else if (np >= 195) zone = 'sweetspot';
-        else if (np >= 165) zone = 'tempo';
+        if (np >= ranges.anaerobic.min) zone = 'anaerobic';
+        else if (np >= ranges.vo2max.min) zone = 'vo2max';
+        else if (np >= ranges.threshold.min) zone = 'threshold';
+        else if (np >= ranges.sweetspot.min) zone = 'sweetspot';
+        else if (np >= ranges.tempo.min) zone = 'tempo';
 
         const currentLevel = tempLevels[zone];
 
@@ -1017,7 +1111,7 @@ Please analyze my current training status and provide personalized insights.`;
   const loads = calculateTrainingLoads();
   const tsbStatus = getTSBStatus(loads.tsb);
   const insights = generateInsights(loads, history, levels);
-  const currentIF = formData.normalizedPower / FTP;
+  const currentIF = formData.normalizedPower / currentFTP;
   const currentTSS = calculateTSS(formData.normalizedPower, formData.duration);
 
   const last7Days = history.filter(w => {
@@ -1036,7 +1130,7 @@ Please analyze my current training status and provide personalized insights.`;
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-2xl mx-auto">
         <h1 className="text-xl font-bold mb-1">Gran Fondo Utah Training</h1>
-        <p className="text-gray-400 text-sm mb-4">FTP: {FTP}W • Event: June 13, 2026</p>
+        <p className="text-gray-400 text-sm mb-4">FTP: {currentFTP}W • Event: June 13, 2026</p>
 
         {/* Tabs */}
         <div className="flex gap-1 mb-4 bg-gray-800 rounded-lg p-1">
@@ -1218,6 +1312,70 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
+        {/* FTP Increase Detection Modal */}
+        {showFTPModal && detectedFTP && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+              <div className="text-center mb-4">
+                <div className="text-5xl mb-3">🎉</div>
+                <h2 className="font-bold text-2xl mb-2">FTP Increase Detected!</h2>
+                <p className="text-gray-400 mb-4">
+                  Your FTP has increased from <span className="font-bold text-blue-400">{currentFTP}W</span> to{' '}
+                  <span className="font-bold text-green-400">{detectedFTP}W</span>
+                </p>
+                <div className="bg-gray-700/50 rounded-lg p-4 mb-6">
+                  <div className="text-4xl font-bold text-green-400 mb-1">
+                    +{detectedFTP - currentFTP}W
+                  </div>
+                  <div className="text-sm text-gray-400">Awesome progress!</div>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-300 mb-4">
+                How would you like to update your training zones?
+              </p>
+
+              <div className="space-y-3">
+                <button
+                  onClick={handleRecalculateLevels}
+                  className="w-full bg-blue-600 hover:bg-blue-700 px-4 py-3 rounded-lg font-medium transition text-left"
+                >
+                  <div className="font-bold mb-1">🔄 Recalculate Levels</div>
+                  <div className="text-xs text-blue-200">
+                    Reset all progression levels to 1.0 and update power zones
+                  </div>
+                </button>
+
+                <button
+                  onClick={handleAdjustZonesOnly}
+                  className="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-medium transition text-left"
+                >
+                  <div className="font-bold mb-1">⚙️ Adjust Zones Only</div>
+                  <div className="text-xs text-green-200">
+                    Update power zones but keep your progression levels
+                  </div>
+                </button>
+
+                <button
+                  onClick={handleIgnoreFTP}
+                  className="w-full bg-gray-600 hover:bg-gray-500 px-4 py-3 rounded-lg font-medium transition text-left"
+                >
+                  <div className="font-bold mb-1">❌ Ignore for Now</div>
+                  <div className="text-xs text-gray-300">
+                    Keep current FTP and zones unchanged
+                  </div>
+                </button>
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <p className="text-xs text-gray-400 text-center">
+                  💡 Tip: Choose "Recalculate" if you want a fresh start, or "Adjust Zones Only" to maintain your current progression.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* intervals.icu Sync Modal */}
         {showIntervalsSyncModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -1329,7 +1487,7 @@ Please analyze my current training status and provide personalized insights.`;
                       </span>
                     )}
                   </span>
-                  <span className="text-gray-400">{zone.description}</span>
+                  <span className="text-gray-400">{getZoneDescription(zone.id, currentFTP)}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="flex-1 bg-gray-700 rounded-full h-5 overflow-hidden">
