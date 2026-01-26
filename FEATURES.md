@@ -136,16 +136,46 @@ Sweet Spot:
 **Priority:** MEDIUM
 **Complexity:** Medium
 **Description:** Enhanced data visualization and trends
+**Status:** 📊 Weekly Hours Chart - Requested 2026-01-26
 
 **Features:**
+- **Weekly Hours Chart (Strava-style)** - Top priority!
+  - Area chart showing weekly training hours over time
+  - X-axis: Months (APR, MAY, JUN, etc.)
+  - Y-axis: Hours (0h, 3h 30m, 6h, etc.)
+  - Orange fill with data point markers
+  - Current week highlighted
+  - Located in Dashboard tab, above or below Training Summary
+  - Interactive tooltips showing exact hours per week
+
 - CTL/ATL/TSB chart over time (Performance Management Chart)
 - Progression level trends by zone
 - TSS distribution by zone (pie chart)
-- Weekly/monthly training volume
 - Power curve (best efforts by duration)
 - Fitness trends and projections
 
-**Why:** Better understanding of training progress and patterns
+**Implementation Notes:**
+- Use Chart.js or Recharts for React charting
+- Group workouts by week (Sunday-Saturday)
+- Calculate total duration per week
+- Display last 12-16 weeks for useful trend view
+- Responsive design for mobile
+
+**Visual Reference:**
+```
+Weekly Hours Chart
+─────────────────────
+This week: 2h 11m
+
+6h 7m │               ╱╲
+      │              ╱  ╲
+3h 3m │     ╱╲  ╱╲  ╱    ╲
+      │  ╱╲╱  ╲╱  ╲╱
+0h    │───────────────────
+        APR  MAY  JUN
+```
+
+**Why:** Visual feedback on training volume trends, motivation, consistency tracking
 
 ---
 
