@@ -136,17 +136,19 @@ Sweet Spot:
 **Priority:** MEDIUM
 **Complexity:** Medium
 **Description:** Enhanced data visualization and trends
-**Status:** 📊 Weekly Hours Chart - Requested 2026-01-26
+**Status:** ✅ Weekly Hours Chart COMPLETED (2026-01-26)
 
 **Features:**
-- **Weekly Hours Chart (Strava-style)** - Top priority!
-  - Area chart showing weekly training hours over time
-  - X-axis: Months (APR, MAY, JUN, etc.)
-  - Y-axis: Hours (0h, 3h 30m, 6h, etc.)
-  - Orange fill with data point markers
-  - Current week highlighted
-  - Located in Dashboard tab, above or below Training Summary
-  - Interactive tooltips showing exact hours per week
+- ✅ **Weekly Hours Chart (Strava-style)** - COMPLETED!
+  - Area chart showing weekly training hours over last 20 weeks
+  - X-axis: Week labels (e.g., "Apr 7", "May 12")
+  - Y-axis: Hours (0h, 3h, 6h, etc.)
+  - Orange gradient fill with data point markers
+  - Current week summary in header
+  - Located in Dashboard tab after CTL/ATL/TSB cards
+  - Interactive tooltips showing exact hours/minutes and ride count
+  - Responsive design with 200px height
+  - Built with Recharts library
 
 - CTL/ATL/TSB chart over time (Performance Management Chart)
 - Progression level trends by zone
@@ -154,12 +156,15 @@ Sweet Spot:
 - Power curve (best efforts by duration)
 - Fitness trends and projections
 
-**Implementation Notes:**
-- Use Chart.js or Recharts for React charting
-- Group workouts by week (Sunday-Saturday)
-- Calculate total duration per week
-- Display last 12-16 weeks for useful trend view
-- Responsive design for mobile
+**Implementation Details:**
+- ✅ Using Recharts (AreaChart, ResponsiveContainer, custom Tooltip)
+- ✅ Groups workouts by week (Sunday-Saturday)
+- ✅ Calculates total duration per week in hours
+- ✅ Displays last 20 weeks (expanded from initial 16-week plan)
+- ✅ Responsive design with ResponsiveContainer
+- ✅ Custom gradient fill (#FB923C orange)
+- ✅ Interactive hover states with enlarged active dots
+- ✅ Custom tooltip component showing hours/minutes and ride count
 
 **Visual Reference:**
 ```
