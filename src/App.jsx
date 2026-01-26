@@ -285,12 +285,17 @@ export default function ProgressionTracker() {
       return [];
     }
 
-    // Get date 16 weeks ago
-    const sixteenWeeksAgo = new Date();
-    sixteenWeeksAgo.setDate(sixteenWeeksAgo.getDate() - (16 * 7));
+    console.log('=== CHART DEBUG ===');
+    console.log('Total history entries:', history.length);
+    console.log('Sample dates:', history.slice(0, 3).map(w => ({ date: w.date, duration: w.duration })));
 
-    // Filter to last 16 weeks
-    const recentWorkouts = history.filter(w => new Date(w.date) >= sixteenWeeksAgo);
+    // Get date 20 weeks ago (expanded from 16 for more data)
+    const twentyWeeksAgo = new Date();
+    twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
+    console.log('Looking for workouts after:', twentyWeeksAgo.toISOString().split('T')[0]);
+
+    // Filter to last 20 weeks
+    const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
     console.log('Recent workouts for chart:', recentWorkouts.length, 'of', history.length);
 
     // Group by week
@@ -1883,6 +1888,11 @@ Please analyze my current training status and provide personalized insights.`;
                 </div>
                 <div className="text-xs" style={{ color: tsbStatus.color }}>{tsbStatus.label}</div>
               </div>
+            </div>
+
+            {/* Weekly Hours Chart DEBUG */}
+            <div className="bg-red-900 text-white p-2 text-xs">
+              DEBUG: Chart component loading. History: {history.length} workouts
             </div>
 
             {/* Weekly Hours Chart */}
