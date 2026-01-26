@@ -280,7 +280,10 @@ export default function ProgressionTracker() {
 
   // Calculate weekly hours for chart
   const calculateWeeklyHours = (history) => {
-    if (!history || history.length === 0) return [];
+    if (!history || history.length === 0) {
+      console.log('No history data for chart');
+      return [];
+    }
 
     // Get date 16 weeks ago
     const sixteenWeeksAgo = new Date();
@@ -288,6 +291,7 @@ export default function ProgressionTracker() {
 
     // Filter to last 16 weeks
     const recentWorkouts = history.filter(w => new Date(w.date) >= sixteenWeeksAgo);
+    console.log('Recent workouts for chart:', recentWorkouts.length, 'of', history.length);
 
     // Group by week
     const weeklyData = {};
@@ -1884,6 +1888,7 @@ Please analyze my current training status and provide personalized insights.`;
             {/* Weekly Hours Chart */}
             {(() => {
               const weeklyData = calculateWeeklyHours(history);
+              console.log('Weekly chart data:', weeklyData.length, weeklyData);
               const currentWeekHours = weeklyData.length > 0 ? weeklyData[weeklyData.length - 1].hours : 0;
 
               // Custom tooltip
