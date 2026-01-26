@@ -513,20 +513,24 @@ export default function ProgressionTracker() {
         const athleteData = await athleteResponse.json();
         console.log('Athlete data:', athleteData);
         console.log('All athlete data field names:', Object.keys(athleteData));
+
+        // eFTP is stored in sportSettings.settings.mmp_model.ftp
+        const sportSettings = athleteData.sportSettings || athleteData.settings;
+        const settings = sportSettings?.Ride || sportSettings;
+        const eFTPSupported = settings?.eFTPSupported;
+        const eFTPValue = settings?.mmp_model?.ftp;
+        const manualFTP = settings?.ftp;
+
         console.log('FTP-related fields:', {
-          ftp: athleteData.ftp,
-          icu_ftp: athleteData.icu_ftp,
-          icu_ftp_delta: athleteData.icu_ftp_delta,
-          avg_watts: athleteData.avg_watts,
-          weighted_avg_watts: athleteData.weighted_avg_watts,
-          power: athleteData.power,
-          threshold_power: athleteData.threshold_power,
-          cp: athleteData.cp,
-          w_prime: athleteData.w_prime,
+          eFTPSupported: eFTPSupported,
+          eFTP: eFTPValue,
+          manualFTP: manualFTP,
+          mmp_model: settings?.mmp_model,
           currentFTP: currentFTP
         });
 
-        const fetchedFTP = athleteData.ftp || athleteData.icu_ftp || currentFTP;
+        // Use eFTP if available and supported, otherwise fall back to manual FTP or current
+        const fetchedFTP = eFTPValue || manualFTP || currentFTP;
         console.log('Fetched FTP:', fetchedFTP);
 
         // Store intervals.icu FTP
