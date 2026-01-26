@@ -62,6 +62,16 @@ export default function ProgressionTracker() {
   // Cloud sync instructions modal
   const [showCloudSyncHelp, setShowCloudSyncHelp] = useState(false);
 
+  // Event/Goal management
+  const [event, setEvent] = useState({
+    name: 'Gran Fondo Utah',
+    date: '2026-06-13',
+    distance: 100, // miles
+    targetCTL: 85,
+  });
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [eventFormData, setEventFormData] = useState(event);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
@@ -70,6 +80,8 @@ export default function ProgressionTracker() {
     completed: true,
     duration: 60,
     normalizedPower: 150,
+    rideType: 'Outdoor', // 'Outdoor' or 'Indoor'
+    distance: 0, // miles
     notes: '',
   });
 
@@ -81,6 +93,12 @@ export default function ProgressionTracker() {
       setLevels(loadedLevels);
       setDisplayLevels(loadedLevels);
       setHistory(parsed.history || []);
+
+      // Load event if available
+      if (parsed.event) {
+        setEvent(parsed.event);
+        setEventFormData(parsed.event);
+      }
 
       // Calculate recent changes from history
       if (parsed.history && parsed.history.length > 0) {
@@ -100,8 +118,8 @@ export default function ProgressionTracker() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history }));
-  }, [levels, history]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history, event }));
+  }, [levels, history, event]);
 
   // Load intervals.icu config from localStorage
   useEffect(() => {
@@ -696,6 +714,12 @@ export default function ProgressionTracker() {
           // Calculate new level
           const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
 
+          // Extract distance and ride type
+          const distanceMeters = activityData.distance || 0;
+          const distanceMiles = distanceMeters / 1000 * 0.621371; // Convert meters to miles
+          const activityType = activityData.type || 'Ride';
+          const rideType = activityType === 'VirtualRide' ? 'Indoor' : 'Outdoor';
+
           // Create workout entry
           const entry = {
             id: Date.now() + imported, // Unique ID
@@ -706,6 +730,8 @@ export default function ProgressionTracker() {
             completed: true,
             duration: Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60),
             normalizedPower: Math.round(np),
+            rideType: rideType,
+            distance: Math.round(distanceMiles * 10) / 10, // Round to 1 decimal
             notes: `Imported from intervals.icu: ${activityData.name || 'Ride'}`,
             previousLevel: currentLevel,
             newLevel: newLevel,
@@ -810,8 +836,9 @@ export default function ProgressionTracker() {
       const timeIdx = headers.findIndex(h => h.toLowerCase().includes('moving') && h.toLowerCase().includes('time'));
       const nameIdx = headers.findIndex(h => h.toLowerCase().includes('name'));
       const typeIdx = headers.findIndex(h => h.toLowerCase() === 'type');
+      const distanceIdx = headers.findIndex(h => h.toLowerCase().includes('distance'));
 
-      console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx });
+      console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx });
 
       let imported = 0;
       let skipped = 0;
@@ -834,6 +861,11 @@ export default function ProgressionTracker() {
         const intensityFactor = parseFloat(cols[intensityIdx]) / 100; // Convert percentage to decimal
         const activityDate = cols[dateIdx].split('T')[0]; // Extract date part
         const activityName = cols[nameIdx] || 'Imported Ride';
+        const activityType = cols[typeIdx] || 'Ride';
+        const distance = distanceIdx >= 0 ? parseFloat(cols[distanceIdx]) / 1000 * 0.621371 : 0; // Convert meters to miles
+
+        // Map intervals.icu type to ride type ('Ride' = Outdoor, 'VirtualRide' = Indoor)
+        const rideType = activityType === 'VirtualRide' ? 'Indoor' : 'Outdoor';
 
         // Skip if no power data
         if (!np || np === 0) {
@@ -878,6 +910,8 @@ export default function ProgressionTracker() {
           completed: true,
           duration: Math.round(duration),
           normalizedPower: Math.round(np),
+          rideType: rideType,
+          distance: Math.round(distance * 10) / 10, // Round to 1 decimal
           notes: `${activityName}`,
           previousLevel: currentLevel,
           newLevel: newLevel,
@@ -984,6 +1018,8 @@ export default function ProgressionTracker() {
       completed: true,
       duration: 60,
       normalizedPower: 150,
+      rideType: 'Outdoor',
+      distance: 0,
       notes: '',
     });
   };
@@ -1002,6 +1038,35 @@ export default function ProgressionTracker() {
         );
       }, 100);
     }
+  };
+
+  // Event management handlers
+  const handleSaveEvent = () => {
+    setEvent(eventFormData);
+    setShowEventModal(false);
+  };
+
+  const handleDeleteEvent = () => {
+    const confirmed = window.confirm('Are you sure you want to delete this event?');
+    if (confirmed) {
+      setEvent({
+        name: '',
+        date: '',
+        distance: 0,
+        targetCTL: 0,
+      });
+      setShowEventModal(false);
+    }
+  };
+
+  // Calculate days until event
+  const getDaysUntilEvent = () => {
+    if (!event.date) return null;
+    const today = new Date();
+    const eventDate = new Date(event.date);
+    const diffTime = eventDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
   };
 
   const exportData = () => {
@@ -1600,6 +1665,86 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
+        {/* Event Management Modal */}
+        {showEventModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+              <h2 className="font-bold mb-4 text-lg">Event/Goal Management</h2>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Event Name</label>
+                  <input
+                    type="text"
+                    value={eventFormData.name}
+                    onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                    placeholder="Gran Fondo Utah"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={eventFormData.date}
+                    onChange={(e) => setEventFormData({ ...eventFormData, date: e.target.value })}
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Distance (miles)</label>
+                  <input
+                    type="number"
+                    value={eventFormData.distance}
+                    onChange={(e) => setEventFormData({ ...eventFormData, distance: parseInt(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                    min="0"
+                    step="1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Target CTL</label>
+                  <input
+                    type="number"
+                    value={eventFormData.targetCTL}
+                    onChange={(e) => setEventFormData({ ...eventFormData, targetCTL: parseInt(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                    min="0"
+                    step="1"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Recommended: 80-100 for Gran Fondo</p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSaveEvent}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium transition"
+                >
+                  Save
+                </button>
+                {event.name && (
+                  <button
+                    onClick={handleDeleteEvent}
+                    className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-medium transition"
+                  >
+                    Delete
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowEventModal(false)}
+                  className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Levels Tab */}
         {activeTab === 'levels' && (
           <div className="space-y-4">
@@ -1669,10 +1814,75 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             </div>
 
+            {/* Event/Goal Management */}
+            {event.name && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-medium">Event Goal</h3>
+                  <button
+                    onClick={() => {
+                      setEventFormData(event);
+                      setShowEventModal(true);
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    Edit
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Event:</span>
+                    <span className="font-medium">{event.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Date:</span>
+                    <span className="font-medium">
+                      {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {getDaysUntilEvent() !== null && (
+                        <span className="ml-2 text-blue-400">
+                          ({getDaysUntilEvent()} days)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Distance:</span>
+                    <span className="font-medium">{event.distance} miles</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Target CTL:</span>
+                    <span className={`font-medium ${loads.ctl >= event.targetCTL ? 'text-green-400' : 'text-yellow-400'}`}>
+                      {event.targetCTL} {loads.ctl >= event.targetCTL && '✓'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!event.name && (
+              <div className="bg-gray-800 rounded-lg p-4 text-center">
+                <p className="text-gray-400 text-sm mb-3">No event goal set</p>
+                <button
+                  onClick={() => {
+                    setEventFormData({
+                      name: 'Gran Fondo Utah',
+                      date: '2026-06-13',
+                      distance: 100,
+                      targetCTL: 85,
+                    });
+                    setShowEventModal(true);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition"
+                >
+                  Add Event
+                </button>
+              </div>
+            )}
+
             {/* Weekly Summary */}
             <div className="bg-gray-800 rounded-lg p-4">
               <h3 className="font-medium mb-3">Training Summary</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-2 gap-4 text-sm mb-4">
                 <div>
                   <div className="text-gray-400">Last 7 Days</div>
                   <div className="text-lg font-bold">{loads.weeklyTSS} TSS</div>
@@ -1686,6 +1896,35 @@ Please analyze my current training status and provide personalized insights.`;
                   <div className="text-gray-500">{last28Days.length} workouts</div>
                 </div>
               </div>
+              {/* Longest Ride (30 days) */}
+              {(() => {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const outdoorRides = history.filter(w =>
+                  new Date(w.date) >= thirtyDaysAgo &&
+                  w.rideType === 'Outdoor' &&
+                  w.distance > 0
+                );
+                const longestRide = outdoorRides.length > 0
+                  ? outdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, outdoorRides[0])
+                  : null;
+
+                return longestRide ? (
+                  <div className="border-t border-gray-700 pt-3">
+                    <div className="text-gray-400 text-sm mb-1">Longest Ride (30 days)</div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <div className="text-xs text-gray-500">Duration</div>
+                        <div className="text-lg font-bold">{longestRide.duration} min</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500">Distance</div>
+                        <div className="text-lg font-bold">{longestRide.distance} mi</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
             </div>
 
             {/* Instant Analysis */}
@@ -1830,6 +2069,35 @@ Please analyze my current training status and provide personalized insights.`;
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                   min="50"
                   max="500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Ride Type</label>
+                <select
+                  value={formData.rideType}
+                  onChange={(e) => setFormData({ ...formData, rideType: e.target.value })}
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                >
+                  <option value="Outdoor">Outdoor</option>
+                  <option value="Indoor">Indoor</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  Distance (miles)
+                  {formData.rideType === 'Indoor' && <span className="text-gray-500 ml-1 text-xs">(optional)</span>}
+                </label>
+                <input
+                  type="number"
+                  value={formData.distance}
+                  onChange={(e) => setFormData({ ...formData, distance: parseFloat(e.target.value) || 0 })}
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  min="0"
+                  step="0.1"
+                  max="200"
                 />
               </div>
             </div>
