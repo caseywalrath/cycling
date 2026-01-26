@@ -280,23 +280,14 @@ export default function ProgressionTracker() {
 
   // Calculate weekly hours for chart
   const calculateWeeklyHours = (history) => {
-    if (!history || history.length === 0) {
-      console.log('No history data for chart');
-      return [];
-    }
+    if (!history || history.length === 0) return [];
 
-    console.log('=== CHART DEBUG ===');
-    console.log('Total history entries:', history.length);
-    console.log('Sample dates:', history.slice(0, 3).map(w => ({ date: w.date, duration: w.duration })));
-
-    // Get date 20 weeks ago (expanded from 16 for more data)
+    // Get date 20 weeks ago
     const twentyWeeksAgo = new Date();
     twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
-    console.log('Looking for workouts after:', twentyWeeksAgo.toISOString().split('T')[0]);
 
     // Filter to last 20 weeks
     const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
-    console.log('Recent workouts for chart:', recentWorkouts.length, 'of', history.length);
 
     // Group by week
     const weeklyData = {};
@@ -1890,15 +1881,9 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             </div>
 
-            {/* Weekly Hours Chart DEBUG */}
-            <div className="bg-red-900 text-white p-2 text-xs">
-              DEBUG: Chart component loading. History: {history.length} workouts
-            </div>
-
             {/* Weekly Hours Chart */}
             {(() => {
               const weeklyData = calculateWeeklyHours(history);
-              console.log('Weekly chart data:', weeklyData.length, weeklyData);
               const currentWeekHours = weeklyData.length > 0 ? weeklyData[weeklyData.length - 1].hours : 0;
 
               // Custom tooltip
