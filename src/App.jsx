@@ -59,6 +59,9 @@ export default function ProgressionTracker() {
   const [currentFTP, setCurrentFTP] = useState(FTP);
   const [intervalsFTP, setIntervalsFTP] = useState(null); // eFTP from intervals.icu
 
+  // Cloud sync instructions modal
+  const [showCloudSyncHelp, setShowCloudSyncHelp] = useState(false);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
@@ -1002,15 +1005,23 @@ export default function ProgressionTracker() {
   };
 
   const exportData = () => {
-    const data = JSON.stringify({ levels, history }, null, 2);
+    // Include FTP data in export
+    const data = JSON.stringify({
+      levels,
+      history,
+      ftp: currentFTP,
+      intervalsFTP: intervalsFTP,
+      exportedAt: new Date().toISOString()
+    }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    // Add timestamp to filename
+    // Better filename with timestamp
     const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    a.download = `cycling-data-${timestamp}.json`;
+    a.download = `casey-rides-backup-${timestamp}.json`;
     a.click();
+    URL.revokeObjectURL(url); // Clean up
   };
 
   const importData = (event) => {
@@ -1025,8 +1036,13 @@ export default function ProgressionTracker() {
             setDisplayLevels(parsed.levels);
           }
           if (parsed.history) setHistory(parsed.history);
+          // Import FTP data if available
+          if (parsed.ftp) setCurrentFTP(parsed.ftp);
+          if (parsed.intervalsFTP) setIntervalsFTP(parsed.intervalsFTP);
+
+          alert(`✓ Data imported successfully!\n${parsed.history?.length || 0} workouts restored.`);
         } catch (err) {
-          alert('Invalid file format');
+          alert('Invalid file format. Please check the file and try again.');
         }
       };
       reader.readAsText(file);
@@ -1056,6 +1072,10 @@ export default function ProgressionTracker() {
         });
         setRecentChanges(changes);
       }
+      // Import FTP data if available
+      if (parsed.ftp) setCurrentFTP(parsed.ftp);
+      if (parsed.intervalsFTP) setIntervalsFTP(parsed.intervalsFTP);
+
       setShowPasteImport(false);
       setPasteContent('');
     } catch (err) {
@@ -1412,6 +1432,80 @@ Please analyze my current training status and provide personalized insights.`;
                   💡 Tip: Choose "Recalculate" if you want a fresh start, or "Adjust Zones Only" to maintain your current progression.
                 </p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cloud Sync Instructions Modal */}
+        {showCloudSyncHelp && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-lg">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-xl">☁️ Cloud Sync Guide</h2>
+                <button
+                  onClick={() => setShowCloudSyncHelp(false)}
+                  className="text-gray-400 hover:text-white text-2xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+
+              <p className="text-gray-300 mb-4">
+                Sync your training data across Windows and iPhone using Google Drive or Dropbox.
+              </p>
+
+              <div className="space-y-4">
+                {/* Step 1 */}
+                <div className="bg-gray-700/50 rounded-lg p-4">
+                  <div className="font-bold text-blue-400 mb-2">Step 1: Export on Current Device</div>
+                  <p className="text-sm text-gray-300 mb-2">
+                    Click <span className="font-mono bg-gray-900 px-1 rounded">Export Data</span> below.
+                    This downloads a file named <span className="font-mono bg-gray-900 px-1 rounded">casey-rides-backup-{new Date().toISOString().split('T')[0]}.json</span>
+                  </p>
+                </div>
+
+                {/* Step 2 */}
+                <div className="bg-gray-700/50 rounded-lg p-4">
+                  <div className="font-bold text-green-400 mb-2">Step 2: Save to Cloud</div>
+                  <ul className="text-sm text-gray-300 space-y-1">
+                    <li>• <span className="font-bold">Google Drive:</span> Upload file to a dedicated folder</li>
+                    <li>• <span className="font-bold">Dropbox:</span> Move file to your Dropbox folder</li>
+                    <li>• <span className="font-bold">iCloud:</span> Save to iCloud Drive (Mac/iPhone)</li>
+                  </ul>
+                </div>
+
+                {/* Step 3 */}
+                <div className="bg-gray-700/50 rounded-lg p-4">
+                  <div className="font-bold text-purple-400 mb-2">Step 3: Import on Other Device</div>
+                  <p className="text-sm text-gray-300 mb-2">
+                    On your other device:
+                  </p>
+                  <ol className="text-sm text-gray-300 space-y-1 list-decimal list-inside">
+                    <li>Download the backup file from cloud storage</li>
+                    <li>Click <span className="font-mono bg-gray-900 px-1 rounded">Import File</span> below</li>
+                    <li>Select the downloaded .json file</li>
+                    <li>Your data syncs instantly!</li>
+                  </ol>
+                </div>
+
+                {/* Best Practices */}
+                <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+                  <div className="font-bold text-blue-300 mb-2">💡 Best Practices</div>
+                  <ul className="text-sm text-gray-300 space-y-1">
+                    <li>• Export after every session to keep cloud backup current</li>
+                    <li>• Use consistent folder name like "Casey Rides Backups"</li>
+                    <li>• Keep last 3-5 backups in case you need to restore</li>
+                    <li>• Filename includes date for easy version tracking</li>
+                  </ul>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowCloudSyncHelp(false)}
+                className="w-full mt-4 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg transition"
+              >
+                Got it!
+              </button>
             </div>
           </div>
         )}
@@ -1871,17 +1965,23 @@ Please analyze my current training status and provide personalized insights.`;
         <div className="flex gap-3 text-sm mt-6 flex-wrap">
           <button
             onClick={exportData}
-            className="text-gray-400 hover:text-white transition"
+            className="text-gray-400 hover:text-white transition font-medium"
           >
             Export Data
           </button>
-          <label className="text-gray-400 hover:text-white transition cursor-pointer">
+          <label className="text-gray-400 hover:text-white transition cursor-pointer font-medium">
             Import File
             <input type="file" accept=".json" onChange={importData} className="hidden" />
           </label>
           <button
+            onClick={() => setShowCloudSyncHelp(true)}
+            className="text-blue-400 hover:text-blue-300 transition font-medium"
+          >
+            ☁️ How to Sync?
+          </button>
+          <button
             onClick={() => setShowPasteImport(true)}
-            className="text-blue-400 hover:text-blue-300 transition"
+            className="text-gray-500 hover:text-gray-400 transition text-xs"
           >
             Paste JSON
           </button>
