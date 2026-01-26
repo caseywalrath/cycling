@@ -171,7 +171,15 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 ### 7. Dynamic FTP Tracking from intervals.icu
 **Priority:** MEDIUM
 **Complexity:** Medium
+**Status:** ⚠️ PARTIALLY IMPLEMENTED - eFTP display working, detection needs API investigation
 **Description:** Pull current eFTP from intervals.icu and detect changes
+
+**Current State (2026-01-26):**
+- ✅ eFTP displays in header next to manual FTP
+- ✅ FTP increase modal with 3 options (Recalculate/Adjust/Ignore)
+- ✅ Modal handlers implemented and working
+- ⚠️ eFTP field path unclear - API returns undefined for expected fields
+- 🔍 Forum suggests `sportSettings.Ride.mmp_model.ftp` but needs verification
 
 **Features:**
 - Fetch current eFTP (estimated FTP) from intervals.icu
@@ -181,21 +189,17 @@ Weeks 19-20: Taper (CTL 90→80, TSB +15)
 - Option to auto-adjust zones or manually confirm
 - Track FTP history over time
 
-**Implementation:**
+**Implementation Notes:**
 ```javascript
-// Fetch eFTP from intervals.icu athlete data
-const athleteResponse = await fetch(
-  `https://intervals.icu/api/v1/athlete/${athleteId}`,
-  { headers: { 'Authorization': `Basic ${apiKey}` } }
-);
-const athlete = await athleteResponse.json();
-const currentFTP = athlete.ftp;
+// Current approach (needs verification):
+// eFTP should be at sportSettings.Ride.mmp_model.ftp
+const sportSettings = athleteData.sportSettings || athleteData.settings;
+const settings = sportSettings?.Ride || sportSettings;
+const eFTPValue = settings?.mmp_model?.ftp;
 
-// Compare with stored FTP
-if (currentFTP >= storedFTP + 10) {
-  showCongratulations();
-  promptLevelReset();
-}
+// Issue: Field returns undefined despite intervals.icu showing 241W eFTP
+// May need to examine full API response or contact intervals.icu support
+// Reference: https://forum.intervals.icu/t/api-recommended-way-to-get-eftp/99469
 ```
 
 **Why:**
@@ -211,6 +215,12 @@ if (currentFTP >= storedFTP + 10) {
    - "Recalculate Levels" (reset all to 1.0 with new zones)
    - "Adjust Zones Only" (keep progression levels, update power ranges)
    - "Ignore" (manual FTP management)
+
+**Next Steps:**
+- Examine full athlete API response object structure
+- Test with different intervals.icu accounts
+- Consider manual FTP entry as workaround
+- Contact intervals.icu support if needed
 
 ---
 
