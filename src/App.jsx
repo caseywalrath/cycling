@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const ZONES = [
   { id: 'endurance', name: 'Endurance', color: '#3B82F6', description: 'Z2: 130-165W' },
@@ -275,6 +276,53 @@ export default function ProgressionTracker() {
       weeklyTSS,
       prevWeeklyTSS,
     };
+  };
+
+  // Calculate weekly hours for chart
+  const calculateWeeklyHours = (history) => {
+    if (!history || history.length === 0) return [];
+
+    // Get date 16 weeks ago
+    const sixteenWeeksAgo = new Date();
+    sixteenWeeksAgo.setDate(sixteenWeeksAgo.getDate() - (16 * 7));
+
+    // Filter to last 16 weeks
+    const recentWorkouts = history.filter(w => new Date(w.date) >= sixteenWeeksAgo);
+
+    // Group by week
+    const weeklyData = {};
+    recentWorkouts.forEach(workout => {
+      const date = new Date(workout.date);
+      // Get Sunday of that week (week starts on Sunday)
+      const sunday = new Date(date);
+      sunday.setDate(date.getDate() - date.getDay());
+      const weekKey = sunday.toISOString().split('T')[0];
+
+      if (!weeklyData[weekKey]) {
+        weeklyData[weekKey] = {
+          weekStart: weekKey,
+          totalMinutes: 0,
+          workouts: 0,
+        };
+      }
+
+      weeklyData[weekKey].totalMinutes += workout.duration || 0;
+      weeklyData[weekKey].workouts += 1;
+    });
+
+    // Convert to array and sort by date
+    const chartData = Object.values(weeklyData)
+      .map(week => ({
+        weekStart: week.weekStart,
+        hours: Math.round((week.totalMinutes / 60) * 10) / 10, // Round to 1 decimal
+        totalMinutes: week.totalMinutes,
+        workouts: week.workouts,
+        // Format label as "Apr 7", "May 12", etc.
+        label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      }))
+      .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
+
+    return chartData;
   };
 
   const generateInsights = (loads, history, levels) => {
@@ -1832,6 +1880,73 @@ Please analyze my current training status and provide personalized insights.`;
                 <div className="text-xs" style={{ color: tsbStatus.color }}>{tsbStatus.label}</div>
               </div>
             </div>
+
+            {/* Weekly Hours Chart */}
+            {(() => {
+              const weeklyData = calculateWeeklyHours(history);
+              const currentWeekHours = weeklyData.length > 0 ? weeklyData[weeklyData.length - 1].hours : 0;
+
+              // Custom tooltip
+              const CustomTooltip = ({ active, payload }) => {
+                if (active && payload && payload.length) {
+                  const data = payload[0].payload;
+                  const hours = Math.floor(data.totalMinutes / 60);
+                  const minutes = data.totalMinutes % 60;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                      <p className="text-gray-300 mb-1">{data.label}</p>
+                      <p className="text-orange-400 font-bold">{hours}h {minutes}m</p>
+                      <p className="text-gray-500 text-xs">{data.workouts} rides</p>
+                    </div>
+                  );
+                }
+                return null;
+              };
+
+              return weeklyData.length > 0 ? (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-medium">Weekly Training Hours</h3>
+                    <span className="text-sm text-gray-400">
+                      This week: <span className="text-orange-400 font-bold">{currentWeekHours}h</span>
+                    </span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <AreaChart data={weeklyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#FB923C" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#FB923C" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="label"
+                        stroke="#9CA3AF"
+                        style={{ fontSize: '12px' }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        stroke="#9CA3AF"
+                        style={{ fontSize: '12px' }}
+                        tickFormatter={(value) => `${value}h`}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="hours"
+                        stroke="#FB923C"
+                        strokeWidth={2}
+                        fillOpacity={1}
+                        fill="url(#colorHours)"
+                        dot={{ fill: '#FB923C', strokeWidth: 2, r: 4 }}
+                        activeDot={{ r: 6, fill: '#FB923C', stroke: '#fff', strokeWidth: 2 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null;
+            })()}
 
             {/* Event/Goal Management */}
             {event.name && (
