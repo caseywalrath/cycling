@@ -1069,6 +1069,25 @@ export default function ProgressionTracker() {
     return diffDays;
   };
 
+  // Delete workout handler
+  const handleDeleteWorkout = (workoutId) => {
+    const workout = history.find(w => w.id === workoutId);
+    if (!workout) return;
+
+    const confirmed = window.confirm(
+      `Delete this workout?\n\n` +
+      `Date: ${workout.date}\n` +
+      `Zone: ${getZoneName(workout.zone)}\n` +
+      `Duration: ${workout.duration} min\n` +
+      `TSS: ${workout.tss}\n\n` +
+      `This action cannot be undone.`
+    );
+
+    if (confirmed) {
+      setHistory(history.filter(w => w.id !== workoutId));
+    }
+  };
+
   const exportData = () => {
     // Include FTP data in export
     const data = JSON.stringify({
@@ -2192,8 +2211,15 @@ Please analyze my current training status and provide personalized insights.`;
             ) : (
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {history.map((entry) => (
-                  <div key={entry.id} className="bg-gray-700 rounded p-3 text-sm">
-                    <div className="flex justify-between mb-2">
+                  <div key={entry.id} className="bg-gray-700 rounded p-3 text-sm relative">
+                    <button
+                      onClick={() => handleDeleteWorkout(entry.id)}
+                      className="absolute top-2 right-2 text-gray-400 hover:text-red-400 transition text-xs px-2 py-1 rounded hover:bg-gray-600"
+                      title="Delete workout"
+                    >
+                      🗑️
+                    </button>
+                    <div className="flex justify-between mb-2 pr-8">
                       <span className="font-medium">{getZoneName(entry.zone)}</span>
                       <span className="text-gray-400">{entry.date}</span>
                     </div>
