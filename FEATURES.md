@@ -50,29 +50,38 @@ This document tracks feature requests, enhancements, and ideas for future develo
 ---
 
 ### 2. Cloud Backup/Sync
-**Priority:** HIGH
+**Priority:** ✅ COMPLETED (Manual) → HIGH (Automation)
 **Complexity:** Medium-High
-**Description:** Sync data across devices (Windows, iPhone) automatically
+**Status:** ✅ Option C implemented (2026-01-26) - Manual sync works great!
+**Description:** Sync data across devices (Windows, iPhone)
 
-**Options:**
+**Current Implementation (Option C - Manual Cloud Sync):**
+- ✅ Enhanced export with timestamped filenames (`casey-rides-backup-2026-01-26.json`)
+- ✅ Includes FTP and eFTP data in export/import
+- ✅ Success messages on import with workout count
+- ✅ "☁️ How to Sync?" modal with step-by-step instructions
+- ✅ Works with Google Drive, Dropbox, iCloud Drive, or any cloud storage
+- ✅ No API keys or backend required
+- ✅ User maintains full control over sync timing
+
+**Future Automation Options:**
 - **Option A: Simple Backend** (Firebase, Supabase)
   - User authentication
   - Real-time sync across devices
+  - Auto-sync on app launch and after each workout
   - Free tier sufficient for single user
+  - Complexity: High, requires backend setup
 
-- **Option B: Google Drive Integration**
-  - Auto-export to Google Drive
+- **Option B: Google Drive API Integration**
+  - Auto-export to Google Drive after each workout
   - Auto-import on app launch
+  - OAuth authentication with Google account
   - No backend needed
+  - Complexity: Medium, requires Google API setup
 
-- **Option C: Manual Cloud Sync**
-  - Export to cloud (Dropbox, Google Drive)
-  - Import from cloud on other device
-  - User manages sync timing
+**Why:** Manual sync enables cross-device use; automation would improve convenience
 
-**Why:** Currently data only exists on one device at a time
-
-**Recommendation:** Start with Option C (manual), upgrade to A or B later
+**Recommendation:** Option C works well; consider Option B for automation if needed later
 
 ---
 
@@ -378,7 +387,55 @@ Header Display:
 
 ---
 
-### 11. Strava Integration Alternative
+### 11. Automated Cloud Sync
+**Priority:** MEDIUM
+**Complexity:** Medium
+**Description:** Automatic backup and sync using Google Drive API
+**Depends On:** ✅ Manual Cloud Sync (Feature #2 - completed)
+
+**Features:**
+- Auto-export to Google Drive after each workout logged
+- Auto-import on app launch (sync latest backup)
+- OAuth authentication with Google account
+- Background sync without user intervention
+- Conflict resolution (choose latest or merge)
+- Sync status indicator in header
+- Manual sync button as backup option
+
+**Implementation:**
+```javascript
+// Google Drive API integration
+1. Set up Google OAuth 2.0 (get client ID)
+2. Request drive.file scope (only app-created files)
+3. After workout logged: uploadToGoogleDrive()
+4. On app load: downloadFromGoogleDrive()
+5. Compare timestamps, sync if newer data available
+```
+
+**Technical Details:**
+- Use Google Drive API REST endpoints
+- Store backups in app-specific folder
+- Keep last 10 backups (auto-cleanup old ones)
+- Sync only when changes detected (compare hash)
+- Show sync status: "Last synced: 2 minutes ago"
+
+**Why:**
+- Eliminates manual export/import steps
+- Always up-to-date across all devices
+- Automatic backups prevent data loss
+- Seamless cross-platform experience
+
+**Tradeoffs:**
+- Requires Google account (most users have one)
+- Initial setup with OAuth (one-time)
+- Slightly more complex than manual sync
+- Depends on Google Drive availability
+
+**Recommendation:** Implement when multiple devices become common use case
+
+---
+
+### 12. Strava Integration Alternative
 **Priority:** MEDIUM
 **Complexity:** High
 **Description:** Work around Strava API limitations
@@ -397,7 +454,7 @@ Header Display:
 
 ## Low Priority / Nice to Have
 
-### 12. Weather Integration
+### 13. Weather Integration
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Log weather conditions with rides
@@ -410,7 +467,7 @@ Header Display:
 
 ---
 
-### 13. Equipment Tracking
+### 14. Equipment Tracking
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Track mileage on bikes and components
@@ -423,7 +480,7 @@ Header Display:
 
 ---
 
-### 14. Nutrition/Hydration Tracking
+### 15. Nutrition/Hydration Tracking
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Log fueling strategy per workout
@@ -436,7 +493,7 @@ Header Display:
 
 ---
 
-### 15. Heart Rate Training
+### 16. Heart Rate Training
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Add HR-based training for riders without power
@@ -449,7 +506,7 @@ Header Display:
 
 ---
 
-### 16. Multi-Sport Support
+### 17. Multi-Sport Support
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Track running, swimming for cross-training
@@ -462,7 +519,7 @@ Header Display:
 
 ---
 
-### 17. Advanced FTP Tracking
+### 18. Advanced FTP Tracking
 **Priority:** LOW
 **Complexity:** Medium
 **Description:** Automatic FTP detection and adjustment
@@ -475,7 +532,7 @@ Header Display:
 
 ---
 
-### 18. Race Day Features
+### 19. Race Day Features
 **Priority:** LOW
 **Complexity:** Low
 **Description:** Tools for event day
@@ -490,18 +547,18 @@ Header Display:
 
 ## Technical Improvements
 
-### 19. Performance Optimizations
+### 20. Performance Optimizations
 - Lazy load history (pagination)
 - Service worker caching improvements
 - Reduce bundle size
 - Database migration (LocalStorage → IndexedDB for large datasets)
 
-### 20. Testing
+### 21. Testing
 - Unit tests for calculations
 - Integration tests for UI
 - E2E tests for critical flows
 
-### 21. Code Refactoring
+### 22. Code Refactoring
 - Break App.jsx into smaller components
 - Add TypeScript for type safety
 - State management library (Zustand/Redux)
