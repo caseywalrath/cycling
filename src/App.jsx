@@ -1898,24 +1898,9 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             )}
 
-            {/* Weekly Summary */}
+            {/* Training Summary */}
             <div className="bg-gray-800 rounded-lg p-4">
               <h3 className="font-medium mb-3">Training Summary</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm mb-4">
-                <div>
-                  <div className="text-gray-400">Last 7 Days</div>
-                  <div className="text-lg font-bold">{loads.weeklyTSS} TSS</div>
-                  <div className="text-gray-500">{last7Days.length} workouts</div>
-                </div>
-                <div>
-                  <div className="text-gray-400">Last 28 Days</div>
-                  <div className="text-lg font-bold">
-                    {last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)} TSS
-                  </div>
-                  <div className="text-gray-500">{last28Days.length} workouts</div>
-                </div>
-              </div>
-              {/* Longest Ride (30 days) */}
               {(() => {
                 const thirtyDaysAgo = new Date();
                 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -1928,21 +1913,49 @@ Please analyze my current training status and provide personalized insights.`;
                   ? outdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, outdoorRides[0])
                   : null;
 
-                return longestRide ? (
-                  <div className="border-t border-gray-700 pt-3">
-                    <div className="text-gray-400 text-sm mb-1">Longest Ride (30 days)</div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <div className="text-xs text-gray-500">Duration</div>
-                        <div className="text-lg font-bold">{longestRide.duration} min</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500">Distance</div>
-                        <div className="text-lg font-bold">{longestRide.distance} mi</div>
-                      </div>
+                return (
+                  <div className="grid grid-cols-4 gap-3 text-xs">
+                    <div>
+                      <div className="text-gray-400 mb-1">7 Days</div>
+                      <div className="text-base font-bold">{loads.weeklyTSS} TSS</div>
+                      <div className="text-gray-500">{last7Days.length} rides</div>
                     </div>
+                    <div>
+                      <div className="text-gray-400 mb-1">28 Days</div>
+                      <div className="text-base font-bold">
+                        {last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)} TSS
+                      </div>
+                      <div className="text-gray-500">{last28Days.length} rides</div>
+                    </div>
+                    {longestRide ? (
+                      <>
+                        <div>
+                          <div className="text-gray-400 mb-1">Longest (30d)</div>
+                          <div className="text-base font-bold">{longestRide.duration} min</div>
+                          <div className="text-gray-500">Duration</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 mb-1">&nbsp;</div>
+                          <div className="text-base font-bold">{longestRide.distance} mi</div>
+                          <div className="text-gray-500">Distance</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <div className="text-gray-400 mb-1">Longest (30d)</div>
+                          <div className="text-base font-bold text-gray-600">--</div>
+                          <div className="text-gray-500">Duration</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 mb-1">&nbsp;</div>
+                          <div className="text-base font-bold text-gray-600">--</div>
+                          <div className="text-gray-500">Distance</div>
+                        </div>
+                      </>
+                    )}
                   </div>
-                ) : null;
+                );
               })()}
             </div>
 
