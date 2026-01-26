@@ -1140,7 +1140,7 @@ Please analyze my current training status and provide personalized insights.`;
         <h1 className="text-xl font-bold mb-1">Casey Rides</h1>
         <p className="text-gray-400 text-sm mb-4">
           FTP: {currentFTP}W
-          {intervalsFTP && intervalsFTP !== currentFTP && (
+          {intervalsFTP && (
             <span className="ml-2">• eFTP: {intervalsFTP}W</span>
           )}
           {' • Event: June 13, 2026'}
