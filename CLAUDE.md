@@ -1,6 +1,6 @@
 # CLAUDE.md - AI Assistant Guide for Cycling Project
 
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-01-26
 **Project:** Cycling
 **Repository:** caseywalrath/cycling
 
@@ -41,8 +41,13 @@ This file serves as a comprehensive guide for AI assistants (like Claude) workin
 - Progression level tracking across 6 training zones
 - Training load metrics (CTL, ATL, TSB)
 - TSS and Intensity Factor calculations
-- Smart training insights and recommendations
-- Export/import workout data
+- Smart training insights and recommendations (11 insight types)
+- intervals.icu API integration for workout sync
+- CSV import with automatic column mapping
+- Event/goal management with countdown and CTL targets
+- Ride type (Indoor/Outdoor) and distance tracking
+- Export/import workout data (JSON and manual cloud sync)
+- Delete workouts with confirmation
 - PWA support for iPhone installation
 - All data stored locally in browser
 
@@ -75,43 +80,72 @@ npm run preview
 ```
 cycling/
 ├── src/
-│   ├── App.jsx              # Main application component (all logic here)
-│   ├── main.jsx             # React entry point
-│   └── index.css            # Global styles with Tailwind directives
+│   ├── App.jsx              # Main application component (~2,300 lines, all logic)
+│   ├── main.jsx             # React entry point (10 lines)
+│   └── index.css            # Global styles with Tailwind + iOS fixes
 ├── public/
 │   ├── pwa-192x192.png      # PWA icon (192x192)
 │   ├── pwa-512x512.png      # PWA icon (512x512)
 │   ├── apple-touch-icon.png # iOS home screen icon
 │   └── vite.svg             # Favicon
-├── index.html               # HTML entry point
+├── index.html               # HTML entry point with PWA meta tags
 ├── vite.config.js           # Vite + PWA configuration
 ├── tailwind.config.js       # Tailwind CSS configuration
 ├── postcss.config.js        # PostCSS configuration
 ├── package.json             # Dependencies and scripts
+├── package-lock.json        # Locked dependency versions
 ├── .gitignore              # Git ignore rules
-├── README.md               # User-facing documentation
-└── CLAUDE.md               # This file (AI assistant guide)
+├── CLAUDE.md               # This file (AI assistant guide)
+├── FEATURES.md             # Feature roadmap and wish list
+└── README.md               # User-facing documentation
 ```
 
 ### Key Files
 
-**src/App.jsx** (Main Component)
-- Single-file React component (~600 lines)
-- Contains all application logic
-- State management with useState
-- LocalStorage for data persistence
+**src/App.jsx** (Main Component - ~2,300 lines)
+- Monolithic single-file React component containing all business logic
+- 36 useState/useEffect/useRef hooks for state management
+- LocalStorage for data persistence (workouts, levels, events, intervals.icu config)
 - Four main tabs: Levels, Dashboard, Log, History
+- Multiple modal systems for sync, import, FTP, events, and post-log summary
 
-**Key Constants:**
-- `ZONES`: Training zone definitions with colors and power ranges
-- `FTP`: Functional Threshold Power (235W - line 22)
-- `STORAGE_KEY`: LocalStorage key for data persistence
+**Key Constants (lines 3-24):**
+- `ZONES`: 6 training zone definitions with colors, power ranges, descriptions
+- `DEFAULT_LEVELS`: Starting progression levels (all 1.0)
+- `STORAGE_KEY`: LocalStorage key for workout data (`cycling-progression-data-v2`)
+- `INTERVALS_CONFIG_KEY`: LocalStorage key for intervals.icu credentials
+- `FTP`: Functional Threshold Power (235W)
+- `START_DATE`: Import filter date (`2024-12-29`)
 
-**Core Functions:**
-- `calculateTSS()`: Training Stress Score calculation
-- `calculateTrainingLoads()`: CTL/ATL/TSB calculations
-- `calculateNewLevel()`: Progression level algorithm
-- `generateInsights()`: AI-like training recommendations
+**Core Calculation Functions:**
+- `calculateTSS()`: Training Stress Score (IF² × duration × 100 / 3600)
+- `calculateIF()`: Intensity Factor (NP / FTP)
+- `calculateTrainingLoads()`: CTL/ATL/TSB with exponential weighted averages
+- `calculateNewLevel()`: Progression algorithm (difficulty + RPE based)
+- `generateInsights()`: 11 different training recommendation types
+
+**API Integration Functions:**
+- `syncFromIntervalsICU()`: Fetches athlete data and workouts from intervals.icu
+- `handleCSVImport()`: Parses CSV with auto column detection
+- `mapWorkoutTypeToZone()`: Maps activity types to training zones
+
+**Data Management Functions:**
+- `exportData()`: Generates timestamped JSON backup
+- `importData()`: Imports JSON files with validation
+- `handlePasteImport()`: Allows raw JSON paste for restoration
+- `copyForAnalysis()`: Exports formatted data for AI analysis
+- `handleDeleteWorkout()`: Removes workout with confirmation
+
+**Event Management Functions:**
+- `handleSaveEvent()`: Save event configuration to localStorage
+- `handleDeleteEvent()`: Delete event with confirmation
+- `getDaysUntilEvent()`: Calculate countdown to event date
+
+**FEATURES.md** (Feature Roadmap)
+- Comprehensive list of 22+ planned features
+- Priority levels (HIGH/MEDIUM/LOW)
+- Implementation status tracking
+- Notes on completed, in-progress, and planned features
 
 ---
 
@@ -137,17 +171,25 @@ cycling/
 - **PostCSS:** Autoprefixer for browser compatibility
 - **Custom CSS:** Minimal custom styles in index.css
 
-#### No Backend
+#### External API Integration
+- **intervals.icu**: Optional sync for importing ride history
+  - Requires Athlete ID and API Key (stored in localStorage)
+  - Fetches: workouts, normalized power, TSS, IF, distance
+  - Maps activity types to training zones automatically
+  - Duplicate detection prevents re-importing
+
+#### No Backend Server
 - This is a pure frontend app
 - All data stored in browser LocalStorage
-- No database or API calls
-- Completely offline-capable once installed
+- intervals.icu API calls made directly from browser
+- Completely offline-capable once installed (cached data only)
 
 #### Browser APIs Used
-- LocalStorage API (data persistence)
+- LocalStorage API (data persistence for workouts, levels, events, config)
 - Clipboard API (copy for analysis feature)
-- File API (import/export workout data)
+- File API (import/export workout data - JSON and CSV)
 - Service Worker (PWA offline support)
+- Fetch API (intervals.icu sync)
 
 ---
 
@@ -156,40 +198,43 @@ cycling/
 ### Setting Up Development Environment
 
 1. **Prerequisites**
-   - Node.js (specify version when determined)
+   - Node.js (v18+ recommended)
    - Git
-   - [Other tools as needed]
+   - npm (comes with Node.js)
 
 2. **Environment Variables**
-   ```bash
-   # Create .env file (update when variables are defined)
-   cp .env.example .env
-   ```
+   - **No environment variables required!**
+   - All configuration is in source code (FTP, zones, etc.)
+   - intervals.icu credentials stored in localStorage (user-provided)
 
 3. **IDE Setup**
    - Recommended: VSCode with extensions:
-     - ESLint
-     - Prettier
-     - TypeScript
-     - [Project-specific extensions]
+     - ESLint (code quality)
+     - Tailwind CSS IntelliSense (class autocomplete)
+     - ES7+ React/Redux/React-Native snippets
 
 ### Development Server
 ```bash
-# Start development server (update when configured)
+# Start development server
 npm run dev
+# Opens at http://localhost:3000
+# Network URL shown for mobile testing
 
 # Build for production
 npm run build
 
-# Run linter
-npm run lint
+# Preview production build
+npm run preview
 
-# Format code
-npm run format
+# Run linter (strict mode, no warnings allowed)
+npm run lint
 ```
 
 ### Hot Reload and Watch Mode
-*Document any special development mode features here*
+- Vite provides instant HMR (Hot Module Replacement)
+- React components update without losing state
+- CSS changes apply immediately
+- Service worker updates require refresh in dev mode
 
 ---
 
@@ -283,50 +328,30 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 ## Testing Strategy
 
-### Testing Philosophy
-- Write tests for critical business logic
-- Aim for high coverage on core features
-- Test user interactions, not implementation details
-- Use test-driven development (TDD) when appropriate
+### Current State
+- **No automated tests implemented yet**
+- Testing is primarily manual via the PWA
+- Future: Consider Vitest for unit tests of calculation functions
 
-### Test Organization
+### Manual Testing Checklist
+- [ ] Workout logging updates levels correctly
+- [ ] CTL/ATL/TSB calculations match expected values
+- [ ] intervals.icu sync imports without duplicates
+- [ ] CSV import parses columns correctly
+- [ ] Export/import preserves all data
+- [ ] PWA installs and works offline
+- [ ] Event countdown displays correctly
+
+### Recommended Test Coverage (Future)
 ```
 tests/
-├── unit/           # Pure function tests, utility tests
-├── integration/    # API tests, service tests
-└── e2e/            # Full user flow tests
-```
-
-### Running Tests
-```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm test -- --watch
-
-# Run tests with coverage
-npm test -- --coverage
-
-# Run specific test file
-npm test path/to/test
-```
-
-### Writing Tests
-
-```typescript
-describe('ComponentName', () => {
-  it('should render correctly', () => {
-    // Arrange
-    const props = { /* ... */ };
-
-    // Act
-    const result = render(<ComponentName {...props} />);
-
-    // Assert
-    expect(result).toBeDefined();
-  });
-});
+├── unit/
+│   ├── calculateTSS.test.js
+│   ├── calculateTrainingLoads.test.js
+│   ├── calculateNewLevel.test.js
+│   └── generateInsights.test.js
+└── integration/
+    └── intervalsICU.test.js
 ```
 
 ---
@@ -517,20 +542,32 @@ npm update
 ### Common Issues
 
 #### Build Failures
-*Document common build issues and solutions*
+- **ESLint errors:** Run `npm run lint` to see issues, fix before build
+- **Missing dependencies:** Delete `node_modules` and `npm install` fresh
+- **Vite cache issues:** Delete `.vite` folder and restart dev server
 
-#### Test Failures
-*Document common test issues and solutions*
+#### intervals.icu Sync Issues
+- **401 Unauthorized:** Check Athlete ID and API Key are correct
+- **No workouts imported:** Check START_DATE in App.jsx (line 24)
+- **Duplicate workouts:** Sync detects duplicates by date - expected behavior
+- **eFTP not showing:** Field path may vary - check console for API response
 
-#### Runtime Errors
-*Document common runtime issues and solutions*
+#### PWA Issues
+- **Not installing:** Must be served over HTTPS (except localhost)
+- **Stale cache:** Force refresh or clear browser cache
+- **iOS issues:** Use Safari only, other browsers don't support PWA
+
+#### Data Issues
+- **Lost data:** Check localStorage in DevTools → Application → Local Storage
+- **Import fails:** Ensure JSON format matches expected structure
+- **CSV parse errors:** Check column headers match expected names
 
 ### Getting Help
 
-- Check documentation in `/docs`
-- Review existing issues in issue tracker
-- Ask team members for guidance
-- Consult this CLAUDE.md file
+- Check [FEATURES.md](./FEATURES.md) for known limitations
+- Review existing issues in GitHub issue tracker
+- Check browser DevTools console for errors
+- Consult this CLAUDE.md file for patterns and conventions
 
 ---
 
@@ -684,13 +721,111 @@ This project implements cycling training concepts inspired by TrainerRoad:
 - Training should peak ~2 weeks before event
 
 ### External APIs and Services
-*Document any external services used (Strava, MapBox, etc.)*
+
+**intervals.icu Integration:**
+- **Authentication:** Athlete ID + API Key (Basic Auth)
+- **Base URL:** `https://intervals.icu/api/v1`
+- **Endpoints Used:**
+  - `GET /athlete/{id}` - Fetch athlete profile (includes eFTP)
+  - `GET /athlete/{id}/activities` - Fetch workout history
+- **Rate Limits:** Not explicitly documented, use responsibly
+- **Data Extracted:** date, type, moving_time, icu_training_load (TSS), icu_intensity, distance
+- **Zone Mapping:** Activity types mapped to zones (Ride→Z2, Tempo→Z3, etc.)
 
 ### Data Models
-*Document key data structures and relationships*
+
+**Workout Object:**
+```javascript
+{
+  id: string,              // UUID for unique identification
+  date: string,            // YYYY-MM-DD format
+  zone: string,            // Zone ID (z2, z3, sweetspot, z4, z5, z6)
+  workoutLevel: number,    // 1-10 difficulty of workout
+  rpe: number,             // 1-10 perceived exertion
+  completed: boolean,      // Whether workout was completed
+  duration: number,        // Minutes
+  normalizedPower: number, // Watts (NP)
+  rideType: string,        // 'Outdoor' or 'Indoor'
+  distance: number,        // Miles
+  notes: string,           // Optional notes
+  tss: number,             // Calculated TSS
+  intensityFactor: number, // NP / FTP
+  previousLevel: number,   // Level before workout
+  newLevel: number,        // Level after workout
+  change: number           // Level change (+/-)
+}
+```
+
+**Event Object:**
+```javascript
+{
+  name: string,      // Event name (e.g., "Gran Fondo Utah")
+  date: string,      // YYYY-MM-DD format
+  distance: number,  // Miles
+  targetCTL: number  // Target fitness level (e.g., 80-100)
+}
+```
+
+**Training Loads Object:**
+```javascript
+{
+  ctl: number,         // 42-day exponential average (fitness)
+  atl: number,         // 7-day exponential average (fatigue)
+  tsb: number,         // CTL - ATL (form/freshness)
+  weeklyTSS: number,   // Current week total
+  prevWeeklyTSS: number // Previous week total
+}
+```
+
+**intervals.icu Config Object:**
+```javascript
+{
+  athleteId: string,  // intervals.icu athlete ID
+  apiKey: string      // API key for authentication
+}
+```
 
 ### Business Logic
-*Document critical business rules and algorithms*
+
+**Progression Level Algorithm:**
+```javascript
+// Base progression calculation
+difficulty = workoutLevel - currentLevel
+baseIncrease = difficulty > 0 ? difficulty * 0.15 : difficulty * 0.05
+
+// RPE adjustment (higher RPE = harder than expected)
+rpeAdjustment = (rpe - 5) * 0.02
+
+// Final change (capped 1.0-10.0)
+change = completed ? baseIncrease + rpeAdjustment : -0.1
+newLevel = clamp(currentLevel + change, 1.0, 10.0)
+```
+
+**Training Load Calculations:**
+```javascript
+// Exponential weighted averages
+CTL_DECAY = 2 / (42 + 1)  // 42-day time constant
+ATL_DECAY = 2 / (7 + 1)   // 7-day time constant
+
+// Daily update
+newCTL = previousCTL + (todayTSS - previousCTL) * CTL_DECAY
+newATL = previousATL + (todayTSS - previousATL) * ATL_DECAY
+TSB = CTL - ATL
+```
+
+**TSS Calculation:**
+```javascript
+TSS = (IF² × duration_seconds × 100) / 3600
+// Where IF = Normalized Power / FTP
+```
+
+**TSB Status Ranges:**
+- `tsb >= 25`: "Fresh" (green)
+- `tsb >= 10`: "Form" (green)
+- `tsb >= -10`: "Neutral" (gray)
+- `tsb >= -25`: "Tired" (orange)
+- `tsb >= -40`: "Fatigued" (orange)
+- `tsb < -40`: "Overreached" (red)
 
 ---
 
@@ -707,7 +842,7 @@ This file should be updated when:
 - New patterns emerge
 - Deployment process changes
 
-**Last Review:** 2026-01-22
+**Last Review:** 2026-01-26
 **Next Review:** When significant changes occur
 
 ---
@@ -715,19 +850,32 @@ This file should be updated when:
 ## Additional Resources
 
 - [Project README](./README.md) - User-facing documentation
-- [Contributing Guide](./CONTRIBUTING.md) - Contribution guidelines
-- [Code of Conduct](./CODE_OF_CONDUCT.md) - Community guidelines
-- [Architecture Docs](./docs/architecture.md) - System architecture
-- [API Docs](./docs/api.md) - API documentation
+- [Feature Roadmap](./FEATURES.md) - Planned features and wish list
+- [intervals.icu API](https://intervals.icu/api) - External API documentation
 
 ---
 
 ## Changelog
 
+### 2026-01-26
+- **Event/Goal Management:** Full CRUD for event configuration with countdown and CTL targets
+- **Ride Type & Distance Tracking:** New fields for Indoor/Outdoor classification and miles
+- **Cloud Sync Guide:** Manual sync documentation via Google Drive/Dropbox/iCloud
+- **Delete Workout:** With confirmation modal
+- **Training Summary Compact:** Single row layout refactor
+- **CLAUDE.md Update:** Comprehensive documentation refresh with data models and API details
+
+### 2026-01-23
+- **CSV Import:** Full CSV support with validation and automatic zone mapping
+- **eFTP Display:** Shows estimated FTP from intervals.icu in header
+- **Interactive FTP Modal:** Options to Recalculate, Adjust Zones, or Ignore FTP changes
+- **Package Lock:** Added for dependency management
+
 ### 2026-01-22
 - Initial creation of CLAUDE.md
+- **intervals.icu Integration:** API sync for ride history import
+- **Full PWA Setup:** Service worker and offline support
 - Established basic structure and guidelines
-- Created template sections for future development
 
 ---
 
