@@ -512,9 +512,17 @@ export default function ProgressionTracker() {
       if (athleteResponse.ok) {
         const athleteData = await athleteResponse.json();
         console.log('Athlete data:', athleteData);
-        console.log('FTP fields:', {
+        console.log('All athlete data field names:', Object.keys(athleteData));
+        console.log('FTP-related fields:', {
           ftp: athleteData.ftp,
           icu_ftp: athleteData.icu_ftp,
+          icu_ftp_delta: athleteData.icu_ftp_delta,
+          avg_watts: athleteData.avg_watts,
+          weighted_avg_watts: athleteData.weighted_avg_watts,
+          power: athleteData.power,
+          threshold_power: athleteData.threshold_power,
+          cp: athleteData.cp,
+          w_prime: athleteData.w_prime,
           currentFTP: currentFTP
         });
 
