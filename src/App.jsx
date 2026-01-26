@@ -497,6 +497,7 @@ export default function ProgressionTracker() {
 
     try {
       // First, fetch athlete data to get current eFTP
+      console.log('=== FETCHING ATHLETE DATA FOR eFTP ===');
       const athleteResponse = await fetch(
         `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}`,
         {
@@ -506,12 +507,23 @@ export default function ProgressionTracker() {
         }
       );
 
+      console.log('Athlete response status:', athleteResponse.status, athleteResponse.ok);
+
       if (athleteResponse.ok) {
         const athleteData = await athleteResponse.json();
+        console.log('Athlete data:', athleteData);
+        console.log('FTP fields:', {
+          ftp: athleteData.ftp,
+          icu_ftp: athleteData.icu_ftp,
+          currentFTP: currentFTP
+        });
+
         const fetchedFTP = athleteData.ftp || athleteData.icu_ftp || currentFTP;
+        console.log('Fetched FTP:', fetchedFTP);
 
         // Store intervals.icu FTP
         setIntervalsFTP(fetchedFTP);
+        console.log('Set intervalsFTP to:', fetchedFTP);
 
         // Check if FTP has increased by 10W or more
         if (fetchedFTP >= currentFTP + 10) {
@@ -520,6 +532,8 @@ export default function ProgressionTracker() {
           setShowFTPModal(true);
           setSyncStatus(`🎉 FTP increase detected: ${currentFTP}W → ${fetchedFTP}W`);
         }
+      } else {
+        console.error('Failed to fetch athlete data:', athleteResponse.status, athleteResponse.statusText);
       }
 
       setSyncStatus('Fetching activities from intervals.icu...');
