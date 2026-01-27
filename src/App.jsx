@@ -512,7 +512,7 @@ export default function ProgressionTracker() {
         'To analyze it, please:\n' +
         '1. Go to intervals.icu\n' +
         '2. Find this ride by date: ' + activityDate + '\n' +
-        '3. Copy the activity ID from the URL (e.g., "i55751783")\n' +
+        '3. Copy the activity ID from the URL (e.g., "i55751783" or just "55751783")\n' +
         '4. Paste it below:\n'
       );
 
@@ -523,9 +523,13 @@ export default function ProgressionTracker() {
     setAnalyzingActivity(activityId);
 
     try {
+      // Ensure activity ID has "i" prefix for API call
+      const apiActivityId = activityId.startsWith('i') ? activityId : `i${activityId}`;
+      console.log('Fetching streams for activity:', apiActivityId);
+
       // Fetch activity streams from intervals.icu
       const response = await fetch(
-        `https://intervals.icu/api/v1/activity/${activityId}/streams.json?types=watts,heartrate`,
+        `https://intervals.icu/api/v1/activity/${apiActivityId}/streams.json?types=watts,heartrate`,
         {
           headers: {
             'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
@@ -534,7 +538,9 @@ export default function ProgressionTracker() {
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch activity streams');
+        const errorText = await response.text();
+        console.error('intervals.icu API error:', response.status, errorText);
+        throw new Error(`Failed to fetch activity streams (${response.status}): ${errorText.substring(0, 100)}`);
       }
 
       const streams = await response.json();
