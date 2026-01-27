@@ -759,6 +759,120 @@ export default function ProgressionTracker() {
       });
     }
 
+    // Longest ride analysis
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentOutdoorRides = history.filter(w =>
+      new Date(w.date) >= thirtyDaysAgo &&
+      w.rideType === 'Outdoor' &&
+      w.distance > 0
+    );
+    if (recentOutdoorRides.length > 0) {
+      const longestRide = recentOutdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, recentOutdoorRides[0]);
+      if (longestRide.distance >= 50) {
+        insights.push({
+          type: 'positive',
+          message: `Longest ride in last 30 days: ${longestRide.distance}mi. Strong endurance building.`,
+        });
+      } else if (longestRide.distance < 30 && ctl > 50) {
+        insights.push({
+          type: 'info',
+          message: `Longest ride: ${longestRide.distance}mi. Consider adding longer rides for event prep.`,
+        });
+      }
+    }
+
+    // Weekly hours analysis
+    const last7DaysWorkouts = history.filter(w => {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return new Date(w.date) >= weekAgo;
+    });
+    const prev7DaysWorkouts = history.filter(w => {
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return new Date(w.date) >= twoWeeksAgo && new Date(w.date) < weekAgo;
+    });
+
+    const thisWeekHours = last7DaysWorkouts.reduce((sum, w) => sum + w.duration, 0) / 60;
+    const prevWeekHours = prev7DaysWorkouts.reduce((sum, w) => sum + w.duration, 0) / 60;
+
+    if (thisWeekHours >= 8) {
+      insights.push({
+        type: 'positive',
+        message: `${thisWeekHours.toFixed(1)} hours this week. Solid training volume.`,
+      });
+    } else if (thisWeekHours < 5 && ctl > 40) {
+      insights.push({
+        type: 'caution',
+        message: `${thisWeekHours.toFixed(1)} hours this week. Volume low for current fitness level.`,
+      });
+    }
+
+    // Ride frequency comparison
+    if (prev7DaysWorkouts.length > 0) {
+      const rideCountChange = last7DaysWorkouts.length - prev7DaysWorkouts.length;
+      if (rideCountChange >= 2) {
+        insights.push({
+          type: 'positive',
+          message: `${last7DaysWorkouts.length} rides this week (up from ${prev7DaysWorkouts.length}). Great consistency increase.`,
+        });
+      } else if (rideCountChange <= -2 && last7DaysWorkouts.length < 3) {
+        insights.push({
+          type: 'caution',
+          message: `${last7DaysWorkouts.length} rides this week (down from ${prev7DaysWorkouts.length}). Consistency matters.`,
+        });
+      }
+    }
+
+    // Indoor vs outdoor composition
+    if (last14Days.length >= 5) {
+      const indoorCount = last14Days.filter(w => w.rideType === 'Indoor').length;
+      const outdoorCount = last14Days.filter(w => w.rideType === 'Outdoor').length;
+      const indoorPct = (indoorCount / last14Days.length) * 100;
+
+      if (indoorPct >= 75) {
+        insights.push({
+          type: 'info',
+          message: `${Math.round(indoorPct)}% indoor rides recently. Consider outdoor variety for skill work.`,
+        });
+      } else if (outdoorCount >= 8) {
+        insights.push({
+          type: 'positive',
+          message: `${outdoorCount} outdoor rides in last 14 days. Great outdoor engagement.`,
+        });
+      }
+    }
+
+    // Consecutive days pattern
+    if (history.length >= 7) {
+      const sortedRecent = [...history].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
+      let consecutiveDays = 1;
+      let maxConsecutive = 1;
+
+      for (let i = 0; i < sortedRecent.length - 1; i++) {
+        const current = new Date(sortedRecent[i].date);
+        const next = new Date(sortedRecent[i + 1].date);
+        const daysDiff = Math.round((current - next) / (1000 * 60 * 60 * 24));
+
+        if (daysDiff === 1) {
+          consecutiveDays++;
+          maxConsecutive = Math.max(maxConsecutive, consecutiveDays);
+        } else {
+          consecutiveDays = 1;
+        }
+      }
+
+      if (maxConsecutive >= 4) {
+        insights.push({
+          type: 'caution',
+          message: `${maxConsecutive} consecutive training days detected. Recovery days prevent overtraining.`,
+        });
+      }
+    }
+
     return insights;
   };
 
@@ -1493,12 +1607,14 @@ export default function ProgressionTracker() {
   };
 
   const exportData = () => {
-    // Include FTP data in export
+    // Include all user data in export
     const data = JSON.stringify({
       levels,
       history,
       ftp: currentFTP,
       intervalsFTP: intervalsFTP,
+      event,
+      userProfile,
       exportedAt: new Date().toISOString()
     }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -1527,8 +1643,9 @@ export default function ProgressionTracker() {
           // Import FTP data if available
           if (parsed.ftp) setCurrentFTP(parsed.ftp);
           if (parsed.intervalsFTP) setIntervalsFTP(parsed.intervalsFTP);
-          // Import VO2max data if available
+          // Import user profile and event if available
           if (parsed.userProfile) setUserProfile(parsed.userProfile);
+          if (parsed.event) setEvent(parsed.event);
           if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
 
           alert(`✓ Data imported successfully!\n${parsed.history?.length || 0} workouts restored.`);
@@ -2343,6 +2460,30 @@ Please analyze my current training status and provide personalized insights.`;
                 </div>
               </div>
             ))}
+
+            {/* Reset Levels Button */}
+            <div className="pt-4 border-t border-gray-700">
+              <button
+                onClick={() => {
+                  if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
+                    const resetLevels = {
+                      endurance: 1.0,
+                      tempo: 1.0,
+                      sweetspot: 1.0,
+                      threshold: 1.0,
+                      vo2max: 1.0,
+                      anaerobic: 1.0,
+                    };
+                    setLevels(resetLevels);
+                    setDisplayLevels(resetLevels);
+                    alert('✓ All progression levels reset to 1.0');
+                  }
+                }}
+                className="w-full bg-gray-700 hover:bg-red-900/30 text-gray-400 hover:text-red-400 px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-red-500/30"
+              >
+                Reset Levels
+              </button>
+            </div>
           </div>
         )}
 
@@ -2690,7 +2831,7 @@ Please analyze my current training status and provide personalized insights.`;
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
-                  Workout Level: {formData.workoutLevel}
+                  Expected RPE: {formData.workoutLevel}
                 </label>
                 <input
                   type="range"
@@ -2708,7 +2849,7 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
-                  RPE: {formData.rpe}
+                  Actual RPE: {formData.rpe}
                 </label>
                 <input
                   type="range"
@@ -2720,7 +2861,7 @@ Please analyze my current training status and provide personalized insights.`;
                 />
                 <div className="flex justify-between text-xs text-gray-500">
                   <span>Easy</span>
-                  <span>Maximal</span>
+                  <span>Hard</span>
                 </div>
               </div>
             </div>
@@ -2773,14 +2914,31 @@ Please analyze my current training status and provide personalized insights.`;
                     >
                       🗑️
                     </button>
-                    <div className="flex justify-between mb-2 pr-8">
-                      <span className="font-medium">{getZoneName(entry.zone)}</span>
-                      <span className="text-gray-400">{entry.date}</span>
+
+                    {/* Title row: Name - Zone Classification • ID */}
+                    <div className="flex justify-between items-start mb-2 pr-8">
+                      <div className="flex-1">
+                        <div className="font-medium">
+                          {entry.notes || 'Workout'} - {getZoneName(entry.zone)}
+                          {entry.intervalsId && (
+                            <span className="text-gray-500 text-xs font-mono ml-2">
+                              • {entry.intervalsId}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-gray-400 text-xs">{entry.date}</div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 text-xs mb-2">
+
+                    {/* Stats grid with Distance added */}
+                    <div className="grid grid-cols-5 gap-2 text-xs mb-2">
                       <div>
                         <span className="text-gray-400">Duration</span>
                         <div className="font-mono">{entry.duration}min</div>
+                      </div>
+                      <div>
+                        <span className="text-gray-400">Distance</span>
+                        <div className="font-mono">{entry.distance > 0 ? `${entry.distance}mi` : '—'}</div>
                       </div>
                       <div>
                         <span className="text-gray-400">NP</span>
@@ -2795,21 +2953,14 @@ Please analyze my current training status and provide personalized insights.`;
                         <div className="font-mono">{entry.intensityFactor?.toFixed(2)}</div>
                       </div>
                     </div>
+
+                    {/* Level changes */}
                     <div className="flex justify-between text-xs">
                       <span>Level {entry.workoutLevel} • RPE {entry.rpe}</span>
                       <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
                         {entry.previousLevel.toFixed(1)} → {entry.newLevel.toFixed(1)} ({formatChange(entry.change)})
                       </span>
                     </div>
-                    {entry.notes && <p className="text-gray-400 mt-2 text-xs">{entry.notes}</p>}
-
-                    {/* intervals.icu ID display - discrete at bottom */}
-                    {entry.intervalsId && (
-                      <p className="text-gray-500 mt-1 text-xs font-mono opacity-60">
-                        ID: {entry.intervalsId}
-                      </p>
-                    )}
-
                   </div>
                 ))}
               </div>
@@ -2823,10 +2974,10 @@ Please analyze my current training status and provide personalized insights.`;
             onClick={exportData}
             className="text-gray-400 hover:text-gray-300 transition"
           >
-            Export Data
+            Export
           </button>
           <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
-            Import File
+            Import
             <input type="file" accept=".json" onChange={importData} className="hidden" />
           </label>
           <button
