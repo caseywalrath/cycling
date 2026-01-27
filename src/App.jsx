@@ -37,6 +37,7 @@ export default function ProgressionTracker() {
   const [lastLoggedWorkout, setLastLoggedWorkout] = useState(null);
   const [recentChanges, setRecentChanges] = useState({});
   const [animatingZone, setAnimatingZone] = useState(null);
+  const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours', 'tss', or 'elevation'
   const animationRef = useRef(null);
 
   // intervals.icu integration state
@@ -2686,12 +2687,24 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             </div>
 
-            {/* Weekly TSS Chart */}
+            {/* Consolidated Weekly Charts */}
             {(() => {
               const weeklyTSSData = calculateWeeklyTSS(history);
-              const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
+              const weeklyHoursData = calculateWeeklyHours(history);
+              const weeklyElevationData = calculateWeeklyElevation(history);
 
-              // Custom tooltip for TSS
+              const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
+              const currentWeekHours = weeklyHoursData.length > 0 ? weeklyHoursData[weeklyHoursData.length - 1].hours : 0;
+              const currentWeekElevation = weeklyElevationData.length > 0
+                ? weeklyElevationData[weeklyElevationData.length - 1].elevation
+                : 0;
+
+              // Check if any data exists
+              const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || weeklyElevationData.length > 0;
+
+              if (!hasData) return null;
+
+              // Tooltips
               const TSSTooltip = ({ active, payload }) => {
                 if (active && payload && payload.length) {
                   const data = payload[0].payload;
@@ -2706,57 +2719,7 @@ Please analyze my current training status and provide personalized insights.`;
                 return null;
               };
 
-              return weeklyTSSData.length > 0 ? (
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-medium">Weekly TSS</h3>
-                    <span className="text-sm text-gray-400">
-                      This week: <span className="text-blue-400 font-bold">{currentWeekTSS}</span>
-                    </span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={weeklyTSSData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorTSS" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis
-                        dataKey="label"
-                        stroke="#9CA3AF"
-                        style={{ fontSize: '12px' }}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        stroke="#9CA3AF"
-                        style={{ fontSize: '12px' }}
-                      />
-                      <Tooltip content={<TSSTooltip />} />
-                      <Area
-                        type="monotone"
-                        dataKey="tss"
-                        stroke="#3B82F6"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill="url(#colorTSS)"
-                        dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
-                        activeDot={{ r: 6, fill: '#3B82F6', stroke: '#fff', strokeWidth: 2 }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : null;
-            })()}
-
-            {/* Weekly Hours Chart */}
-            {(() => {
-              const weeklyData = calculateWeeklyHours(history);
-              const currentWeekHours = weeklyData.length > 0 ? weeklyData[weeklyData.length - 1].hours : 0;
-
-              // Custom tooltip
-              const CustomTooltip = ({ active, payload }) => {
+              const HoursTooltip = ({ active, payload }) => {
                 if (active && payload && payload.length) {
                   const data = payload[0].payload;
                   const hours = Math.floor(data.totalMinutes / 60);
@@ -2772,60 +2735,7 @@ Please analyze my current training status and provide personalized insights.`;
                 return null;
               };
 
-              return weeklyData.length > 0 ? (
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-medium">Weekly Training Hours</h3>
-                    <span className="text-sm text-gray-400">
-                      This week: <span className="text-orange-400 font-bold">{currentWeekHours}h</span>
-                    </span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={weeklyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#FB923C" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#FB923C" stopOpacity={0.1}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis
-                        dataKey="label"
-                        stroke="#9CA3AF"
-                        style={{ fontSize: '12px' }}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        stroke="#9CA3AF"
-                        style={{ fontSize: '12px' }}
-                        tickFormatter={(value) => `${value}h`}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Area
-                        type="monotone"
-                        dataKey="hours"
-                        stroke="#FB923C"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill="url(#colorHours)"
-                        dot={{ fill: '#FB923C', strokeWidth: 2, r: 4 }}
-                        activeDot={{ r: 6, fill: '#FB923C', stroke: '#fff', strokeWidth: 2 }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : null;
-            })()}
-
-            {/* Weekly Elevation Gained */}
-            {(() => {
-              const weeklyElevationData = calculateWeeklyElevation(history);
-              const currentWeekElevation = weeklyElevationData.length > 0
-                ? weeklyElevationData[weeklyElevationData.length - 1].elevation
-                : 0;
-
-              // Custom tooltip
-              const CustomTooltip = ({ active, payload }) => {
+              const ElevationTooltip = ({ active, payload }) => {
                 if (active && payload && payload.length) {
                   const data = payload[0].payload;
                   return (
@@ -2839,49 +2749,177 @@ Please analyze my current training status and provide personalized insights.`;
                 return null;
               };
 
-              return weeklyElevationData.length > 0 ? (
+              return (
                 <div className="bg-gray-800 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-medium">Weekly Elevation Gained</h3>
-                    <span className="text-sm text-gray-400">
-                      This week: <span className="text-green-400 font-bold">{currentWeekElevation.toLocaleString()} ft</span>
-                    </span>
+                  {/* Tab Buttons */}
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => setWeeklyChartView('hours')}
+                      className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        weeklyChartView === 'hours'
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      Hours
+                    </button>
+                    <button
+                      onClick={() => setWeeklyChartView('tss')}
+                      className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        weeklyChartView === 'tss'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      TSS
+                    </button>
+                    <button
+                      onClick={() => setWeeklyChartView('elevation')}
+                      className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        weeklyChartView === 'elevation'
+                          ? 'bg-green-500 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      Elevation
+                    </button>
                   </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={weeklyElevationData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorElevation" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#22C55E" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#22C55E" stopOpacity={0.1}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis
-                        dataKey="label"
-                        stroke="#9CA3AF"
-                        style={{ fontSize: '12px' }}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        stroke="#9CA3AF"
-                        style={{ fontSize: '12px' }}
-                        tickFormatter={(value) => `${value.toLocaleString()}ft`}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Area
-                        type="monotone"
-                        dataKey="elevation"
-                        stroke="#22C55E"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill="url(#colorElevation)"
-                        dot={{ fill: '#22C55E', strokeWidth: 2, r: 4 }}
-                        activeDot={{ r: 6, fill: '#22C55E', stroke: '#fff', strokeWidth: 2 }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
+
+                  {/* Training Hours Chart */}
+                  {weeklyChartView === 'hours' && weeklyHoursData.length > 0 && (
+                    <>
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium">Weekly Training Hours</h3>
+                        <span className="text-sm text-gray-400">
+                          This week: <span className="text-orange-400 font-bold">{currentWeekHours}h</span>
+                        </span>
+                      </div>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <AreaChart data={weeklyHoursData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#FB923C" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#FB923C" stopOpacity={0.1}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            tickFormatter={(value) => `${value}h`}
+                          />
+                          <Tooltip content={<HoursTooltip />} />
+                          <Area
+                            type="monotone"
+                            dataKey="hours"
+                            stroke="#FB923C"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#colorHours)"
+                            dot={{ fill: '#FB923C', strokeWidth: 2, r: 4 }}
+                            activeDot={{ r: 6, fill: '#FB923C', stroke: '#fff', strokeWidth: 2 }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </>
+                  )}
+
+                  {/* TSS Chart */}
+                  {weeklyChartView === 'tss' && weeklyTSSData.length > 0 && (
+                    <>
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium">Weekly TSS</h3>
+                        <span className="text-sm text-gray-400">
+                          This week: <span className="text-blue-400 font-bold">{currentWeekTSS}</span>
+                        </span>
+                      </div>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <AreaChart data={weeklyTSSData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorTSS" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                          />
+                          <Tooltip content={<TSSTooltip />} />
+                          <Area
+                            type="monotone"
+                            dataKey="tss"
+                            stroke="#3B82F6"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#colorTSS)"
+                            dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
+                            activeDot={{ r: 6, fill: '#3B82F6', stroke: '#fff', strokeWidth: 2 }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </>
+                  )}
+
+                  {/* Elevation Chart */}
+                  {weeklyChartView === 'elevation' && weeklyElevationData.length > 0 && (
+                    <>
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium">Weekly Elevation Gained</h3>
+                        <span className="text-sm text-gray-400">
+                          This week: <span className="text-green-400 font-bold">{currentWeekElevation.toLocaleString()} ft</span>
+                        </span>
+                      </div>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <AreaChart data={weeklyElevationData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorElevation" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#22C55E" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#22C55E" stopOpacity={0.1}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            tickFormatter={(value) => `${value.toLocaleString()}ft`}
+                          />
+                          <Tooltip content={<ElevationTooltip />} />
+                          <Area
+                            type="monotone"
+                            dataKey="elevation"
+                            stroke="#22C55E"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#colorElevation)"
+                            dot={{ fill: '#22C55E', strokeWidth: 2, r: 4 }}
+                            activeDot={{ r: 6, fill: '#22C55E', stroke: '#fff', strokeWidth: 2 }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </>
+                  )}
                 </div>
-              ) : null;
+              );
             })()}
 
             {/* Training Summary */}
