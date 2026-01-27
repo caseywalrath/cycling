@@ -323,10 +323,10 @@ export default function ProgressionTracker() {
     const weeklyData = {};
     recentWorkouts.forEach(workout => {
       const date = new Date(workout.date);
-      // Get Sunday of that week (week starts on Sunday)
-      const sunday = new Date(date);
-      sunday.setDate(date.getDate() - date.getDay());
-      const weekKey = sunday.toISOString().split('T')[0];
+      // Get Monday of that week (week starts on Monday, Strava convention)
+      const monday = new Date(date);
+      monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+      const weekKey = monday.toISOString().split('T')[0];
 
       if (!weeklyData[weekKey]) {
         weeklyData[weekKey] = {
@@ -369,10 +369,10 @@ export default function ProgressionTracker() {
     const weeklyData = {};
     recentWorkouts.forEach(workout => {
       const date = new Date(workout.date);
-      // Get Sunday of that week (week starts on Sunday)
-      const sunday = new Date(date);
-      sunday.setDate(date.getDate() - date.getDay());
-      const weekKey = sunday.toISOString().split('T')[0];
+      // Get Monday of that week (week starts on Monday, Strava convention)
+      const monday = new Date(date);
+      monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+      const weekKey = monday.toISOString().split('T')[0];
 
       if (!weeklyData[weekKey]) {
         weeklyData[weekKey] = {
