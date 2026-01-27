@@ -28,7 +28,8 @@ export default function ProgressionTracker() {
   const [levels, setLevels] = useState(DEFAULT_LEVELS);
   const [displayLevels, setDisplayLevels] = useState(DEFAULT_LEVELS);
   const [history, setHistory] = useState([]);
-  const [activeTab, setActiveTab] = useState('levels');
+  const [showLogRideModal, setShowLogRideModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteContent, setPasteContent] = useState('');
   const [importError, setImportError] = useState('');
@@ -1720,7 +1721,7 @@ export default function ProgressionTracker() {
 
   const closePostLogSummary = () => {
     setShowPostLogSummary(false);
-    setActiveTab('levels');
+    setShowLogRideModal(false);
 
     // Trigger animation after modal closes
     if (lastLoggedWorkout) {
@@ -1970,10 +1971,16 @@ Please analyze my current training status and provide personalized insights.`;
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-2xl mx-auto">
-        {/* Header with Profile and Event buttons */}
+        {/* Header with Profile, Event, and Log Ride buttons */}
         <div className="flex justify-between items-start mb-1">
           <h1 className="text-xl font-bold">Casey Rides</h1>
           <div className="flex gap-2">
+            <button
+              onClick={() => setShowLogRideModal(true)}
+              className="text-sm px-3 py-1 rounded bg-green-600 hover:bg-green-700 transition font-medium"
+            >
+              Log Ride
+            </button>
             <button
               onClick={() => {
                 setEventFormData(event);
@@ -1998,28 +2005,6 @@ Please analyze my current training status and provide personalized insights.`;
             return daysToEvent !== null ? ` • Days to Event: ${daysToEvent}` : '';
           })()}
         </p>
-
-        {/* Tabs */}
-        <div className="flex gap-1 mb-4 bg-gray-800 rounded-lg p-1">
-          {[
-            { id: 'levels', label: 'Levels' },
-            { id: 'dashboard', label: 'Dashboard' },
-            { id: 'log', label: 'Log Ride' },
-            { id: 'history', label: 'History' },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition ${
-                activeTab === tab.id
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
 
         {/* Post-Log Summary Modal */}
         {showPostLogSummary && lastLoggedWorkout && (
@@ -2594,9 +2579,32 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
-        {/* Levels Tab */}
-        {activeTab === 'levels' && (
-          <div className="space-y-4">
+        {/* Progression Levels */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-medium">Progression Levels</h3>
+            <button
+              onClick={() => {
+                if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
+                  const resetLevels = {
+                    endurance: 1.0,
+                    tempo: 1.0,
+                    sweetspot: 1.0,
+                    threshold: 1.0,
+                    vo2max: 1.0,
+                    anaerobic: 1.0,
+                  };
+                  setLevels(resetLevels);
+                  setDisplayLevels(resetLevels);
+                  alert('✓ All progression levels reset to 1.0');
+                }
+              }}
+              className="text-xs text-gray-400 hover:text-red-400 transition"
+            >
+              Reset
+            </button>
+          </div>
+          <div className="space-y-3">
             {ZONES.map((zone) => (
               <div key={zone.id}>
                 <div className="flex justify-between text-sm mb-1">
@@ -2636,36 +2644,11 @@ Please analyze my current training status and provide personalized insights.`;
                 </div>
               </div>
             ))}
-
-            {/* Reset Levels Button */}
-            <div className="pt-4 border-t border-gray-700">
-              <button
-                onClick={() => {
-                  if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
-                    const resetLevels = {
-                      endurance: 1.0,
-                      tempo: 1.0,
-                      sweetspot: 1.0,
-                      threshold: 1.0,
-                      vo2max: 1.0,
-                      anaerobic: 1.0,
-                    };
-                    setLevels(resetLevels);
-                    setDisplayLevels(resetLevels);
-                    alert('✓ All progression levels reset to 1.0');
-                  }
-                }}
-                className="w-full bg-gray-700 hover:bg-red-900/30 text-gray-400 hover:text-red-400 px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-red-500/30"
-              >
-                Reset Levels
-              </button>
-            </div>
           </div>
-        )}
+        </div>
 
-        {/* Dashboard Tab */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-4">
+        {/* Dashboard Content */}
+        <div className="space-y-4">
             {/* Training Load Cards */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-gray-800 rounded-lg p-3">
@@ -3035,7 +3018,15 @@ Please analyze my current training status and provide personalized insights.`;
 
             {/* Recent Workouts Mini Table */}
             <div className="bg-gray-800 rounded-lg p-4">
-              <h3 className="font-medium mb-3">Recent Workouts</h3>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-medium">Recent Workouts</h3>
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  className="text-sm text-blue-400 hover:text-blue-300 transition"
+                >
+                  Ride History →
+                </button>
+              </div>
               {history.length === 0 ? (
                 <p className="text-gray-400 text-sm">No workouts logged yet.</p>
               ) : (
@@ -3074,12 +3065,20 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             </div>
           </div>
-        )}
 
-        {/* Log Tab */}
-        {activeTab === 'log' && (
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h2 className="font-bold mb-4">Log Workout</h2>
+        {/* Log Ride Modal */}
+        {showLogRideModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="font-bold">Log Workout</h2>
+                <button
+                  onClick={() => setShowLogRideModal(false)}
+                  className="text-gray-400 hover:text-white transition"
+                >
+                  ✕
+                </button>
+              </div>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
@@ -3254,13 +3253,23 @@ Please analyze my current training status and provide personalized insights.`;
             >
               Save Workout
             </button>
+            </div>
           </div>
         )}
 
-        {/* History Tab */}
-        {activeTab === 'history' && (
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h2 className="font-bold mb-4">Workout History</h2>
+        {/* History Modal */}
+        {showHistoryModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="font-bold">Workout History</h2>
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  className="text-gray-400 hover:text-white transition"
+                >
+                  ✕
+                </button>
+              </div>
             {history.length === 0 ? (
               <p className="text-gray-400 text-sm">No workouts logged yet.</p>
             ) : (
@@ -3338,6 +3347,7 @@ Please analyze my current training status and provide personalized insights.`;
                 ))}
               </div>
             )}
+            </div>
           </div>
         )}
 
