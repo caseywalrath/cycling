@@ -1517,7 +1517,10 @@ export default function ProgressionTracker() {
       const typeIdx = headers.findIndex(h => h.toLowerCase() === 'type');
       const distanceIdx = headers.findIndex(h => h.toLowerCase().includes('distance'));
       const idIdx = headers.findIndex(h => h.toLowerCase() === 'id');
-      const elevationIdx = headers.findIndex(h => h.toLowerCase().includes('elevation') && h.toLowerCase().includes('gain'));
+      const elevationIdx = headers.findIndex(h =>
+        (h.toLowerCase().includes('elevation') && h.toLowerCase().includes('gain')) ||
+        h.toLowerCase() === 'climbing'
+      );
       const eftpIdx = headers.findIndex(h => h.toLowerCase().includes('eftp') || h.toLowerCase() === 'activity eftp');
 
       console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx, idIdx, elevationIdx, eftpIdx });
