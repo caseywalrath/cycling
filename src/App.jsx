@@ -355,6 +355,51 @@ export default function ProgressionTracker() {
     return chartData;
   };
 
+  const calculateWeeklyTSS = (history) => {
+    if (!history || history.length === 0) return [];
+
+    // Get date 20 weeks ago
+    const twentyWeeksAgo = new Date();
+    twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
+
+    // Filter to last 20 weeks
+    const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
+
+    // Group by week
+    const weeklyData = {};
+    recentWorkouts.forEach(workout => {
+      const date = new Date(workout.date);
+      // Get Sunday of that week (week starts on Sunday)
+      const sunday = new Date(date);
+      sunday.setDate(date.getDate() - date.getDay());
+      const weekKey = sunday.toISOString().split('T')[0];
+
+      if (!weeklyData[weekKey]) {
+        weeklyData[weekKey] = {
+          weekStart: weekKey,
+          totalTSS: 0,
+          workouts: 0,
+        };
+      }
+
+      weeklyData[weekKey].totalTSS += workout.tss || 0;
+      weeklyData[weekKey].workouts += 1;
+    });
+
+    // Convert to array and sort by date
+    const chartData = Object.values(weeklyData)
+      .map(week => ({
+        weekStart: week.weekStart,
+        tss: Math.round(week.totalTSS), // Round to integer
+        workouts: week.workouts,
+        // Format label as "Apr 7", "May 12", etc.
+        label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      }))
+      .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
+
+    return chartData;
+  };
+
   // VO2max Calculation Functions
   const estimateVO2FromPower = (powerWatts, weightKg) => {
     // ACSM metabolic equation for cycling
@@ -2510,6 +2555,70 @@ Please analyze my current training status and provide personalized insights.`;
                 <div className="text-xs" style={{ color: tsbStatus.color }}>{tsbStatus.label}</div>
               </div>
             </div>
+
+            {/* Weekly TSS Chart */}
+            {(() => {
+              const weeklyTSSData = calculateWeeklyTSS(history);
+              const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
+
+              // Custom tooltip for TSS
+              const TSSTooltip = ({ active, payload }) => {
+                if (active && payload && payload.length) {
+                  const data = payload[0].payload;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                      <p className="text-gray-300 mb-1">{data.label}</p>
+                      <p className="text-blue-400 font-bold">{data.tss} TSS</p>
+                      <p className="text-gray-500 text-xs">{data.workouts} rides</p>
+                    </div>
+                  );
+                }
+                return null;
+              };
+
+              return weeklyTSSData.length > 0 ? (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-medium">Weekly TSS</h3>
+                    <span className="text-sm text-gray-400">
+                      This week: <span className="text-blue-400 font-bold">{currentWeekTSS}</span>
+                    </span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <AreaChart data={weeklyTSSData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorTSS" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="label"
+                        stroke="#9CA3AF"
+                        style={{ fontSize: '12px' }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        stroke="#9CA3AF"
+                        style={{ fontSize: '12px' }}
+                      />
+                      <Tooltip content={<TSSTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="tss"
+                        stroke="#3B82F6"
+                        strokeWidth={2}
+                        fillOpacity={1}
+                        fill="url(#colorTSS)"
+                        dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
+                        activeDot={{ r: 6, fill: '#3B82F6', stroke: '#fff', strokeWidth: 2 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null;
+            })()}
 
             {/* Weekly Hours Chart */}
             {(() => {
