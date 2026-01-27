@@ -1521,7 +1521,9 @@ export default function ProgressionTracker() {
         (h.toLowerCase().includes('elevation') && h.toLowerCase().includes('gain')) ||
         h.toLowerCase() === 'climbing'
       );
-      const eftpIdx = headers.findIndex(h => h.toLowerCase().includes('eftp') || h.toLowerCase() === 'activity eftp');
+      const eftpIdx = headers.findIndex(h =>
+        h.toLowerCase() === 'eftp' && !h.toLowerCase().includes('activity')
+      );
 
       console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx, idIdx, elevationIdx, eftpIdx });
       console.log('Detected delimiter:', delimiter === '\t' ? 'tab' : 'comma');
