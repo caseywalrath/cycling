@@ -97,6 +97,7 @@ export default function ProgressionTracker() {
     normalizedPower: 150,
     rideType: 'Outdoor', // 'Outdoor' or 'Indoor'
     distance: 0, // miles
+    elevation: 0, // feet
     notes: '',
   });
 
@@ -391,6 +392,51 @@ export default function ProgressionTracker() {
       .map(week => ({
         weekStart: week.weekStart,
         tss: Math.round(week.totalTSS), // Round to integer
+        workouts: week.workouts,
+        // Format label as "Apr 7", "May 12", etc.
+        label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      }))
+      .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
+
+    return chartData;
+  };
+
+  const calculateWeeklyElevation = (history) => {
+    if (!history || history.length === 0) return [];
+
+    // Get date 20 weeks ago
+    const twentyWeeksAgo = new Date();
+    twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
+
+    // Filter to last 20 weeks
+    const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
+
+    // Group by week
+    const weeklyData = {};
+    recentWorkouts.forEach(workout => {
+      const date = new Date(workout.date);
+      // Get Monday of that week (week starts on Monday, Strava convention)
+      const monday = new Date(date);
+      monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+      const weekKey = monday.toISOString().split('T')[0];
+
+      if (!weeklyData[weekKey]) {
+        weeklyData[weekKey] = {
+          weekStart: weekKey,
+          totalElevation: 0,
+          workouts: 0,
+        };
+      }
+
+      weeklyData[weekKey].totalElevation += workout.elevation || 0;
+      weeklyData[weekKey].workouts += 1;
+    });
+
+    // Convert to array and sort by date
+    const chartData = Object.values(weeklyData)
+      .map(week => ({
+        weekStart: week.weekStart,
+        elevation: Math.round(week.totalElevation), // Round to integer
         workouts: week.workouts,
         // Format label as "Apr 7", "May 12", etc.
         label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -918,6 +964,68 @@ export default function ProgressionTracker() {
       }
     }
 
+    // Elevation gain analysis
+    const last7DaysElevation = last7DaysWorkouts.reduce((sum, w) => sum + (w.elevation || 0), 0);
+    const prev7DaysElevation = prev7DaysWorkouts.reduce((sum, w) => sum + (w.elevation || 0), 0);
+
+    // Big climbs detection
+    const bigClimbs = last14Days.filter(w => w.elevation > 2999);
+    if (bigClimbs.length > 0) {
+      insights.push({
+        type: 'positive',
+        message: `${bigClimbs.length} big climb${bigClimbs.length > 1 ? 's' : ''} (>3000ft) in last 14 days. Building climbing strength.`,
+      });
+    }
+
+    // Long rides detection
+    const longRides = last14Days.filter(w => w.duration > 180);
+    if (longRides.length > 0) {
+      insights.push({
+        type: 'positive',
+        message: `${longRides.length} long ride${longRides.length > 1 ? 's' : ''} (>3hrs) in last 14 days. Building endurance capacity.`,
+      });
+    }
+
+    // Weekly elevation comparison
+    if (last7DaysElevation > 0 && prev7DaysElevation > 0) {
+      const elevationChange = ((last7DaysElevation - prev7DaysElevation) / prev7DaysElevation) * 100;
+      if (elevationChange > 50) {
+        insights.push({
+          type: 'info',
+          message: `Elevation gain up ${Math.round(elevationChange)}% this week (${last7DaysElevation.toLocaleString()}ft vs ${prev7DaysElevation.toLocaleString()}ft). Big climbing week.`,
+        });
+      } else if (elevationChange < -50) {
+        insights.push({
+          type: 'info',
+          message: `Elevation gain down ${Math.abs(Math.round(elevationChange))}% this week (${last7DaysElevation.toLocaleString()}ft vs ${prev7DaysElevation.toLocaleString()}ft). Flatter week.`,
+        });
+      }
+    } else if (last7DaysElevation >= 5000) {
+      insights.push({
+        type: 'positive',
+        message: `${last7DaysElevation.toLocaleString()}ft of climbing this week. Strong vertical work.`,
+      });
+    }
+
+    // Climbing intensity analysis
+    if (recentOutdoorRides.length >= 3) {
+      const avgElevationPerMile = recentOutdoorRides.reduce((sum, w) => {
+        return sum + (w.distance > 0 ? (w.elevation || 0) / w.distance : 0);
+      }, 0) / recentOutdoorRides.length;
+
+      if (avgElevationPerMile >= 100) {
+        insights.push({
+          type: 'positive',
+          message: `Averaging ${Math.round(avgElevationPerMile)}ft/mi in recent rides. Hilly/mountainous terrain building strength.`,
+        });
+      } else if (avgElevationPerMile < 30 && ctl > 50) {
+        insights.push({
+          type: 'info',
+          message: `Averaging ${Math.round(avgElevationPerMile)}ft/mi recently. Consider adding climbing for Gran Fondo prep.`,
+        });
+      }
+    }
+
     return insights;
   };
 
@@ -1242,6 +1350,17 @@ export default function ProgressionTracker() {
           const activityType = activityData.type || 'Ride';
           const rideType = activityType === 'VirtualRide' ? 'Indoor' : 'Outdoor';
 
+          // Extract elevation gain (meters to feet)
+          const elevationMeters = activityData.total_elevation_gain ||
+                                  activityData.elevation_gain ||
+                                  activityData.ascent ||
+                                  activityData.icu_elevation_gain ||
+                                  0;
+          const elevationFeet = Math.round(elevationMeters * 3.28084); // Convert meters to feet
+
+          // Get eFTP if available
+          const activityEFTP = activityData.icu_ftp || activityData.ftp || null;
+
           // Create workout entry
           const entry = {
             id: Date.now() + imported, // Unique ID
@@ -1255,6 +1374,8 @@ export default function ProgressionTracker() {
             normalizedPower: Math.round(np),
             rideType: rideType,
             distance: Math.round(distanceMiles * 10) / 10, // Round to 1 decimal
+            elevation: elevationFeet,
+            eFTP: activityEFTP,
             notes: `Imported from intervals.icu: ${activityData.name || 'Ride'}`,
             previousLevel: currentLevel,
             newLevel: newLevel,
@@ -2694,7 +2815,72 @@ Please analyze my current training status and provide personalized insights.`;
               ) : null;
             })()}
 
+            {/* Weekly Elevation Gained */}
+            {(() => {
+              const weeklyElevationData = calculateWeeklyElevation(history);
+              const currentWeekElevation = weeklyElevationData.length > 0
+                ? weeklyElevationData[weeklyElevationData.length - 1].elevation
+                : 0;
 
+              // Custom tooltip
+              const CustomTooltip = ({ active, payload }) => {
+                if (active && payload && payload.length) {
+                  const data = payload[0].payload;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                      <p className="text-gray-300 mb-1">{data.label}</p>
+                      <p className="text-green-400 font-bold">{data.elevation.toLocaleString()} ft</p>
+                      <p className="text-gray-500 text-xs">{data.workouts} rides</p>
+                    </div>
+                  );
+                }
+                return null;
+              };
+
+              return weeklyElevationData.length > 0 ? (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-medium">Weekly Elevation Gained</h3>
+                    <span className="text-sm text-gray-400">
+                      This week: <span className="text-green-400 font-bold">{currentWeekElevation.toLocaleString()} ft</span>
+                    </span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <AreaChart data={weeklyElevationData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorElevation" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22C55E" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#22C55E" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="label"
+                        stroke="#9CA3AF"
+                        style={{ fontSize: '12px' }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        stroke="#9CA3AF"
+                        style={{ fontSize: '12px' }}
+                        tickFormatter={(value) => `${value.toLocaleString()}ft`}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="elevation"
+                        stroke="#22C55E"
+                        strokeWidth={2}
+                        fillOpacity={1}
+                        fill="url(#colorElevation)"
+                        dot={{ fill: '#22C55E', strokeWidth: 2, r: 4 }}
+                        activeDot={{ r: 6, fill: '#22C55E', stroke: '#fff', strokeWidth: 2 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null;
+            })()}
 
             {/* Training Summary */}
             <div className="bg-gray-800 rounded-lg p-4">
@@ -2702,6 +2888,8 @@ Please analyze my current training status and provide personalized insights.`;
               {(() => {
                 const thirtyDaysAgo = new Date();
                 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const fourteenDaysAgo = new Date();
+                fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
                 const outdoorRides = history.filter(w =>
                   new Date(w.date) >= thirtyDaysAgo &&
                   w.rideType === 'Outdoor' &&
@@ -2711,8 +2899,14 @@ Please analyze my current training status and provide personalized insights.`;
                   ? outdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, outdoorRides[0])
                   : null;
 
+                // Calculate 14-day elevation
+                const last14Days = history.filter(w => {
+                  return new Date(w.date) >= fourteenDaysAgo;
+                });
+                const elevation14d = last14Days.reduce((sum, w) => sum + (w.elevation || 0), 0);
+
                 return (
-                  <div className="grid grid-cols-4 gap-3 text-xs">
+                  <div className="grid grid-cols-5 gap-3 text-xs">
                     <div>
                       <div className="text-gray-400 mb-1">7 Days</div>
                       <div className="text-base font-bold">{loads.weeklyTSS} TSS</div>
@@ -2724,6 +2918,13 @@ Please analyze my current training status and provide personalized insights.`;
                         {last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)} TSS
                       </div>
                       <div className="text-gray-500">{last28Days.length} rides</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 mb-1">Elevation (14d)</div>
+                      <div className="text-base font-bold">
+                        {elevation14d.toLocaleString()} ft
+                      </div>
+                      <div className="text-gray-500">{last14Days.length} rides</div>
                     </div>
                     {longestRide ? (
                       <>
@@ -3034,7 +3235,7 @@ Please analyze my current training status and provide personalized insights.`;
                       🗑️
                     </button>
 
-                    {/* Title row: Name - Zone Classification • ID */}
+                    {/* Title row: Name - Zone Classification • ID • Flags */}
                     <div className="flex justify-between items-start mb-2 pr-8">
                       <div className="flex-1">
                         <div className="font-medium">
@@ -3044,13 +3245,19 @@ Please analyze my current training status and provide personalized insights.`;
                               • {entry.intervalsId}
                             </span>
                           )}
+                          {entry.elevation > 2999 && (
+                            <span className="ml-2" title="Big Climb">🏔️</span>
+                          )}
+                          {entry.duration > 180 && (
+                            <span className="ml-2" title="Long Ride">🛣️</span>
+                          )}
                         </div>
                         <div className="text-gray-400 text-xs">{entry.date}</div>
                       </div>
                     </div>
 
-                    {/* Stats grid with Distance added */}
-                    <div className="grid grid-cols-5 gap-2 text-xs mb-2">
+                    {/* Stats grid with Distance and Elevation */}
+                    <div className="grid grid-cols-6 gap-2 text-xs mb-2">
                       <div>
                         <span className="text-gray-400">Duration</span>
                         <div className="font-mono">{entry.duration}min</div>
@@ -3058,6 +3265,10 @@ Please analyze my current training status and provide personalized insights.`;
                       <div>
                         <span className="text-gray-400">Distance</span>
                         <div className="font-mono">{entry.distance > 0 ? `${entry.distance}mi` : '—'}</div>
+                      </div>
+                      <div>
+                        <span className="text-gray-400">Elevation</span>
+                        <div className="font-mono">{entry.elevation > 0 ? `${entry.elevation}ft` : '—'}</div>
                       </div>
                       <div>
                         <span className="text-gray-400">NP</span>
@@ -3073,9 +3284,12 @@ Please analyze my current training status and provide personalized insights.`;
                       </div>
                     </div>
 
-                    {/* Level changes */}
+                    {/* Level changes and eFTP */}
                     <div className="flex justify-between text-xs">
-                      <span>Level {entry.workoutLevel} • RPE {entry.rpe}</span>
+                      <span>
+                        Level {entry.workoutLevel} • RPE {entry.rpe}
+                        {entry.eFTP && <span className="text-gray-400 ml-2">• eFTP {entry.eFTP}W</span>}
+                      </span>
                       <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
                         {entry.previousLevel.toFixed(1)} → {entry.newLevel.toFixed(1)} ({formatChange(entry.change)})
                       </span>
