@@ -564,10 +564,13 @@ export default function ProgressionTracker() {
       const weights = [];
 
       segments.forEach(seg => {
+        // Convert weight from lbs to kg for VO2max calculation
+        const weightKg = userProfile.weight / 2.20462;
+
         const vo2maxEst = estimateVO2max(
           seg.power,
           seg.hr,
-          userProfile.weight,
+          weightKg,
           userProfile.restingHR,
           userProfile.maxHR
         );
@@ -1182,8 +1185,9 @@ export default function ProgressionTracker() {
       const nameIdx = headers.findIndex(h => h.toLowerCase().includes('name'));
       const typeIdx = headers.findIndex(h => h.toLowerCase() === 'type');
       const distanceIdx = headers.findIndex(h => h.toLowerCase().includes('distance'));
+      const idIdx = headers.findIndex(h => h.toLowerCase() === 'id');
 
-      console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx });
+      console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx, idIdx });
 
       let imported = 0;
       let skipped = 0;
@@ -1208,6 +1212,7 @@ export default function ProgressionTracker() {
         const activityName = cols[nameIdx] || 'Imported Ride';
         const activityType = cols[typeIdx] || 'Ride';
         const distance = distanceIdx >= 0 ? parseFloat(cols[distanceIdx]) / 1000 * 0.621371 : 0; // Convert meters to miles
+        const activityId = idIdx >= 0 ? cols[idIdx] : null; // Capture ride ID if available
 
         // Map intervals.icu type to ride type ('Ride' = Outdoor, 'VirtualRide' = Indoor)
         const rideType = activityType === 'VirtualRide' ? 'Indoor' : 'Outdoor';
@@ -1263,6 +1268,7 @@ export default function ProgressionTracker() {
           change: newLevel - currentLevel,
           tss: tss,
           intensityFactor: intensityFactor,
+          rideId: activityId, // Store ride ID from CSV
         };
 
         newWorkouts.push(entry);
@@ -2154,15 +2160,15 @@ Please analyze my current training status and provide personalized insights.`;
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">Weight (kg)</label>
+                    <label className="block text-sm text-gray-400 mb-1">Weight (lbs)</label>
                     <input
                       type="number"
                       value={userProfile.weight || ''}
                       onChange={(e) => setUserProfile({ ...userProfile, weight: parseFloat(e.target.value) || null })}
                       className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                      placeholder="70"
-                      min="40"
-                      max="150"
+                      placeholder="154"
+                      min="90"
+                      max="330"
                       step="0.1"
                     />
                   </div>
@@ -2864,6 +2870,13 @@ Please analyze my current training status and provide personalized insights.`;
                       </span>
                     </div>
                     {entry.notes && <p className="text-gray-400 mt-2 text-xs">{entry.notes}</p>}
+
+                    {/* Ride ID display - discrete at bottom */}
+                    {entry.rideId && (
+                      <p className="text-gray-500 mt-1 text-xs font-mono opacity-60">
+                        ID: {entry.rideId}
+                      </p>
+                    )}
 
                     {/* VO2max Analysis Button - show for suitable rides (outdoor, reasonable duration) */}
                     {entry.rideType === 'Outdoor' && entry.duration >= 30 && entry.normalizedPower > 0 && (
