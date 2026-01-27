@@ -530,11 +530,13 @@ export default function ProgressionTracker() {
     setAnalyzingActivity(activityId);
 
     try {
-      console.log('Fetching streams for activity:', activityId, 'athlete:', intervalsConfig.athleteId);
+      // Strip "i" prefix from athlete ID if present (API uses numeric IDs)
+      const athleteId = intervalsConfig.athleteId.replace(/^i/, '');
+      console.log('Fetching streams for activity:', activityId, 'athlete:', athleteId);
 
       // Fetch activity streams from intervals.icu using athlete-specific endpoint
       const response = await fetch(
-        `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities/${activityId}/streams?types=watts,heartrate`,
+        `https://intervals.icu/api/v1/athlete/${athleteId}/activities/${activityId}/streams?types=watts,heartrate`,
         {
           headers: {
             'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
@@ -875,10 +877,13 @@ export default function ProgressionTracker() {
     setSyncStatus('Checking current FTP...');
 
     try {
+      // Strip "i" prefix from athlete ID if present (API uses numeric IDs)
+      const athleteId = intervalsConfig.athleteId.replace(/^i/, '');
+
       // First, fetch athlete data to get current eFTP
       console.log('=== FETCHING ATHLETE DATA FOR eFTP ===');
       const athleteResponse = await fetch(
-        `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}`,
+        `https://intervals.icu/api/v1/athlete/${athleteId}`,
         {
           headers: {
             'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
@@ -931,7 +936,7 @@ export default function ProgressionTracker() {
 
       // Fetch activities from intervals.icu API
       const response = await fetch(
-        `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities?oldest=${START_DATE}`,
+        `https://intervals.icu/api/v1/athlete/${athleteId}/activities?oldest=${START_DATE}`,
         {
           headers: {
             'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
@@ -972,7 +977,7 @@ export default function ProgressionTracker() {
         try {
           // Fetch detailed activity data which includes power metrics
           const detailResponse = await fetch(
-            `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities/${activitySummary.id}`,
+            `https://intervals.icu/api/v1/athlete/${athleteId}/activities/${activitySummary.id}`,
             {
               headers: {
                 'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
@@ -2017,7 +2022,7 @@ Please analyze my current training status and provide personalized insights.`;
                   type="text"
                   value={intervalsConfig.athleteId}
                   onChange={(e) => setIntervalsConfig({ ...intervalsConfig, athleteId: e.target.value })}
-                  placeholder="i12345"
+                  placeholder="i12345 or 12345"
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                   disabled={isSyncing}
                 />
