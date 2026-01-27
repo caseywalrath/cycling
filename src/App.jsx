@@ -520,16 +520,21 @@ export default function ProgressionTracker() {
       activityId = manualId.trim();
     }
 
+    // Check if intervals.icu is configured
+    if (!intervalsConfig.athleteId || !intervalsConfig.apiKey) {
+      alert('Please configure intervals.icu sync first.\n\nGo to Settings and click "Sync from intervals.icu" to set up your athlete ID and API key.');
+      setShowIntervalsSyncModal(true);
+      return;
+    }
+
     setAnalyzingActivity(activityId);
 
     try {
-      // Ensure activity ID has "i" prefix for API call
-      const apiActivityId = activityId.startsWith('i') ? activityId : `i${activityId}`;
-      console.log('Fetching streams for activity:', apiActivityId);
+      console.log('Fetching streams for activity:', activityId, 'athlete:', intervalsConfig.athleteId);
 
-      // Fetch activity streams from intervals.icu
+      // Fetch activity streams from intervals.icu using athlete-specific endpoint
       const response = await fetch(
-        `https://intervals.icu/api/v1/activity/${apiActivityId}/streams.json?types=watts,heartrate`,
+        `https://intervals.icu/api/v1/athlete/${intervalsConfig.athleteId}/activities/${activityId}/streams?types=watts,heartrate`,
         {
           headers: {
             'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
