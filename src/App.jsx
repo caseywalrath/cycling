@@ -1157,6 +1157,38 @@ export default function ProgressionTracker() {
     }
   };
 
+  // Helper function to parse CSV line (handles both comma-separated with quotes and tab-separated)
+  const parseCSVLine = (line, delimiter = ',') => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      const nextChar = line[i + 1];
+
+      if (char === '"' && inQuotes && nextChar === '"') {
+        // Escaped quote
+        current += '"';
+        i++; // Skip next quote
+      } else if (char === '"') {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+      } else if (char === delimiter && !inQuotes) {
+        // End of field
+        result.push(current);
+        current = '';
+      } else {
+        // Regular character
+        current += char;
+      }
+    }
+
+    // Push last field
+    result.push(current);
+    return result;
+  };
+
   // Parse and import CSV from intervals.icu
   const handleCSVImport = () => {
     setCSVImportStatus('');
@@ -1172,11 +1204,14 @@ export default function ProgressionTracker() {
         return;
       }
 
-      // Parse header row (tab-separated)
-      const headers = lines[0].split('\t');
+      // Detect delimiter (comma or tab)
+      const delimiter = lines[0].includes('\t') ? '\t' : ',';
+
+      // Parse header row
+      const headers = parseCSVLine(lines[0], delimiter);
       setCSVImportStatus(`Found ${lines.length - 1} activities. Processing...`);
 
-      // Find column indices
+      // Find column indices (case-insensitive)
       const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
       const npIdx = headers.findIndex(h => h.toLowerCase().includes('norm') && h.toLowerCase().includes('power'));
       const intensityIdx = headers.findIndex(h => h.toLowerCase().includes('intensity'));
@@ -1188,6 +1223,8 @@ export default function ProgressionTracker() {
       const idIdx = headers.findIndex(h => h.toLowerCase() === 'id');
 
       console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx, idIdx });
+      console.log('Detected delimiter:', delimiter === '\t' ? 'tab' : 'comma');
+      console.log('Headers:', headers);
 
       let imported = 0;
       let skipped = 0;
@@ -1196,7 +1233,7 @@ export default function ProgressionTracker() {
 
       // Process each data row
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split('\t');
+        const cols = parseCSVLine(lines[i], delimiter);
 
         // Skip if missing critical data
         if (!cols[dateIdx] || !cols[npIdx] || !cols[loadIdx]) {
@@ -1212,7 +1249,7 @@ export default function ProgressionTracker() {
         const activityName = cols[nameIdx] || 'Imported Ride';
         const activityType = cols[typeIdx] || 'Ride';
         const distance = distanceIdx >= 0 ? parseFloat(cols[distanceIdx]) / 1000 * 0.621371 : 0; // Convert meters to miles
-        const activityId = idIdx >= 0 ? cols[idIdx] : null; // Capture ride ID if available
+        const activityId = idIdx >= 0 && cols[idIdx] ? cols[idIdx].trim() : null; // Capture intervals.icu activity ID if available
 
         // Map intervals.icu type to ride type ('Ride' = Outdoor, 'VirtualRide' = Indoor)
         const rideType = activityType === 'VirtualRide' ? 'Indoor' : 'Outdoor';
@@ -1268,7 +1305,7 @@ export default function ProgressionTracker() {
           change: newLevel - currentLevel,
           tss: tss,
           intensityFactor: intensityFactor,
-          rideId: activityId, // Store ride ID from CSV
+          intervalsId: activityId, // intervals.icu activity ID for VO2max analysis
         };
 
         newWorkouts.push(entry);
@@ -2871,10 +2908,10 @@ Please analyze my current training status and provide personalized insights.`;
                     </div>
                     {entry.notes && <p className="text-gray-400 mt-2 text-xs">{entry.notes}</p>}
 
-                    {/* Ride ID display - discrete at bottom */}
-                    {entry.rideId && (
+                    {/* intervals.icu ID display - discrete at bottom */}
+                    {entry.intervalsId && (
                       <p className="text-gray-500 mt-1 text-xs font-mono opacity-60">
-                        ID: {entry.rideId}
+                        ID: {entry.intervalsId}
                       </p>
                     )}
 
