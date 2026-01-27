@@ -3047,7 +3047,7 @@ Please analyze my current training status and provide personalized insights.`;
                             strokeWidth={2}
                             fillOpacity={1}
                             fill="url(#colorEFTP)"
-                            dot={{ fill: '#A855F7', strokeWidth: 2, r: 4 }}
+                            dot={false}
                             activeDot={{ r: 6, fill: '#A855F7', stroke: '#fff', strokeWidth: 2 }}
                           />
                         </AreaChart>
