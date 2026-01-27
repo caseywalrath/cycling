@@ -1677,13 +1677,33 @@ Please analyze my current training status and provide personalized insights.`;
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-xl font-bold mb-1">Casey Rides</h1>
+        {/* Header with Profile and Event buttons */}
+        <div className="flex justify-between items-start mb-1">
+          <h1 className="text-xl font-bold">Casey Rides</h1>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setEventFormData(event);
+                setShowEventModal(true);
+              }}
+              className="text-sm px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 transition"
+            >
+              Event
+            </button>
+            <button
+              onClick={() => setShowProfileModal(true)}
+              className="text-sm px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 transition"
+            >
+              Profile
+            </button>
+          </div>
+        </div>
         <p className="text-gray-400 text-sm mb-4">
           FTP: {currentFTP}W
-          {intervalsFTP && (
-            <span className="ml-2">• eFTP: {intervalsFTP}W</span>
-          )}
-          {' • Event: June 13, 2026'}
+          {(() => {
+            const daysToEvent = getDaysUntilEvent();
+            return daysToEvent !== null ? ` • Days to Event: ${daysToEvent}` : '';
+          })()}
         </p>
 
         {/* Tabs */}
@@ -1691,7 +1711,7 @@ Please analyze my current training status and provide personalized insights.`;
           {[
             { id: 'levels', label: 'Levels' },
             { id: 'dashboard', label: 'Dashboard' },
-            { id: 'log', label: 'Log' },
+            { id: 'log', label: 'Log Ride' },
             { id: 'history', label: 'History' },
           ].map(tab => (
             <button
@@ -2175,15 +2195,26 @@ Please analyze my current training status and provide personalized insights.`;
         )}
 
         {/* Profile Settings Modal */}
+        {/* Profile Modal */}
         {showProfileModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-              <h2 className="font-bold mb-2 text-lg">VO2max Profile Settings</h2>
-              <p className="text-sm text-gray-400 mb-4">
-                Required for VO2max estimation. Enter accurate values for best results.
-              </p>
+              <h2 className="font-bold mb-4 text-lg">Profile Settings</h2>
 
               <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">FTP (watts)</label>
+                  <input
+                    type="number"
+                    value={currentFTP}
+                    onChange={(e) => setCurrentFTP(parseInt(e.target.value) || 235)}
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                    placeholder="235"
+                    min="100"
+                    max="500"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm text-gray-400 mb-1">Max HR (bpm)</label>
@@ -2249,13 +2280,6 @@ Please analyze my current training status and provide personalized insights.`;
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                   </select>
-                </div>
-
-                <div className="bg-blue-900/30 border border-blue-500/30 rounded p-3 text-xs text-gray-300">
-                  <p className="font-bold mb-1">💡 Tips:</p>
-                  <p className="mb-1">• Use measured max HR, not age-based estimate</p>
-                  <p className="mb-1">• Measure resting HR in the morning while lying down</p>
-                  <p>• Accurate values = accurate VO2max estimates</p>
                 </div>
               </div>
 
@@ -2413,152 +2437,7 @@ Please analyze my current training status and provide personalized insights.`;
               ) : null;
             })()}
 
-            {/* VO2max Fitness Card */}
-            {(() => {
-              const latestEstimate = vo2maxEstimates.length > 0 ? vo2maxEstimates[0] : null;
-              const hasProfile = userProfile.maxHR && userProfile.restingHR && userProfile.weight && userProfile.age;
 
-              return (
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <h3 className="font-medium">VO2max Fitness</h3>
-                    <button
-                      onClick={() => setShowProfileModal(true)}
-                      className="text-xs text-blue-400 hover:text-blue-300"
-                    >
-                      {hasProfile ? 'Edit Profile' : 'Setup Profile'}
-                    </button>
-                  </div>
-
-                  {!hasProfile ? (
-                    <div className="text-center py-4">
-                      <p className="text-gray-400 text-sm mb-3">
-                        Complete your profile to analyze VO2max from your rides
-                      </p>
-                      <button
-                        onClick={() => setShowProfileModal(true)}
-                        className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition"
-                      >
-                        Setup Profile
-                      </button>
-                    </div>
-                  ) : !latestEstimate ? (
-                    <div className="text-center py-4">
-                      <p className="text-gray-400 text-sm mb-2">
-                        No VO2max estimates yet
-                      </p>
-                      <p className="text-gray-500 text-xs">
-                        Go to History tab and click "🫀 Analyze for VO2max" on a ride
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="flex items-baseline gap-2">
-                        <div className="text-4xl font-bold" style={{ color: classifyVO2max(latestEstimate.percentile).color }}>
-                          {latestEstimate.vo2max}
-                        </div>
-                        <div className="text-gray-400 text-sm">ml/kg/min</div>
-                        <div
-                          className="ml-auto px-3 py-1 rounded text-sm font-medium"
-                          style={{
-                            backgroundColor: `${classifyVO2max(latestEstimate.percentile).color}20`,
-                            color: classifyVO2max(latestEstimate.percentile).color,
-                          }}
-                        >
-                          {latestEstimate.classification}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <div className="text-gray-400 text-xs mb-1">Fitness Age</div>
-                          <div className="font-bold text-lg">
-                            {latestEstimate.fitnessAge}
-                            <span className="text-gray-500 text-sm ml-1">(you're {userProfile.age})</span>
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 text-xs mb-1">Percentile</div>
-                          <div className="font-bold text-lg">
-                            {latestEstimate.percentile}th
-                            <span className="text-gray-500 text-sm ml-1">for age/{userProfile.sex}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-gray-500 pt-2 border-t border-gray-700">
-                        Latest: {new Date(latestEstimate.date).toLocaleDateString()} • {vo2maxEstimates.length} total estimate{vo2maxEstimates.length > 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* Event/Goal Management */}
-            {event.name && (
-              <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="font-medium">Event Goal</h3>
-                  <button
-                    onClick={() => {
-                      setEventFormData(event);
-                      setShowEventModal(true);
-                    }}
-                    className="text-xs text-blue-400 hover:text-blue-300"
-                  >
-                    Edit
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Event:</span>
-                    <span className="font-medium">{event.name}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Date:</span>
-                    <span className="font-medium">
-                      {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      {getDaysUntilEvent() !== null && (
-                        <span className="ml-2 text-blue-400">
-                          ({getDaysUntilEvent()} days)
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Distance:</span>
-                    <span className="font-medium">{event.distance} miles</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Target CTL:</span>
-                    <span className={`font-medium ${loads.ctl >= event.targetCTL ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {event.targetCTL} {loads.ctl >= event.targetCTL && '✓'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {!event.name && (
-              <div className="bg-gray-800 rounded-lg p-4 text-center">
-                <p className="text-gray-400 text-sm mb-3">No event goal set</p>
-                <button
-                  onClick={() => {
-                    setEventFormData({
-                      name: 'Gran Fondo Utah',
-                      date: '2026-06-13',
-                      distance: 100,
-                      targetCTL: 85,
-                    });
-                    setShowEventModal(true);
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition"
-                >
-                  Add Event
-                </button>
-              </div>
-            )}
 
             {/* Training Summary */}
             <div className="bg-gray-800 rounded-lg p-4">
@@ -2931,17 +2810,6 @@ Please analyze my current training status and provide personalized insights.`;
                       </p>
                     )}
 
-                    {/* VO2max Analysis Button - show for suitable rides (outdoor, reasonable duration) */}
-                    {entry.rideType === 'Outdoor' && entry.duration >= 30 && entry.normalizedPower > 0 && (
-                      <button
-                        onClick={() => analyzeActivityForVO2max(entry.intervalsId, entry.date)}
-                        disabled={analyzingActivity === entry.intervalsId}
-                        className="mt-2 w-full bg-blue-900/30 hover:bg-blue-900/50 border border-blue-500/30 text-blue-400 px-3 py-2 rounded text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={entry.intervalsId ? 'Analyze this ride for VO2max' : 'Manually enter intervals.icu activity ID to analyze'}
-                      >
-                        {analyzingActivity === entry.intervalsId ? '🔄 Analyzing...' : '🫀 Analyze for VO2max'}
-                      </button>
-                    )}
                   </div>
                 ))}
               </div>
@@ -2953,37 +2821,31 @@ Please analyze my current training status and provide personalized insights.`;
         <div className="flex gap-3 text-sm mt-6 flex-wrap">
           <button
             onClick={exportData}
-            className="text-gray-400 hover:text-white transition font-medium"
+            className="text-gray-400 hover:text-gray-300 transition"
           >
             Export Data
           </button>
-          <label className="text-gray-400 hover:text-white transition cursor-pointer font-medium">
+          <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
             Import File
             <input type="file" accept=".json" onChange={importData} className="hidden" />
           </label>
           <button
             onClick={() => setShowCloudSyncHelp(true)}
-            className="text-blue-400 hover:text-blue-300 transition font-medium"
+            className="text-gray-400 hover:text-gray-300 transition"
           >
-            ☁️ How to Sync?
+            How to Sync?
           </button>
           <button
             onClick={() => setShowPasteImport(true)}
-            className="text-gray-500 hover:text-gray-400 transition text-xs"
+            className="text-gray-400 hover:text-gray-300 transition"
           >
             Paste JSON
           </button>
           <button
             onClick={() => setShowCSVImport(true)}
-            className="text-purple-400 hover:text-purple-300 transition font-medium"
+            className="text-gray-400 hover:text-gray-300 transition"
           >
             Import CSV
-          </button>
-          <button
-            onClick={() => setShowIntervalsSyncModal(true)}
-            className="text-green-400 hover:text-green-300 transition font-medium"
-          >
-            Sync from intervals.icu
           </button>
         </div>
       </div>
