@@ -1396,6 +1396,10 @@ export default function ProgressionTracker() {
       const typeIdx = headers.findIndex(h => h.toLowerCase() === 'type');
       const distanceIdx = headers.findIndex(h => h.toLowerCase().includes('distance'));
       const idIdx = headers.findIndex(h => h.toLowerCase() === 'id');
+      // TODO: Future feature - Elevation gain tracking
+      // const elevationIdx = headers.findIndex(h => h.toLowerCase().includes('elevation') && h.toLowerCase().includes('gain'));
+      // TODO: Future feature - eFTP tracking (Continuous eFTP with decay from intervals.icu)
+      // const eftpIdx = headers.findIndex(h => h.toLowerCase().includes('eftp') || h.toLowerCase() === 'activity eftp');
 
       console.log('CSV Column Indices:', { dateIdx, npIdx, intensityIdx, loadIdx, timeIdx, nameIdx, typeIdx, distanceIdx, idIdx });
       console.log('Detected delimiter:', delimiter === '\t' ? 'tab' : 'comma');
@@ -1481,6 +1485,9 @@ export default function ProgressionTracker() {
           tss: tss,
           intensityFactor: intensityFactor,
           intervalsId: activityId, // intervals.icu activity ID for VO2max analysis
+          // TODO: Future features to capture from CSV:
+          // elevation: elevationIdx >= 0 ? Math.round(parseFloat(cols[elevationIdx])) : null, // Total elevation gain in feet
+          // eFTP: eftpIdx >= 0 ? parseInt(cols[eftpIdx]) : null, // Continuous eFTP with decay from intervals.icu
         };
 
         newWorkouts.push(entry);
@@ -2924,6 +2931,9 @@ Please analyze my current training status and provide personalized insights.`;
                 />
               </div>
             </div>
+
+            {/* TODO: Future feature - Add elevation gain input field here */}
+            {/* Example: <input type="number" label="Elevation Gain (ft)" placeholder="2500" /> */}
 
             {/* Calculated values preview */}
             <div className="bg-gray-700 rounded p-3 mb-4 grid grid-cols-2 gap-4 text-sm">
