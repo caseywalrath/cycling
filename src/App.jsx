@@ -73,6 +73,20 @@ export default function ProgressionTracker() {
   const [showEventModal, setShowEventModal] = useState(false);
   const [eventFormData, setEventFormData] = useState(event);
 
+  // User profile for VO2max calculations
+  const [userProfile, setUserProfile] = useState({
+    maxHR: null,
+    restingHR: null,
+    weight: null, // kg
+    age: null,
+    sex: 'male', // 'male' or 'female'
+  });
+  const [showProfileModal, setShowProfileModal] = useState(false);
+
+  // VO2max estimates storage
+  const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
+  const [analyzingActivity, setAnalyzingActivity] = useState(null);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
@@ -101,6 +115,16 @@ export default function ProgressionTracker() {
         setEventFormData(parsed.event);
       }
 
+      // Load user profile if available
+      if (parsed.userProfile) {
+        setUserProfile(parsed.userProfile);
+      }
+
+      // Load VO2max estimates if available
+      if (parsed.vo2maxEstimates) {
+        setVo2maxEstimates(parsed.vo2maxEstimates);
+      }
+
       // Calculate recent changes from history
       if (parsed.history && parsed.history.length > 0) {
         const changes = {};
@@ -119,8 +143,14 @@ export default function ProgressionTracker() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history, event }));
-  }, [levels, history, event]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      levels,
+      history,
+      event,
+      userProfile,
+      vo2maxEstimates
+    }));
+  }, [levels, history, event, userProfile, vo2maxEstimates]);
 
   // Load intervals.icu config from localStorage
   useEffect(() => {
@@ -323,6 +353,255 @@ export default function ProgressionTracker() {
       .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
 
     return chartData;
+  };
+
+  // VO2max Calculation Functions
+  const estimateVO2FromPower = (powerWatts, weightKg) => {
+    // ACSM metabolic equation for cycling
+    // VO2 (ml/kg/min) ≈ (10.8 × watts / weight) + 7
+    return (10.8 * powerWatts / weightKg) + 7;
+  };
+
+  const estimateVO2max = (powerWatts, hrBpm, weightKg, restingHR, maxHR) => {
+    // Calculate HR reserve percentage
+    const hrReserve = maxHR - restingHR;
+    const hrReservePct = (hrBpm - restingHR) / hrReserve;
+
+    // Estimate current VO2 from power
+    const currentVO2 = estimateVO2FromPower(powerWatts, weightKg);
+
+    // Extrapolate to VO2max using HR reserve method
+    const restingVO2 = 3.5; // ml/kg/min
+    const vo2ReserveCurrent = currentVO2 - restingVO2;
+    const vo2ReserveMax = vo2ReserveCurrent / hrReservePct;
+    const vo2max = vo2ReserveMax + restingVO2;
+
+    return vo2max;
+  };
+
+  const findStableSegments = (hrStream, powerStream, maxHR) => {
+    if (!hrStream || !powerStream || hrStream.length < 300) {
+      return [];
+    }
+
+    const segments = [];
+    const windowSize = 300; // 5 minutes in seconds
+
+    for (let start = 300; start < hrStream.length - windowSize; start += 60) {
+      const end = start + windowSize;
+      const hrSegment = hrStream.slice(start, end);
+      const powerSegment = powerStream.slice(start, end);
+
+      // Calculate statistics
+      const hrMean = hrSegment.reduce((a, b) => a + b, 0) / hrSegment.length;
+      const powerMean = powerSegment.reduce((a, b) => a + b, 0) / powerSegment.length;
+
+      const hrStd = Math.sqrt(
+        hrSegment.reduce((sum, val) => sum + Math.pow(val - hrMean, 2), 0) / hrSegment.length
+      );
+      const powerStd = Math.sqrt(
+        powerSegment.reduce((sum, val) => sum + Math.pow(val - powerMean, 2), 0) / powerSegment.length
+      );
+
+      // Check stability and intensity criteria
+      if (
+        hrStd < 5 &&
+        powerStd < 10 &&
+        hrMean > 0.60 * maxHR &&
+        hrMean < 0.85 * maxHR &&
+        powerMean > 100
+      ) {
+        segments.push({
+          hr: hrMean,
+          power: powerMean,
+          duration: windowSize,
+          hrPct: hrMean / maxHR,
+        });
+      }
+    }
+
+    return segments;
+  };
+
+  const calculateFitnessAge = (vo2max, actualAge, sex) => {
+    // Reference VO2max values by age and sex
+    const maleRef = {
+      20: 51, 25: 50, 30: 48, 35: 47, 40: 45, 45: 44,
+      50: 42, 55: 40, 60: 38, 65: 36, 70: 34
+    };
+    const femaleRef = {
+      20: 44, 25: 43, 30: 41, 35: 40, 40: 38, 45: 37,
+      50: 35, 55: 33, 60: 32, 65: 30, 70: 28
+    };
+
+    const ref = sex === 'male' ? maleRef : femaleRef;
+    const ages = Object.keys(ref).map(Number).sort((a, b) => a - b);
+
+    // Find age where vo2max matches reference
+    for (const age of ages) {
+      if (vo2max >= ref[age]) {
+        return age;
+      }
+    }
+    return 70; // cap at 70
+  };
+
+  const calculatePercentile = (vo2max, age, sex) => {
+    // Simplified percentile calculation using population norms
+    // Mean and SD for age/sex groups (approximate values)
+    let mean, sd;
+
+    if (sex === 'male') {
+      if (age < 30) {
+        mean = 48; sd = 7;
+      } else if (age < 40) {
+        mean = 46; sd = 7;
+      } else if (age < 50) {
+        mean = 42; sd = 7;
+      } else if (age < 60) {
+        mean = 38; sd = 6;
+      } else {
+        mean = 34; sd = 6;
+      }
+    } else {
+      if (age < 30) {
+        mean = 41; sd = 6;
+      } else if (age < 40) {
+        mean = 39; sd = 6;
+      } else if (age < 50) {
+        mean = 35; sd = 6;
+      } else if (age < 60) {
+        mean = 32; sd = 5;
+      } else {
+        mean = 28; sd = 5;
+      }
+    }
+
+    // Calculate z-score and convert to percentile
+    const zScore = (vo2max - mean) / sd;
+    // Approximate percentile from z-score (simplified)
+    let percentile = 50 + (zScore * 19); // rough approximation
+    percentile = Math.max(1, Math.min(99, percentile)); // clamp to 1-99
+
+    return Math.round(percentile);
+  };
+
+  const classifyVO2max = (percentile) => {
+    if (percentile >= 95) return { label: 'Superior', color: '#10B981' };
+    if (percentile >= 80) return { label: 'Excellent', color: '#3B82F6' };
+    if (percentile >= 60) return { label: 'Good', color: '#22C55E' };
+    if (percentile >= 40) return { label: 'Fair', color: '#F59E0B' };
+    return { label: 'Poor', color: '#EF4444' };
+  };
+
+  // Analyze activity for VO2max
+  const analyzeActivityForVO2max = async (activityId, activityDate) => {
+    // Check if profile is complete
+    if (!userProfile.maxHR || !userProfile.restingHR || !userProfile.weight) {
+      alert('Please complete your user profile first (Max HR, Resting HR, Weight)');
+      setShowProfileModal(true);
+      return;
+    }
+
+    setAnalyzingActivity(activityId);
+
+    try {
+      // Fetch activity streams from intervals.icu
+      const response = await fetch(
+        `https://intervals.icu/api/v1/activity/${activityId}/streams.json?types=watts,heartrate`,
+        {
+          headers: {
+            'Authorization': `Basic ${btoa(`API_KEY:${intervalsConfig.apiKey}`)}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch activity streams');
+      }
+
+      const streams = await response.json();
+
+      // Check if we have both HR and power data
+      if (!streams.heartrate || !streams.watts) {
+        alert('This activity is missing heart rate or power data. VO2max requires both.');
+        setAnalyzingActivity(null);
+        return;
+      }
+
+      // Find stable segments
+      const segments = findStableSegments(
+        streams.heartrate,
+        streams.watts,
+        userProfile.maxHR
+      );
+
+      if (segments.length === 0) {
+        alert('No stable aerobic segments found. Try a longer endurance ride with steady effort.');
+        setAnalyzingActivity(null);
+        return;
+      }
+
+      // Calculate VO2max from each segment
+      const estimates = [];
+      const weights = [];
+
+      segments.forEach(seg => {
+        const vo2maxEst = estimateVO2max(
+          seg.power,
+          seg.hr,
+          userProfile.weight,
+          userProfile.restingHR,
+          userProfile.maxHR
+        );
+
+        // Weight by segment quality (prefer mid-range HR ~75%)
+        const hrQuality = 1 - Math.abs(seg.hrPct - 0.75) * 2;
+        const durationWeight = Math.min(seg.duration / 600, 1.0);
+
+        estimates.push(vo2maxEst);
+        weights.push(hrQuality * durationWeight);
+      });
+
+      // Calculate weighted average
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      const weightedSum = estimates.reduce((sum, est, i) => sum + est * weights[i], 0);
+      const finalVO2max = Math.round(weightedSum / totalWeight);
+
+      // Calculate fitness metrics
+      const fitnessAge = calculateFitnessAge(finalVO2max, userProfile.age, userProfile.sex);
+      const percentile = calculatePercentile(finalVO2max, userProfile.age, userProfile.sex);
+      const classification = classifyVO2max(percentile);
+
+      // Store the estimate
+      const newEstimate = {
+        id: Date.now(),
+        activityId,
+        date: activityDate,
+        vo2max: finalVO2max,
+        fitnessAge,
+        percentile,
+        classification: classification.label,
+        segmentsUsed: segments.length,
+        timestamp: new Date().toISOString(),
+      };
+
+      setVo2maxEstimates([newEstimate, ...vo2maxEstimates]);
+
+      // Show success message
+      alert(
+        `VO2max Estimated: ${finalVO2max} ml/kg/min\n` +
+        `Classification: ${classification.label} (${percentile}th percentile)\n` +
+        `Fitness Age: ${fitnessAge} (you're ${userProfile.age})\n` +
+        `Based on ${segments.length} stable segment${segments.length > 1 ? 's' : ''}`
+      );
+
+    } catch (error) {
+      console.error('VO2max analysis error:', error);
+      alert('Failed to analyze activity: ' + error.message);
+    } finally {
+      setAnalyzingActivity(null);
+    }
   };
 
   const generateInsights = (loads, history, levels) => {
@@ -771,6 +1050,7 @@ export default function ProgressionTracker() {
           // Create workout entry
           const entry = {
             id: Date.now() + imported, // Unique ID
+            intervalsId: activitySummary.id, // intervals.icu activity ID for VO2max analysis
             date: activityDate,
             zone: zone,
             workoutLevel: parseFloat(workoutLevel.toFixed(1)),
@@ -1171,6 +1451,9 @@ export default function ProgressionTracker() {
           // Import FTP data if available
           if (parsed.ftp) setCurrentFTP(parsed.ftp);
           if (parsed.intervalsFTP) setIntervalsFTP(parsed.intervalsFTP);
+          // Import VO2max data if available
+          if (parsed.userProfile) setUserProfile(parsed.userProfile);
+          if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
 
           alert(`✓ Data imported successfully!\n${parsed.history?.length || 0} workouts restored.`);
         } catch (err) {
@@ -1207,6 +1490,9 @@ export default function ProgressionTracker() {
       // Import FTP data if available
       if (parsed.ftp) setCurrentFTP(parsed.ftp);
       if (parsed.intervalsFTP) setIntervalsFTP(parsed.intervalsFTP);
+      // Import VO2max data if available
+      if (parsed.userProfile) setUserProfile(parsed.userProfile);
+      if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
 
       setShowPasteImport(false);
       setPasteContent('');
@@ -1812,6 +2098,109 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
+        {/* Profile Settings Modal */}
+        {showProfileModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+              <h2 className="font-bold mb-2 text-lg">VO2max Profile Settings</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Required for VO2max estimation. Enter accurate values for best results.
+              </p>
+
+              <div className="space-y-4 mb-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Max HR (bpm)</label>
+                    <input
+                      type="number"
+                      value={userProfile.maxHR || ''}
+                      onChange={(e) => setUserProfile({ ...userProfile, maxHR: parseInt(e.target.value) || null })}
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                      placeholder="185"
+                      min="100"
+                      max="220"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Resting HR (bpm)</label>
+                    <input
+                      type="number"
+                      value={userProfile.restingHR || ''}
+                      onChange={(e) => setUserProfile({ ...userProfile, restingHR: parseInt(e.target.value) || null })}
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                      placeholder="55"
+                      min="30"
+                      max="100"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Weight (kg)</label>
+                    <input
+                      type="number"
+                      value={userProfile.weight || ''}
+                      onChange={(e) => setUserProfile({ ...userProfile, weight: parseFloat(e.target.value) || null })}
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                      placeholder="70"
+                      min="40"
+                      max="150"
+                      step="0.1"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Age</label>
+                    <input
+                      type="number"
+                      value={userProfile.age || ''}
+                      onChange={(e) => setUserProfile({ ...userProfile, age: parseInt(e.target.value) || null })}
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                      placeholder="40"
+                      min="18"
+                      max="90"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Sex</label>
+                  <select
+                    value={userProfile.sex}
+                    onChange={(e) => setUserProfile({ ...userProfile, sex: e.target.value })}
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+
+                <div className="bg-blue-900/30 border border-blue-500/30 rounded p-3 text-xs text-gray-300">
+                  <p className="font-bold mb-1">💡 Tips:</p>
+                  <p className="mb-1">• Use measured max HR, not age-based estimate</p>
+                  <p className="mb-1">• Measure resting HR in the morning while lying down</p>
+                  <p>• Accurate values = accurate VO2max estimates</p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowProfileModal(false)}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium transition"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setShowProfileModal(false)}
+                  className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Levels Tab */}
         {activeTab === 'levels' && (
           <div className="space-y-4">
@@ -1946,6 +2335,88 @@ Please analyze my current training status and provide personalized insights.`;
                   </ResponsiveContainer>
                 </div>
               ) : null;
+            })()}
+
+            {/* VO2max Fitness Card */}
+            {(() => {
+              const latestEstimate = vo2maxEstimates.length > 0 ? vo2maxEstimates[0] : null;
+              const hasProfile = userProfile.maxHR && userProfile.restingHR && userProfile.weight && userProfile.age;
+
+              return (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="font-medium">VO2max Fitness</h3>
+                    <button
+                      onClick={() => setShowProfileModal(true)}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      {hasProfile ? 'Edit Profile' : 'Setup Profile'}
+                    </button>
+                  </div>
+
+                  {!hasProfile ? (
+                    <div className="text-center py-4">
+                      <p className="text-gray-400 text-sm mb-3">
+                        Complete your profile to analyze VO2max from your rides
+                      </p>
+                      <button
+                        onClick={() => setShowProfileModal(true)}
+                        className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition"
+                      >
+                        Setup Profile
+                      </button>
+                    </div>
+                  ) : !latestEstimate ? (
+                    <div className="text-center py-4">
+                      <p className="text-gray-400 text-sm mb-2">
+                        No VO2max estimates yet
+                      </p>
+                      <p className="text-gray-500 text-xs">
+                        Go to History tab and click "🫀 Analyze for VO2max" on a ride
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-baseline gap-2">
+                        <div className="text-4xl font-bold" style={{ color: classifyVO2max(latestEstimate.percentile).color }}>
+                          {latestEstimate.vo2max}
+                        </div>
+                        <div className="text-gray-400 text-sm">ml/kg/min</div>
+                        <div
+                          className="ml-auto px-3 py-1 rounded text-sm font-medium"
+                          style={{
+                            backgroundColor: `${classifyVO2max(latestEstimate.percentile).color}20`,
+                            color: classifyVO2max(latestEstimate.percentile).color,
+                          }}
+                        >
+                          {latestEstimate.classification}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <div className="text-gray-400 text-xs mb-1">Fitness Age</div>
+                          <div className="font-bold text-lg">
+                            {latestEstimate.fitnessAge}
+                            <span className="text-gray-500 text-sm ml-1">(you're {userProfile.age})</span>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-xs mb-1">Percentile</div>
+                          <div className="font-bold text-lg">
+                            {latestEstimate.percentile}th
+                            <span className="text-gray-500 text-sm ml-1">for age/{userProfile.sex}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-gray-500 pt-2 border-t border-gray-700">
+                        Latest: {new Date(latestEstimate.date).toLocaleDateString()} • {vo2maxEstimates.length} total estimate{vo2maxEstimates.length > 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
             })()}
 
             {/* Event/Goal Management */}
@@ -2376,6 +2847,17 @@ Please analyze my current training status and provide personalized insights.`;
                       </span>
                     </div>
                     {entry.notes && <p className="text-gray-400 mt-2 text-xs">{entry.notes}</p>}
+
+                    {/* VO2max Analysis Button - only show for imported activities with intervals ID */}
+                    {entry.intervalsId && (
+                      <button
+                        onClick={() => analyzeActivityForVO2max(entry.intervalsId, entry.date)}
+                        disabled={analyzingActivity === entry.intervalsId}
+                        className="mt-2 w-full bg-blue-900/30 hover:bg-blue-900/50 border border-blue-500/30 text-blue-400 px-3 py-2 rounded text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {analyzingActivity === entry.intervalsId ? '🔄 Analyzing...' : '🫀 Analyze for VO2max'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
