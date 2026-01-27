@@ -495,12 +495,29 @@ export default function ProgressionTracker() {
   };
 
   // Analyze activity for VO2max
-  const analyzeActivityForVO2max = async (activityId, activityDate) => {
+  const analyzeActivityForVO2max = async (activityIdOrPrompt, activityDate) => {
     // Check if profile is complete
     if (!userProfile.maxHR || !userProfile.restingHR || !userProfile.weight) {
       alert('Please complete your user profile first (Max HR, Resting HR, Weight)');
       setShowProfileModal(true);
       return;
+    }
+
+    let activityId = activityIdOrPrompt;
+
+    // If no activity ID provided, prompt user to enter it manually
+    if (!activityId) {
+      const manualId = prompt(
+        'This ride was imported before the VO2max feature was added.\n\n' +
+        'To analyze it, please:\n' +
+        '1. Go to intervals.icu\n' +
+        '2. Find this ride by date: ' + activityDate + '\n' +
+        '3. Copy the activity ID from the URL (e.g., "i55751783")\n' +
+        '4. Paste it below:\n'
+      );
+
+      if (!manualId) return; // User cancelled
+      activityId = manualId.trim();
     }
 
     setAnalyzingActivity(activityId);
@@ -2848,12 +2865,13 @@ Please analyze my current training status and provide personalized insights.`;
                     </div>
                     {entry.notes && <p className="text-gray-400 mt-2 text-xs">{entry.notes}</p>}
 
-                    {/* VO2max Analysis Button - only show for imported activities with intervals ID */}
-                    {entry.intervalsId && (
+                    {/* VO2max Analysis Button - show for suitable rides (outdoor, reasonable duration) */}
+                    {entry.rideType === 'Outdoor' && entry.duration >= 30 && entry.normalizedPower > 0 && (
                       <button
                         onClick={() => analyzeActivityForVO2max(entry.intervalsId, entry.date)}
                         disabled={analyzingActivity === entry.intervalsId}
                         className="mt-2 w-full bg-blue-900/30 hover:bg-blue-900/50 border border-blue-500/30 text-blue-400 px-3 py-2 rounded text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={entry.intervalsId ? 'Analyze this ride for VO2max' : 'Manually enter intervals.icu activity ID to analyze'}
                       >
                         {analyzingActivity === entry.intervalsId ? '🔄 Analyzing...' : '🫀 Analyze for VO2max'}
                       </button>
