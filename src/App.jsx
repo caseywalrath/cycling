@@ -1437,7 +1437,8 @@ export default function ProgressionTracker() {
             distance: Math.round(distanceMiles * 10) / 10, // Round to 1 decimal
             elevation: elevationFeet,
             eFTP: activityEFTP,
-            notes: `Imported from intervals.icu: ${activityData.name || 'Ride'}`,
+            name: activityData.name || 'Imported Ride',
+            notes: 'Imported from intervals.icu',
             previousLevel: currentLevel,
             newLevel: newLevel,
             change: newLevel - currentLevel,
@@ -1663,7 +1664,8 @@ export default function ProgressionTracker() {
           normalizedPower: Math.round(np),
           rideType: rideType,
           distance: Math.round(distance * 10) / 10, // Round to 1 decimal
-          notes: `${activityName}`,
+          name: activityName,
+          notes: 'Imported from CSV',
           previousLevel: currentLevel,
           newLevel: newLevel,
           change: newLevel - currentLevel,
@@ -3482,24 +3484,6 @@ Please analyze my current training status and provide personalized insights.`;
                   type="range"
                   min="1"
                   max="10"
-                  step="0.5"
-                  value={formData.workoutLevel}
-                  onChange={(e) => setFormData({ ...formData, workoutLevel: parseFloat(e.target.value) })}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Easy</span>
-                  <span>Hard</span>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">
-                  Actual RPE: {formData.rpe}
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
                   value={formData.rpe}
                   onChange={(e) => setFormData({ ...formData, rpe: parseInt(e.target.value) })}
                   className="w-full"
@@ -3537,7 +3521,7 @@ Please analyze my current training status and provide personalized insights.`;
               onClick={handleLogWorkout}
               className="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-medium transition"
             >
-              Save Workout
+              {editingRide ? 'Update Workout' : 'Save Workout'}
             </button>
             </div>
           </div>
@@ -3562,19 +3546,28 @@ Please analyze my current training status and provide personalized insights.`;
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {history.map((entry) => (
                   <div key={entry.id} className="bg-gray-700 rounded p-3 text-sm relative">
-                    <button
-                      onClick={() => handleDeleteWorkout(entry.id)}
-                      className="absolute top-2 right-2 text-gray-400 hover:text-red-400 transition text-xs px-2 py-1 rounded hover:bg-gray-600"
-                      title="Delete workout"
-                    >
-                      🗑️
-                    </button>
+                    <div className="absolute top-2 right-2 flex gap-1">
+                      <button
+                        onClick={() => handleEditRide(entry.id)}
+                        className="text-gray-400 hover:text-blue-400 transition text-xs px-2 py-1 rounded hover:bg-gray-600"
+                        title="Edit workout"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => handleDeleteWorkout(entry.id)}
+                        className="text-gray-400 hover:text-red-400 transition text-xs px-2 py-1 rounded hover:bg-gray-600"
+                        title="Delete workout"
+                      >
+                        🗑️
+                      </button>
+                    </div>
 
                     {/* Title row: Name - Zone Classification • ID • Flags */}
-                    <div className="flex justify-between items-start mb-2 pr-8">
+                    <div className="flex justify-between items-start mb-2 pr-16">
                       <div className="flex-1">
                         <div className="font-medium">
-                          {entry.notes || 'Workout'} - {getZoneName(entry.zone)}
+                          {entry.name || entry.notes || 'Workout'} - {getZoneName(entry.zone)}
                           {entry.intervalsId && (
                             <span className="text-gray-500 text-xs font-mono ml-2">
                               • {entry.intervalsId}
