@@ -84,6 +84,18 @@ STORAGE_KEY     // localStorage key: 'cycling-progression-data-v2'
 1. **intervals.icu API** - Direct sync via athlete ID + API key
 2. **CSV paste** - Manual paste from intervals.icu export
 
+**Important (Session 5)**: Imports do NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts.
+
+## Ride Source Model
+Every ride entry has a `source` field:
+- `'imported'` — From CSV or intervals.icu API. Has `zone: null`, no progression data.
+- `'manual'` — Logged or classified by user. Has a zone, progression levels calculated.
+- `null`/missing — Legacy rides from before Session 5. Treated as classified (they have zone data from the old auto-classification logic).
+
+When editing an imported ride, the handler detects the zone change (`wasUnclassified → isNowClassified`) and recalculates progression against the current level for that zone. The ride is re-tagged as `source: 'manual'`.
+
+Recovery zone (`zone: 'recovery'`) is excluded from progression level updates regardless of source.
+
 ## Persistence
 Single localStorage key stores:
 - `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`

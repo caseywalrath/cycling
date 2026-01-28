@@ -107,3 +107,18 @@
 - Changed default ride type from Outdoor to Indoor
 - Created ARCHITECTURE.md documentation
 - Files: `src/App.jsx`, `ARCHITECTURE.md`
+
+---
+
+## Session 5 - Decouple Progression Levels from Imported Rides
+
+- **Breaking change to import behavior**: CSV and intervals.icu API imports no longer auto-classify rides into training zones or update progression levels
+- Imported rides stored with `zone: null`, `source: 'imported'` — user must manually classify via Edit (✏️) in Ride History
+- Manual ride logging now tagged with `source: 'manual'`; only manual rides affect progression levels
+- Recovery zone excluded from progression level calculations
+- Edit ride handler recalculates progression when user assigns a zone to an unclassified import
+- History modal shows "Needs classification" (yellow) for unclassified rides; level progression column shows "—"
+- Post-log summary modal handles Recovery zone gracefully (no before/after display)
+- JSON export/import preserves `source` field on all ride entries automatically
+- **Rationale**: Normalized Power is a whole-ride metric that cannot distinguish interval types (e.g., VO2max intervals with recovery spin yield Sweet Spot NP). User-selected zone classification is the only reliable method.
+- Files: `src/App.jsx`
