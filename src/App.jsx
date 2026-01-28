@@ -83,6 +83,7 @@ export default function ProgressionTracker() {
     sex: 'male', // 'male' or 'female'
   });
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileModalOriginalFTP, setProfileModalOriginalFTP] = useState(null);
 
   // VO2max estimates storage
   const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
@@ -189,7 +190,23 @@ export default function ProgressionTracker() {
     }
   }, [currentFTP, intervalsFTP]);
 
-  // Animate level changes
+  // Check FTP vs eFTP difference and prompt user if > 10
+  useEffect(() => {
+    const latestEFTP = history.find(w => w.eFTP)?.eFTP;
+    if (latestEFTP && Math.abs(currentFTP - latestEFTP) > 10) {
+      const difference = latestEFTP - currentFTP;
+      const direction = difference > 0 ? 'higher' : 'lower';
+      const shouldUpdate = window.confirm(
+        `Your estimated FTP (${latestEFTP}W) is ${Math.abs(difference)}W ${direction} than your current FTP (${currentFTP}W).\n\n` +
+        `Would you like to update your FTP in Profile settings?`
+      );
+      if (shouldUpdate) {
+        setProfileModalOriginalFTP(currentFTP);
+        setShowProfileModal(true);
+      }
+    }
+  }, [history]); // Only check when history changes (new rides imported/logged)
+
   // Calculate zone descriptions dynamically based on current FTP
   const getZoneDescription = (zoneId, ftp) => {
     const zones = {
@@ -447,6 +464,28 @@ export default function ProgressionTracker() {
     return chartData;
   };
 
+  // Calculate eFTP history for rolling one-year chart
+  const calculateEFTPHistory = (history) => {
+    if (!history || history.length === 0) return [];
+
+    // Get date one year ago
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+    // Filter to workouts with eFTP in the last year, sorted by date
+    const eftpData = history
+      .filter(w => w.eFTP && new Date(w.date) >= oneYearAgo)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(w => ({
+        date: w.date,
+        eFTP: w.eFTP,
+        label: new Date(w.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        notes: w.notes || 'Workout',
+      }));
+
+    return eftpData;
+  };
+
   // VO2max Calculation Functions
   const estimateVO2FromPower = (powerWatts, weightKg) => {
     // ACSM metabolic equation for cycling
@@ -591,6 +630,7 @@ export default function ProgressionTracker() {
     // Check if profile is complete
     if (!userProfile.maxHR || !userProfile.restingHR || !userProfile.weight) {
       alert('Please complete your user profile first (Max HR, Resting HR, Weight)');
+      setProfileModalOriginalFTP(currentFTP);
       setShowProfileModal(true);
       return;
     }
@@ -1984,7 +2024,10 @@ Please analyze my current training status and provide personalized insights.`;
               Event
             </button>
             <button
-              onClick={() => setShowProfileModal(true)}
+              onClick={() => {
+                setProfileModalOriginalFTP(currentFTP);
+                setShowProfileModal(true);
+              }}
               className="text-sm px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 transition"
             >
               Profile
@@ -1993,6 +2036,14 @@ Please analyze my current training status and provide personalized insights.`;
         </div>
         <p className="text-gray-400 text-sm mb-4">
           FTP: {currentFTP}W
+          {(() => {
+            // Get most recent eFTP from history
+            const latestEFTP = history.find(w => w.eFTP)?.eFTP;
+            if (latestEFTP) {
+              return <span> • eFTP: <span className="text-purple-400">{latestEFTP}W</span></span>;
+            }
+            return null;
+          })()}
           {(() => {
             const daysToEvent = getDaysUntilEvent();
             return daysToEvent !== null ? ` • Days to Event: ${daysToEvent}` : '';
@@ -2578,13 +2629,41 @@ Please analyze my current training status and provide personalized insights.`;
 
               <div className="flex gap-3">
                 <button
-                  onClick={() => setShowProfileModal(false)}
+                  onClick={() => {
+                    // Check if FTP changed
+                    if (profileModalOriginalFTP !== null && currentFTP !== profileModalOriginalFTP) {
+                      const shouldReset = window.confirm(
+                        `Your FTP changed from ${profileModalOriginalFTP}W to ${currentFTP}W.\n\n` +
+                        `Would you like to reset your progression levels to 1.0?\n\n` +
+                        `This is recommended when your FTP changes significantly.`
+                      );
+                      if (shouldReset) {
+                        const resetLevels = {
+                          endurance: 1.0,
+                          tempo: 1.0,
+                          sweetspot: 1.0,
+                          threshold: 1.0,
+                          vo2max: 1.0,
+                          anaerobic: 1.0,
+                        };
+                        setLevels(resetLevels);
+                        setDisplayLevels(resetLevels);
+                      }
+                    }
+                    setShowProfileModal(false);
+                  }}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium transition"
                 >
                   Save
                 </button>
                 <button
-                  onClick={() => setShowProfileModal(false)}
+                  onClick={() => {
+                    // Revert FTP change on cancel
+                    if (profileModalOriginalFTP !== null) {
+                      setCurrentFTP(profileModalOriginalFTP);
+                    }
+                    setShowProfileModal(false);
+                  }}
                   className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition"
                 >
                   Cancel
@@ -2692,15 +2771,19 @@ Please analyze my current training status and provide personalized insights.`;
               const weeklyTSSData = calculateWeeklyTSS(history);
               const weeklyHoursData = calculateWeeklyHours(history);
               const weeklyElevationData = calculateWeeklyElevation(history);
+              const eftpHistoryData = calculateEFTPHistory(history);
 
               const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
               const currentWeekHours = weeklyHoursData.length > 0 ? weeklyHoursData[weeklyHoursData.length - 1].hours : 0;
               const currentWeekElevation = weeklyElevationData.length > 0
                 ? weeklyElevationData[weeklyElevationData.length - 1].elevation
                 : 0;
+              const latestEFTP = eftpHistoryData.length > 0
+                ? eftpHistoryData[eftpHistoryData.length - 1].eFTP
+                : null;
 
               // Check if any data exists
-              const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || weeklyElevationData.length > 0;
+              const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || weeklyElevationData.length > 0 || eftpHistoryData.length > 0;
 
               if (!hasData) return null;
 
@@ -2749,6 +2832,20 @@ Please analyze my current training status and provide personalized insights.`;
                 return null;
               };
 
+              const EFTPTooltip = ({ active, payload }) => {
+                if (active && payload && payload.length) {
+                  const data = payload[0].payload;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                      <p className="text-gray-300 mb-1">{data.label}</p>
+                      <p className="text-purple-400 font-bold">{data.eFTP}W</p>
+                      <p className="text-gray-500 text-xs">{data.notes}</p>
+                    </div>
+                  );
+                }
+                return null;
+              };
+
               return (
                 <div className="bg-gray-800 rounded-lg p-4">
                   {/* Tab Buttons */}
@@ -2782,6 +2879,16 @@ Please analyze my current training status and provide personalized insights.`;
                       }`}
                     >
                       Elevation
+                    </button>
+                    <button
+                      onClick={() => setWeeklyChartView('eftp')}
+                      className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        weeklyChartView === 'eftp'
+                          ? 'bg-purple-500 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      eFTP
                     </button>
                   </div>
 
@@ -2917,6 +3024,59 @@ Please analyze my current training status and provide personalized insights.`;
                         </AreaChart>
                       </ResponsiveContainer>
                     </>
+                  )}
+
+                  {/* eFTP Chart */}
+                  {weeklyChartView === 'eftp' && eftpHistoryData.length > 0 && (
+                    <>
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium">eFTP Progress (1 Year)</h3>
+                        <span className="text-sm text-gray-400">
+                          Latest: <span className="text-purple-400 font-bold">{latestEFTP}W</span>
+                        </span>
+                      </div>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <AreaChart data={eftpHistoryData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorEFTP" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#A855F7" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#A855F7" stopOpacity={0.1}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            stroke="#9CA3AF"
+                            style={{ fontSize: '12px' }}
+                            tickFormatter={(value) => `${value}W`}
+                            domain={['dataMin - 10', 'dataMax + 10']}
+                          />
+                          <Tooltip content={<EFTPTooltip />} />
+                          <Area
+                            type="monotone"
+                            dataKey="eFTP"
+                            stroke="#A855F7"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#colorEFTP)"
+                            dot={false}
+                            activeDot={{ r: 6, fill: '#A855F7', stroke: '#fff', strokeWidth: 2 }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </>
+                  )}
+
+                  {weeklyChartView === 'eftp' && eftpHistoryData.length === 0 && (
+                    <div className="text-center text-gray-400 py-8">
+                      <p>No eFTP data available.</p>
+                      <p className="text-sm mt-2">Import rides with eFTP data from intervals.icu CSV.</p>
+                    </div>
                   )}
                 </div>
               );
