@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const ZONES = [
+  { id: 'recovery', name: 'Recovery', color: '#6B7280', description: 'Z1: <130W' },
   { id: 'endurance', name: 'Endurance', color: '#3B82F6', description: 'Z2: 130-165W' },
   { id: 'tempo', name: 'Tempo', color: '#22C55E', description: 'Z3: 165-185W' },
   { id: 'sweetspot', name: 'Sweet Spot', color: '#EAB308', description: '195-220W' },
@@ -11,12 +12,24 @@ const ZONES = [
 ];
 
 const DEFAULT_LEVELS = {
+  recovery: 1,
   endurance: 1,
   tempo: 1,
   sweetspot: 1,
   threshold: 1,
   vo2max: 1,
   anaerobic: 1,
+};
+
+// Expected RPE based on zone/ride type
+const ZONE_EXPECTED_RPE = {
+  recovery: 3,
+  endurance: 4,
+  tempo: 5,
+  sweetspot: 6,
+  threshold: 7,
+  vo2max: 8,
+  anaerobic: 9,
 };
 
 const STORAGE_KEY = 'cycling-progression-data-v2';
@@ -91,18 +104,22 @@ export default function ProgressionTracker() {
   const [analyzingActivity, setAnalyzingActivity] = useState(null);
 
   const [formData, setFormData] = useState({
+    name: '',
     date: new Date().toISOString().split('T')[0],
     zone: 'endurance',
-    workoutLevel: 2,
+    workoutLevel: ZONE_EXPECTED_RPE['endurance'], // Auto-set based on zone
     rpe: 5,
     completed: true,
     duration: 60,
     normalizedPower: 150,
-    rideType: 'Outdoor', // 'Outdoor' or 'Indoor'
+    rideType: 'Indoor', // 'Indoor' or 'Outdoor'
     distance: 0, // miles
     elevation: 0, // feet
     notes: '',
   });
+
+  // State for editing rides
+  const [editingRide, setEditingRide] = useState(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -211,6 +228,7 @@ export default function ProgressionTracker() {
   // Calculate zone descriptions dynamically based on current FTP
   const getZoneDescription = (zoneId, ftp) => {
     const zones = {
+      recovery: { min: 0, max: Math.round(ftp * 0.55), label: 'Z1' },
       endurance: { min: Math.round(ftp * 0.55), max: Math.round(ftp * 0.70), label: 'Z2' },
       tempo: { min: Math.round(ftp * 0.70), max: Math.round(ftp * 0.79), label: 'Z3' },
       sweetspot: { min: Math.round(ftp * 0.83), max: Math.round(ftp * 0.94), label: '' },
@@ -230,7 +248,8 @@ export default function ProgressionTracker() {
 
   // Get zone power ranges for mapping activities
   const getZonePowerRanges = (ftp) => ({
-    endurance: { min: 0, max: Math.round(ftp * 0.70) },
+    recovery: { min: 0, max: Math.round(ftp * 0.55) },
+    endurance: { min: Math.round(ftp * 0.55), max: Math.round(ftp * 0.70) },
     tempo: { min: Math.round(ftp * 0.70), max: Math.round(ftp * 0.79) },
     sweetspot: { min: Math.round(ftp * 0.83), max: Math.round(ftp * 0.94) },
     threshold: { min: Math.round(ftp * 0.94), max: ftp },
@@ -1704,59 +1723,103 @@ export default function ProgressionTracker() {
 
   const handleLogWorkout = () => {
     const zone = formData.zone;
-    const currentLevel = levels[zone];
-    const newLevel = calculateNewLevel(
-      currentLevel,
-      formData.workoutLevel,
-      formData.rpe,
-      formData.completed
-    );
-
     const tss = calculateTSS(formData.normalizedPower, formData.duration);
     const intensityFactor = calculateIF(formData.normalizedPower);
 
-    const entry = {
-      ...formData,
-      id: Date.now(),
-      previousLevel: currentLevel,
-      newLevel: newLevel,
-      change: newLevel - currentLevel,
-      tss,
-      intensityFactor,
-    };
+    if (editingRide) {
+      // Editing existing workout
+      const oldWorkout = history.find(w => w.id === editingRide);
 
-    // Update recent changes
-    setRecentChanges(prev => ({
-      ...prev,
-      [zone]: {
-        change: entry.change,
-        date: entry.date,
-      },
-    }));
+      const entry = {
+        ...oldWorkout, // Preserve any extra fields like intervalsId, eFTP
+        ...formData,
+        name: formData.name,
+        id: editingRide,
+        previousLevel: oldWorkout.previousLevel,
+        newLevel: oldWorkout.newLevel,
+        change: oldWorkout.change,
+        tss,
+        intensityFactor,
+      };
 
-    // Set last logged workout for summary modal
-    setLastLoggedWorkout(entry);
+      // Update history with edited entry
+      setHistory(history.map(w => w.id === editingRide ? entry : w));
 
-    // Update history and levels
-    setHistory([entry, ...history]);
-    setLevels({ ...levels, [zone]: newLevel });
+      // Reset form
+      setFormData({
+        name: '',
+        date: new Date().toISOString().split('T')[0],
+        zone: 'endurance',
+        workoutLevel: ZONE_EXPECTED_RPE['endurance'],
+        rpe: 5,
+        completed: true,
+        duration: 60,
+        normalizedPower: 150,
+        rideType: 'Indoor',
+        distance: 0,
+        elevation: 0,
+        notes: '',
+      });
+      setEditingRide(null);
+      setShowLogRideModal(false);
+      setShowHistoryModal(true);
+    } else {
+      // Creating new workout
+      const currentLevel = levels[zone];
+      const newLevel = calculateNewLevel(
+        currentLevel,
+        formData.workoutLevel,
+        formData.rpe,
+        formData.completed
+      );
 
-    // Show summary modal
-    setShowPostLogSummary(true);
+      const entry = {
+        ...formData,
+        name: formData.name,
+        id: Date.now(),
+        previousLevel: currentLevel,
+        newLevel: newLevel,
+        change: newLevel - currentLevel,
+        tss,
+        intensityFactor,
+      };
 
-    // Reset form
-    setFormData({
-      date: new Date().toISOString().split('T')[0],
-      zone: 'endurance',
-      workoutLevel: 2,
-      rpe: 5,
-      completed: true,
-      duration: 60,
-      normalizedPower: 150,
-      rideType: 'Outdoor',
-      distance: 0,
-      notes: '',
-    });
+      // Update recent changes
+      setRecentChanges(prev => ({
+        ...prev,
+        [zone]: {
+          change: entry.change,
+          date: entry.date,
+        },
+      }));
+
+      // Set last logged workout for summary modal
+      setLastLoggedWorkout(entry);
+
+      // Update history and levels
+      setHistory([entry, ...history]);
+      setLevels({ ...levels, [zone]: newLevel });
+
+      // Show summary modal
+      setShowPostLogSummary(true);
+
+      // Reset form
+      setFormData({
+        name: '',
+        date: new Date().toISOString().split('T')[0],
+        zone: 'endurance',
+        workoutLevel: ZONE_EXPECTED_RPE['endurance'],
+        rpe: 5,
+        completed: true,
+        duration: 60,
+        normalizedPower: 150,
+        rideType: 'Indoor',
+        distance: 0,
+        elevation: 0,
+        notes: '',
+      });
+      setEditingRide(null);
+    }
   };
 
   const closePostLogSummary = () => {
@@ -1821,6 +1884,52 @@ export default function ProgressionTracker() {
     if (confirmed) {
       setHistory(history.filter(w => w.id !== workoutId));
     }
+  };
+
+  // Edit workout handler
+  const handleEditRide = (workoutId) => {
+    const workout = history.find(w => w.id === workoutId);
+    if (!workout) return;
+
+    // Populate form with workout data
+    setFormData({
+      name: workout.name || workout.notes || '',
+      date: workout.date,
+      zone: workout.zone,
+      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[workout.zone],
+      rpe: workout.rpe,
+      completed: workout.completed !== false,
+      duration: workout.duration,
+      normalizedPower: workout.normalizedPower,
+      rideType: workout.rideType || 'Indoor',
+      distance: workout.distance || 0,
+      elevation: workout.elevation || 0,
+      notes: workout.notes || '',
+    });
+
+    setEditingRide(workoutId);
+    setShowHistoryModal(false);
+    setShowLogRideModal(true);
+  };
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setEditingRide(null);
+    setFormData({
+      name: '',
+      date: new Date().toISOString().split('T')[0],
+      zone: 'endurance',
+      workoutLevel: ZONE_EXPECTED_RPE['endurance'],
+      rpe: 5,
+      completed: true,
+      duration: 60,
+      normalizedPower: 150,
+      rideType: 'Indoor',
+      distance: 0,
+      elevation: 0,
+      notes: '',
+    });
+    setShowLogRideModal(false);
   };
 
   const exportData = () => {
@@ -3227,14 +3336,26 @@ Please analyze my current training status and provide personalized insights.`;
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="font-bold">Log Workout</h2>
+                <h2 className="font-bold">{editingRide ? 'Edit Workout' : 'Log Workout'}</h2>
                 <button
-                  onClick={() => setShowLogRideModal(false)}
+                  onClick={() => editingRide ? handleCancelEdit() : setShowLogRideModal(false)}
                   className="text-gray-400 hover:text-white text-xl"
                 >
                   ×
                 </button>
               </div>
+
+            {/* Ride Name */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-1">Ride Name</label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                placeholder="e.g., Morning Endurance Ride"
+              />
+            </div>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
@@ -3262,7 +3383,11 @@ Please analyze my current training status and provide personalized insights.`;
                 <label className="block text-sm text-gray-400 mb-1">Primary Zone</label>
                 <select
                   value={formData.zone}
-                  onChange={(e) => setFormData({ ...formData, zone: e.target.value })}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    zone: e.target.value,
+                    workoutLevel: ZONE_EXPECTED_RPE[e.target.value]
+                  })}
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                 >
                   {ZONES.map((zone) => (
@@ -3307,8 +3432,8 @@ Please analyze my current training status and provide personalized insights.`;
                   onChange={(e) => setFormData({ ...formData, rideType: e.target.value })}
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                 >
-                  <option value="Outdoor">Outdoor</option>
                   <option value="Indoor">Indoor</option>
+                  <option value="Outdoor">Outdoor</option>
                 </select>
               </div>
               <div>
@@ -3328,9 +3453,6 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             </div>
 
-            {/* TODO: Future feature - Add elevation gain input field here */}
-            {/* Example: <input type="number" label="Elevation Gain (ft)" placeholder="2500" /> */}
-
             {/* Calculated values preview */}
             <div className="bg-gray-700 rounded p-3 mb-4 grid grid-cols-2 gap-4 text-sm">
               <div>
@@ -3346,7 +3468,15 @@ Please analyze my current training status and provide personalized insights.`;
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
-                  Expected RPE: {formData.workoutLevel}
+                  Expected RPE (from zone)
+                </label>
+                <div className="bg-gray-600 rounded px-3 py-2 text-sm font-mono">
+                  {formData.workoutLevel}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  Actual RPE: {formData.rpe}
                 </label>
                 <input
                   type="range"
