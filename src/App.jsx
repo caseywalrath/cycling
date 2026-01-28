@@ -1391,19 +1391,10 @@ export default function ProgressionTracker() {
           const tss = activityData.icu_training_load || activityData.training_load || activityData.tss ||
                       calculateTSS(np, Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60));
 
-          // Map to our zone
-          const zone = mapWorkoutTypeToZone(activityData);
-          const currentLevel = levels[zone];
+          // Imported rides are NOT auto-classified into zones.
+          // Zone classification and progression levels are only set via manual ride logging.
 
-          // Estimate workout level from IF
           const intensityFactor = np / currentFTP;
-          const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
-
-          // Get RPE if available (wellness data)
-          const rpe = activityData.feel || activityData.perceived_exertion || 5; // Default to 5 if not available
-
-          // Calculate new level
-          const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
 
           // Extract distance and ride type
           const distanceMeters = activityData.distance || 0;
@@ -1422,14 +1413,14 @@ export default function ProgressionTracker() {
           // Get eFTP if available
           const activityEFTP = activityData.icu_ftp || activityData.ftp || null;
 
-          // Create workout entry
+          // Create workout entry without zone classification
           const entry = {
             id: Date.now() + imported, // Unique ID
             intervalsId: activitySummary.id, // intervals.icu activity ID for VO2max analysis
             date: activityDate,
-            zone: zone,
-            workoutLevel: parseFloat(workoutLevel.toFixed(1)),
-            rpe: rpe,
+            zone: null, // No auto-classification — user must classify manually
+            workoutLevel: null,
+            rpe: null,
             completed: true,
             duration: Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60),
             normalizedPower: Math.round(np),
@@ -1439,17 +1430,15 @@ export default function ProgressionTracker() {
             eFTP: activityEFTP,
             name: activityData.name || 'Imported Ride',
             notes: 'Imported from intervals.icu',
-            previousLevel: currentLevel,
-            newLevel: newLevel,
-            change: newLevel - currentLevel,
+            previousLevel: null,
+            newLevel: null,
+            change: 0,
             tss: tss,
             intensityFactor: intensityFactor,
+            source: 'imported',
           };
 
           newWorkouts.push(entry);
-
-          // Update level for next workout calculation
-          levels[zone] = newLevel;
 
           imported++;
 
@@ -1469,23 +1458,8 @@ export default function ProgressionTracker() {
         );
 
         setHistory(mergedHistory);
-        setLevels({ ...levels });
-        setDisplayLevels({ ...levels });
 
-        // Recalculate recent changes
-        const changes = {};
-        ZONES.forEach(zone => {
-          const lastWorkout = mergedHistory.find(w => w.zone === zone.id);
-          if (lastWorkout && lastWorkout.change !== 0) {
-            changes[zone.id] = {
-              change: lastWorkout.change,
-              date: lastWorkout.date,
-            };
-          }
-        });
-        setRecentChanges(changes);
-
-        let statusMsg = `✓ Imported ${imported} activities!`;
+        let statusMsg = `✓ Imported ${imported} activities! Classify rides in Ride History to update progression levels.`;
         if (skippedNoPower > 0 || skippedDuplicate > 0 || fetchErrors > 0) {
           statusMsg += ` Skipped: ${skippedNoPower} without power, ${skippedDuplicate} duplicates, ${fetchErrors} fetch errors.`;
         }
@@ -1594,7 +1568,6 @@ export default function ProgressionTracker() {
       let imported = 0;
       let skipped = 0;
       const newWorkouts = [];
-      const tempLevels = { ...levels };
 
       // Process each data row
       for (let i = 1; i < lines.length; i++) {
@@ -1632,33 +1605,16 @@ export default function ProgressionTracker() {
           continue;
         }
 
-        // Map to zone based on NP
-        const ranges = getZonePowerRanges(currentFTP);
-        let zone = 'endurance';
-        if (np >= ranges.anaerobic.min) zone = 'anaerobic';
-        else if (np >= ranges.vo2max.min) zone = 'vo2max';
-        else if (np >= ranges.threshold.min) zone = 'threshold';
-        else if (np >= ranges.sweetspot.min) zone = 'sweetspot';
-        else if (np >= ranges.tempo.min) zone = 'tempo';
+        // Imported rides are NOT auto-classified into zones.
+        // Zone classification and progression levels are only set via manual ride logging.
 
-        const currentLevel = tempLevels[zone];
-
-        // Estimate workout level from IF
-        const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
-
-        // Default RPE to 5 (no RPE data in CSV)
-        const rpe = 5;
-
-        // Calculate new level
-        const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
-
-        // Create workout entry
+        // Create workout entry without zone classification
         const entry = {
           id: Date.now() + imported,
           date: activityDate,
-          zone: zone,
-          workoutLevel: parseFloat(workoutLevel.toFixed(1)),
-          rpe: rpe,
+          zone: null, // No auto-classification — user must classify manually
+          workoutLevel: null,
+          rpe: null,
           completed: true,
           duration: Math.round(duration),
           normalizedPower: Math.round(np),
@@ -1666,18 +1622,18 @@ export default function ProgressionTracker() {
           distance: Math.round(distance * 10) / 10, // Round to 1 decimal
           name: activityName,
           notes: 'Imported from CSV',
-          previousLevel: currentLevel,
-          newLevel: newLevel,
-          change: newLevel - currentLevel,
+          previousLevel: null,
+          newLevel: null,
+          change: 0,
           tss: tss,
           intensityFactor: intensityFactor,
           intervalsId: activityId, // intervals.icu activity ID for VO2max analysis
           elevation: elevationIdx >= 0 && cols[elevationIdx] ? Math.round(parseFloat(cols[elevationIdx]) * 3.28084) : 0, // Convert meters to feet
           eFTP: eftpIdx >= 0 && cols[eftpIdx] ? parseInt(cols[eftpIdx]) : null, // Continuous eFTP with decay from intervals.icu
+          source: 'imported',
         };
 
         newWorkouts.push(entry);
-        tempLevels[zone] = newLevel;
         imported++;
       }
 
@@ -1688,23 +1644,8 @@ export default function ProgressionTracker() {
         );
 
         setHistory(mergedHistory);
-        setLevels(tempLevels);
-        setDisplayLevels(tempLevels);
 
-        // Recalculate recent changes
-        const changes = {};
-        ZONES.forEach(zone => {
-          const lastWorkout = mergedHistory.find(w => w.zone === zone.id);
-          if (lastWorkout && lastWorkout.change !== 0) {
-            changes[zone.id] = {
-              change: lastWorkout.change,
-              date: lastWorkout.date,
-            };
-          }
-        });
-        setRecentChanges(changes);
-
-        setCSVImportStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data).`);
+        setCSVImportStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data). Classify rides in Ride History to update progression levels.`);
 
         // Clear CSV content after successful import
         setTimeout(() => {
@@ -1731,21 +1672,46 @@ export default function ProgressionTracker() {
     if (editingRide) {
       // Editing existing workout
       const oldWorkout = history.find(w => w.id === editingRide);
+      const wasUnclassified = oldWorkout.zone === null || oldWorkout.source === 'imported';
+      const isNowClassified = zone !== null && zone !== 'recovery';
+
+      // If user is classifying an imported ride (or re-classifying), calculate progression
+      let previousLevel = oldWorkout.previousLevel;
+      let newLevel = oldWorkout.newLevel;
+      let change = oldWorkout.change;
+
+      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+        // Recalculate progression for the newly assigned zone
+        previousLevel = levels[zone];
+        newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, formData.completed);
+        change = newLevel - previousLevel;
+      }
 
       const entry = {
         ...oldWorkout, // Preserve any extra fields like intervalsId, eFTP
         ...formData,
         name: formData.name,
         id: editingRide,
-        previousLevel: oldWorkout.previousLevel,
-        newLevel: oldWorkout.newLevel,
-        change: oldWorkout.change,
+        previousLevel,
+        newLevel,
+        change,
         tss,
         intensityFactor,
+        source: 'manual', // Editing always marks as manually classified
       };
 
       // Update history with edited entry
       setHistory(history.map(w => w.id === editingRide ? entry : w));
+
+      // Update progression levels if zone was assigned/changed
+      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+        setLevels(prev => ({ ...prev, [zone]: newLevel }));
+        setDisplayLevels(prev => ({ ...prev, [zone]: newLevel }));
+        setRecentChanges(prev => ({
+          ...prev,
+          [zone]: { change, date: formData.date },
+        }));
+      }
 
       // Reset form
       setFormData({
@@ -1767,13 +1733,12 @@ export default function ProgressionTracker() {
       setShowHistoryModal(true);
     } else {
       // Creating new workout
-      const currentLevel = levels[zone];
-      const newLevel = calculateNewLevel(
-        currentLevel,
-        formData.workoutLevel,
-        formData.rpe,
-        formData.completed
-      );
+      // Recovery zone does not affect progression levels
+      const affectsProgression = zone !== 'recovery';
+      const currentLevel = affectsProgression ? levels[zone] : null;
+      const newLevel = affectsProgression
+        ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, formData.completed)
+        : null;
 
       const entry = {
         ...formData,
@@ -1781,26 +1746,31 @@ export default function ProgressionTracker() {
         id: Date.now(),
         previousLevel: currentLevel,
         newLevel: newLevel,
-        change: newLevel - currentLevel,
+        change: affectsProgression ? newLevel - currentLevel : 0,
         tss,
         intensityFactor,
+        source: 'manual',
       };
 
-      // Update recent changes
-      setRecentChanges(prev => ({
-        ...prev,
-        [zone]: {
-          change: entry.change,
-          date: entry.date,
-        },
-      }));
+      // Update recent changes (only for non-recovery zones)
+      if (affectsProgression) {
+        setRecentChanges(prev => ({
+          ...prev,
+          [zone]: {
+            change: entry.change,
+            date: entry.date,
+          },
+        }));
+      }
 
       // Set last logged workout for summary modal
       setLastLoggedWorkout(entry);
 
       // Update history and levels
       setHistory([entry, ...history]);
-      setLevels({ ...levels, [zone]: newLevel });
+      if (affectsProgression) {
+        setLevels({ ...levels, [zone]: newLevel });
+      }
 
       // Show summary modal
       setShowPostLogSummary(true);
@@ -1828,8 +1798,8 @@ export default function ProgressionTracker() {
     setShowPostLogSummary(false);
     setShowLogRideModal(false);
 
-    // Trigger animation after modal closes
-    if (lastLoggedWorkout) {
+    // Trigger animation after modal closes (only for rides with progression)
+    if (lastLoggedWorkout && lastLoggedWorkout.previousLevel != null && lastLoggedWorkout.newLevel != null) {
       setTimeout(() => {
         animateLevel(
           lastLoggedWorkout.zone,
@@ -1894,12 +1864,14 @@ export default function ProgressionTracker() {
     if (!workout) return;
 
     // Populate form with workout data
+    // For imported (unclassified) rides, default zone to 'endurance' so the user can select
+    const editZone = workout.zone || 'endurance';
     setFormData({
       name: workout.name || workout.notes || '',
       date: workout.date,
-      zone: workout.zone,
-      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[workout.zone],
-      rpe: workout.rpe,
+      zone: editZone,
+      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[editZone],
+      rpe: workout.rpe != null ? workout.rpe : 5,
       completed: workout.completed !== false,
       duration: workout.duration,
       normalizedPower: workout.normalizedPower,
@@ -2044,7 +2016,7 @@ export default function ProgressionTracker() {
 - Anaerobic: ${levels.anaerobic.toFixed(1)}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${w.date}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}, RPE ${w.rpe}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
+${recentWorkouts.map(w => `- ${w.date}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
 
 Please analyze my current training status and provide personalized insights.`;
 
@@ -2055,11 +2027,13 @@ Please analyze my current training status and provide personalized insights.`;
   };
 
   const getZoneName = (zoneId) => {
+    if (!zoneId) return 'Unclassified';
     const zone = ZONES.find(z => z.id === zoneId);
     return zone ? zone.name : zoneId;
   };
 
   const getZoneColor = (zoneId) => {
+    if (!zoneId) return '#888';
     const zone = ZONES.find(z => z.id === zoneId);
     return zone ? zone.color : '#888';
   };
@@ -2180,31 +2154,39 @@ Please analyze my current training status and provide personalized insights.`;
                 {getChangeDescription(lastLoggedWorkout.change, lastLoggedWorkout.rpe, lastLoggedWorkout.workoutLevel, lastLoggedWorkout.previousLevel)}
               </p>
 
-              <div className="flex items-center justify-center gap-4 mb-4">
-                <div className="text-right">
-                  <div className="text-2xl font-mono text-gray-400">{lastLoggedWorkout.previousLevel.toFixed(1)}</div>
-                  <div className="text-xs text-gray-500">Before</div>
-                </div>
-                <div className="text-2xl">→</div>
-                <div className="text-left">
-                  <div className="text-2xl font-mono font-bold" style={{ color: getZoneColor(lastLoggedWorkout.zone) }}>
-                    {lastLoggedWorkout.newLevel.toFixed(1)}
+              {lastLoggedWorkout.previousLevel != null && lastLoggedWorkout.newLevel != null ? (
+                <>
+                  <div className="flex items-center justify-center gap-4 mb-4">
+                    <div className="text-right">
+                      <div className="text-2xl font-mono text-gray-400">{lastLoggedWorkout.previousLevel.toFixed(1)}</div>
+                      <div className="text-xs text-gray-500">Before</div>
+                    </div>
+                    <div className="text-2xl">→</div>
+                    <div className="text-left">
+                      <div className="text-2xl font-mono font-bold" style={{ color: getZoneColor(lastLoggedWorkout.zone) }}>
+                        {lastLoggedWorkout.newLevel.toFixed(1)}
+                      </div>
+                      <div className="text-xs text-gray-500">After</div>
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500">After</div>
-                </div>
-              </div>
 
-              <div
-                className={`inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 ${
-                  lastLoggedWorkout.change > 0
-                    ? 'bg-green-900/50 text-green-400'
-                    : lastLoggedWorkout.change < 0
-                    ? 'bg-red-900/50 text-red-400'
-                    : 'bg-gray-700 text-gray-400'
-                }`}
-              >
-                {formatChange(lastLoggedWorkout.change)}
-              </div>
+                  <div
+                    className={`inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 ${
+                      lastLoggedWorkout.change > 0
+                        ? 'bg-green-900/50 text-green-400'
+                        : lastLoggedWorkout.change < 0
+                        ? 'bg-red-900/50 text-red-400'
+                        : 'bg-gray-700 text-gray-400'
+                    }`}
+                  >
+                    {formatChange(lastLoggedWorkout.change)}
+                  </div>
+                </>
+              ) : (
+                <div className="mb-4 text-gray-400 text-sm">
+                  Recovery rides do not affect progression levels.
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-2 text-xs mb-4 bg-gray-700/50 rounded p-2">
                 <div>
@@ -3615,12 +3597,18 @@ Please analyze my current training status and provide personalized insights.`;
                     {/* Level changes and eFTP */}
                     <div className="flex justify-between text-xs">
                       <span>
-                        Level {entry.workoutLevel} • RPE {entry.rpe}
+                        {entry.workoutLevel != null ? `Level ${entry.workoutLevel}` : ''}
+                        {entry.rpe != null ? ` • RPE ${entry.rpe}` : ''}
                         {entry.eFTP && <span className="text-gray-400 ml-2">• eFTP {entry.eFTP}W</span>}
+                        {!entry.zone && <span className="text-yellow-400 ml-1">• Needs classification</span>}
                       </span>
-                      <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
-                        {entry.previousLevel.toFixed(1)} → {entry.newLevel.toFixed(1)} ({formatChange(entry.change)})
-                      </span>
+                      {entry.previousLevel != null && entry.newLevel != null ? (
+                        <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
+                          {entry.previousLevel.toFixed(1)} → {entry.newLevel.toFixed(1)} ({formatChange(entry.change)})
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">—</span>
+                      )}
                     </div>
                   </div>
                 ))}
