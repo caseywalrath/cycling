@@ -8,6 +8,16 @@
 
 This file serves as a comprehensive guide for AI assistants (like Claude) working on this codebase. It documents the project structure, development workflows, coding conventions, and key patterns that AI assistants should follow when contributing to this project.
 
+## First Steps — Required Reading
+
+Before doing any substantive work (features, bug fixes, refactoring, or architectural questions), read these files to understand the project and its history:
+
+1. **`Project_Context.md`** — Project goals, user context, and development priorities
+2. **`ARCHITECTURE.md`** — Codebase structure, key patterns, and technical decisions
+3. **`CHANGELOG.md`** — Session-by-session development history and recent changes
+
+For trivial tasks (typo fixes, simple questions about a single file), you may skip this step.
+
 ---
 
 ## Table of Contents
