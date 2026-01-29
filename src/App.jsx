@@ -496,12 +496,17 @@ export default function ProgressionTracker() {
     const eftpData = history
       .filter(w => w.eFTP && new Date(w.date) >= oneYearAgo)
       .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(w => ({
-        date: w.date,
-        eFTP: w.eFTP,
-        label: new Date(w.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        notes: w.notes || 'Workout',
-      }));
+      .map(w => {
+        const d = new Date(w.date);
+        return {
+          date: w.date,
+          eFTP: w.eFTP,
+          label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          month: d.toLocaleDateString('en-US', { month: 'short' }),
+          monthKey: `${d.getFullYear()}-${d.getMonth()}`,
+          rideName: w.name || 'Workout',
+        };
+      });
 
     return eftpData;
   };
@@ -2908,7 +2913,7 @@ Please analyze my current training status and provide personalized insights.`;
                     <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
                       <p className="text-gray-300 mb-1">{data.label}</p>
                       <p className="text-purple-400 font-bold">{data.eFTP}W</p>
-                      <p className="text-gray-500 text-xs">{data.notes}</p>
+                      <p className="text-gray-500 text-xs">{data.rideName}</p>
                     </div>
                   );
                 }
@@ -2971,7 +2976,7 @@ Please analyze my current training status and provide personalized insights.`;
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={weeklyHoursData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <AreaChart data={weeklyHoursData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#FB923C" stopOpacity={0.8}/>
@@ -2989,6 +2994,7 @@ Please analyze my current training status and provide personalized insights.`;
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
                             tickFormatter={(value) => `${value}h`}
+                            width={45}
                           />
                           <Tooltip content={<HoursTooltip />} />
                           <Area
@@ -3016,7 +3022,7 @@ Please analyze my current training status and provide personalized insights.`;
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={weeklyTSSData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <AreaChart data={weeklyTSSData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorTSS" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
@@ -3033,6 +3039,7 @@ Please analyze my current training status and provide personalized insights.`;
                           <YAxis
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
+                            width={45}
                           />
                           <Tooltip content={<TSSTooltip />} />
                           <Area
@@ -3060,7 +3067,7 @@ Please analyze my current training status and provide personalized insights.`;
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={weeklyElevationData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <AreaChart data={weeklyElevationData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorElevation" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#22C55E" stopOpacity={0.8}/>
@@ -3078,6 +3085,7 @@ Please analyze my current training status and provide personalized insights.`;
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
                             tickFormatter={(value) => `${value.toLocaleString()}ft`}
+                            width={55}
                           />
                           <Tooltip content={<ElevationTooltip />} />
                           <Area
@@ -3105,7 +3113,7 @@ Please analyze my current training status and provide personalized insights.`;
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={eftpHistoryData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <AreaChart data={eftpHistoryData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorEFTP" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#A855F7" stopOpacity={0.8}/>
@@ -3114,16 +3122,30 @@ Please analyze my current training status and provide personalized insights.`;
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                           <XAxis
-                            dataKey="label"
+                            dataKey="monthKey"
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
-                            interval="preserveStartEnd"
+                            tickFormatter={(value, index) => {
+                              const point = eftpHistoryData.find(d => d.monthKey === value);
+                              return point ? point.month : '';
+                            }}
+                            ticks={(() => {
+                              const seen = new Set();
+                              return eftpHistoryData
+                                .filter(d => {
+                                  if (seen.has(d.monthKey)) return false;
+                                  seen.add(d.monthKey);
+                                  return true;
+                                })
+                                .map(d => d.monthKey);
+                            })()}
                           />
                           <YAxis
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
                             tickFormatter={(value) => `${value}W`}
                             domain={['dataMin - 10', 'dataMax + 10']}
+                            width={45}
                           />
                           <Tooltip content={<EFTPTooltip />} />
                           <Area
