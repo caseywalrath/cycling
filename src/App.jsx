@@ -2020,9 +2020,27 @@ ${recentWorkouts.map(w => `- ${w.date}: ${getZoneName(w.zone)}, ${w.duration}min
 
 Please analyze my current training status and provide personalized insights.`;
 
-    navigator.clipboard.writeText(analysisText).then(() => {
+    const copyToClipboard = (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+      }
+      // Fallback for non-secure contexts (e.g., HTTP on LAN)
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return Promise.resolve();
+    };
+
+    copyToClipboard(analysisText).then(() => {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
+    }).catch(() => {
+      alert('Copy failed. Your browser may not support clipboard access over HTTP.');
     });
   };
 
