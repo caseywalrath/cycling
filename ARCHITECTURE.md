@@ -18,11 +18,23 @@
 - Confirm which branch should be used as base before starting work
 - Use specific line numbers when referencing code locations
 
+**Branch Management — Required Claude Code Behavior**:
+- Each Claude Code session is assigned a new `claude/` branch (e.g., `claude/fix-progression-levels-jyD2G`). These branches are **sequential, not parallel** — each one builds on top of the previous session's work. They are session bookmarks, not independent feature branches.
+- **Always notify the user** at the start of a session what branch you are working on and why a new branch was created. Example: "This session is on branch `claude/review-changelog-SDb6v`. It was created automatically for this session and includes all prior work."
+- **Always end every set of changes** with explicit pull instructions so the user can sync locally in VS Code:
+  ```
+  git fetch origin <branch-name>
+  git checkout <branch-name>
+  git pull origin <branch-name>
+  ```
+- If the user is already on the branch, remind them that only `git pull origin <branch-name>` is needed.
+
 **Common Issues to Prevent**:
 - Wrong branch base → old UI deploying (see CHANGELOG.md Session 4)
 - Features reverting due to unclear git state
 - Changes made to wrong files
 - User confusion about what version is "live"
+- User not knowing a new branch was created or how to pull it
 
 ## File Structure
 ```
