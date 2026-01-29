@@ -2753,7 +2753,7 @@ Please analyze my current training status and provide personalized insights.`;
 
         {/* Progression Levels */}
         <div className="space-y-4">
-            {ZONES.map((zone) => (
+            {ZONES.filter((zone) => zone.id !== 'recovery').map((zone) => (
               <div key={zone.id}>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="font-medium flex items-center gap-2">
