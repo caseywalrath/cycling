@@ -131,4 +131,6 @@
 - "Copy for Claude" clipboard fix: added fallback for non-secure contexts (HTTP on LAN)
 - Replaced Recent Workouts card with full-width "Ride History" button below Instant Analysis
 - Increased Ride History modal scroll height from fixed 384px to 70% viewport height
+- Training Summary compacted into two inline rows: `TSS 140 7d 302 14d 693 28d` and `Longest (30d) 121 min • 30.3 mi`
+- Reset Levels moved from full-width button to small text link in bottom-right corner of action bar
 - Files: `src/App.jsx`

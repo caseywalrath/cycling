@@ -114,14 +114,13 @@ Single localStorage key stores:
 
 1. **Header bar**: App title, FTP/eFTP display, Days to Event, Settings/Profile buttons
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
-3. **Reset Levels button**: Full-width, resets all levels to 1.0
-4. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
-5. **Training Summary card**: 7 / 14 / 28 day TSS columns + Longest Ride (30 Days)
-6. **Charts**: Tabbed — Weekly TSS, Weekly Hours, Elevation, eFTP History
-7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
-8. **Ride History button**: Full-width, opens History modal
-9. **Fitness Progress bar**: CTL toward target 100
-10. **Bottom action bar**: Import | Export | Paste CSV
+3. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
+4. **Training Summary card**: Two inline rows — `TSS [7d] [14d] [28d]` and `Longest (30d) [min] • [mi]`
+5. **Charts**: Tabbed — Weekly TSS, Weekly Hours, Elevation, eFTP History
+6. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
+7. **Ride History button**: Full-width, opens History modal
+8. **Fitness Progress bar**: CTL toward target 100
+9. **Bottom action bar**: Import | Export | Paste CSV (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Key modals:
