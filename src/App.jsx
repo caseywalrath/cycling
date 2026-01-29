@@ -3151,7 +3151,7 @@ Please analyze my current training status and provide personalized insights.`;
                             style={{ fontSize: '12px' }}
                             tickFormatter={(value) => `${value}W`}
                             domain={['dataMin - 10', 'dataMax + 10']}
-                            width={45}
+                            width={55}
                           />
                           <Tooltip content={<EFTPTooltip />} />
                           <Area
