@@ -3282,32 +3282,14 @@ Please analyze my current training status and provide personalized insights.`;
               )}
             </div>
 
-            {/* Recent Workouts Mini Table */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-medium">Recent Workouts</h3>
-                <button
-                  onClick={() => setShowHistoryModal(true)}
-                  className="text-sm px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 transition"
-                >
-                  Ride History
-                </button>
-              </div>
-              {history.length === 0 ? (
-                <p className="text-gray-400 text-sm">No workouts logged yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {history.slice(0, 5).map((entry) => (
-                    <div key={entry.id} className="flex justify-between text-sm py-1 border-b border-gray-700 last:border-0">
-                      <span className="text-gray-400">{entry.date}</span>
-                      <span>{getZoneName(entry.zone)}</span>
-                      <span className="text-gray-400">{entry.duration}min</span>
-                      <span className="font-mono">{entry.tss} TSS</span>
-                      <span className="font-mono text-gray-400">{entry.intensityFactor.toFixed(2)} IF</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Ride History Button */}
+            <div className="pt-4 border-t border-gray-700">
+              <button
+                onClick={() => setShowHistoryModal(true)}
+                className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-gray-500"
+              >
+                Ride History
+              </button>
             </div>
 
             {/* CTL Progress */}
@@ -3542,7 +3524,7 @@ Please analyze my current training status and provide personalized insights.`;
             {history.length === 0 ? (
               <p className="text-gray-400 text-sm">No workouts logged yet.</p>
             ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
+              <div className="space-y-3 max-h-[70vh] overflow-y-auto">
                 {history.map((entry) => (
                   <div key={entry.id} className="bg-gray-700 rounded p-3 text-sm relative">
                     <div className="absolute top-2 right-2 flex gap-1">
