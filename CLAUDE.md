@@ -10,6 +10,18 @@ This file serves as a comprehensive guide for AI assistants (like Claude) workin
 
 ---
 
+## REQUIRED: First Steps for Every Session
+
+Before doing anything else, you MUST:
+
+1. **Read `ARCHITECTURE.md`** — contains developer context, component structure, key functions, chart details, and UI layout reference.
+2. **Read `CHANGELOG.md`** — contains session-by-session history of all changes. Review to understand what has already been built, recently changed, or intentionally removed.
+3. **Notify the user** which branch you are on and that it includes all prior work (see Branch Management in `ARCHITECTURE.md`).
+
+Do not skip these steps. They prevent duplicate work, reverted features, and confusion about the current state of the app.
+
+---
+
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
