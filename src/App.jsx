@@ -334,8 +334,8 @@ export default function ProgressionTracker() {
       .filter(w => new Date(w.date) >= weekAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
-    const prevWeeklyTSS = sorted
-      .filter(w => new Date(w.date) >= twoWeeksAgo && new Date(w.date) < weekAgo)
+    const twoWeekTSS = sorted
+      .filter(w => new Date(w.date) >= twoWeeksAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
     return {
@@ -343,7 +343,7 @@ export default function ProgressionTracker() {
       atl: Math.round(atl),
       tsb: Math.round(ctl - atl),
       weeklyTSS,
-      prevWeeklyTSS,
+      twoWeekTSS,
     };
   };
 
@@ -791,7 +791,8 @@ export default function ProgressionTracker() {
 
   const generateInsights = (loads, history, levels) => {
     const insights = [];
-    const { ctl, atl, tsb, weeklyTSS, prevWeeklyTSS } = loads;
+    const { ctl, atl, tsb, weeklyTSS, twoWeekTSS } = loads;
+    const prevWeeklyTSS = twoWeekTSS - weeklyTSS;
 
     if (tsb < -25) {
       insights.push({
@@ -2004,8 +2005,8 @@ export default function ProgressionTracker() {
 - CTL (Fitness): ${loads.ctl}
 - ATL (Fatigue): ${loads.atl}
 - TSB (Form): ${loads.tsb}
-- Weekly TSS: ${loads.weeklyTSS}
-- Previous Week TSS: ${loads.prevWeeklyTSS}
+- 7-Day TSS: ${loads.weeklyTSS}
+- 14-Day TSS: ${loads.twoWeekTSS}
 
 **Progression Levels:**
 - Endurance: ${levels.endurance.toFixed(1)}
@@ -3196,11 +3197,16 @@ Please analyze my current training status and provide personalized insights.`;
                 const elevation14d = last14Days.reduce((sum, w) => sum + (w.elevation || 0), 0);
 
                 return (
-                  <div className="grid grid-cols-4 gap-3 text-xs">
+                  <div className="grid grid-cols-5 gap-3 text-xs">
                     <div>
                       <div className="text-gray-400 mb-1">7 Days</div>
                       <div className="text-base font-bold">{loads.weeklyTSS} TSS</div>
                       <div className="text-gray-500">{last7Days.length} rides</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 mb-1">14 Days</div>
+                      <div className="text-base font-bold">{loads.twoWeekTSS} TSS</div>
+                      <div className="text-gray-500">{last14Days.length} rides</div>
                     </div>
                     <div>
                       <div className="text-gray-400 mb-1">28 Days</div>
