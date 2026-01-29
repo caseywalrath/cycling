@@ -2812,29 +2812,7 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             ))}
 
-            {/* Reset Levels Button */}
-            <div className="pt-4 border-t border-gray-700">
-              <button
-                onClick={() => {
-                  if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
-                    const resetLevels = {
-                      endurance: 1.0,
-                      tempo: 1.0,
-                      sweetspot: 1.0,
-                      threshold: 1.0,
-                      vo2max: 1.0,
-                      anaerobic: 1.0,
-                    };
-                    setLevels(resetLevels);
-                    setDisplayLevels(resetLevels);
-                    alert('✓ All progression levels reset to 1.0');
-                  }
-                }}
-                className="w-full bg-gray-700 hover:bg-red-900/30 text-gray-400 hover:text-red-400 px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-red-500/30"
-              >
-                Reset Levels
-              </button>
-            </div>
+
 
             {/* Training Load Cards */}
             <div className="grid grid-cols-3 gap-3">
@@ -3594,23 +3572,45 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
-        {/* Import/Export */}
-        <div className="flex gap-3 text-sm mt-6 flex-wrap">
-          <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
-            Import
-            <input type="file" accept=".json" onChange={importData} className="hidden" />
-          </label>
+        {/* Import/Export/Reset */}
+        <div className="flex justify-between text-sm mt-6">
+          <div className="flex gap-3">
+            <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
+              Import
+              <input type="file" accept=".json" onChange={importData} className="hidden" />
+            </label>
+            <button
+              onClick={exportData}
+              className="text-gray-400 hover:text-gray-300 transition"
+            >
+              Export
+            </button>
+            <button
+              onClick={() => setShowCSVImport(true)}
+              className="text-gray-400 hover:text-gray-300 transition"
+            >
+              Paste CSV
+            </button>
+          </div>
           <button
-            onClick={exportData}
-            className="text-gray-400 hover:text-gray-300 transition"
+            onClick={() => {
+              if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
+                const resetLevels = {
+                  endurance: 1.0,
+                  tempo: 1.0,
+                  sweetspot: 1.0,
+                  threshold: 1.0,
+                  vo2max: 1.0,
+                  anaerobic: 1.0,
+                };
+                setLevels(resetLevels);
+                setDisplayLevels(resetLevels);
+                alert('✓ All progression levels reset to 1.0');
+              }
+            }}
+            className="text-gray-500 hover:text-red-400 transition"
           >
-            Export
-          </button>
-          <button
-            onClick={() => setShowCSVImport(true)}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            Paste CSV
+            Reset Levels
           </button>
         </div>
       </div>
