@@ -492,21 +492,40 @@ export default function ProgressionTracker() {
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-    // Filter to workouts with eFTP in the last year, sorted by date
-    const eftpData = history
+    // Filter to workouts with eFTP in the last year
+    const rides = history
       .filter(w => w.eFTP && new Date(w.date) >= oneYearAgo)
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(w => {
-        const d = new Date(w.date);
-        return {
-          date: w.date,
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    if (rides.length === 0) return [];
+
+    // Group by calendar month → find max eFTP per month
+    const monthMap = {};
+    rides.forEach(w => {
+      const d = new Date(w.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!monthMap[key] || w.eFTP > monthMap[key].eFTP) {
+        monthMap[key] = {
           eFTP: w.eFTP,
-          label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          month: d.toLocaleDateString('en-US', { month: 'short' }),
-          monthKey: `${d.getFullYear()}-${d.getMonth()}`,
           rideName: w.name || 'Workout',
+          date: w.date,
         };
-      });
+      }
+    });
+
+    // Build sorted array with month labels
+    const eftpData = Object.keys(monthMap).sort().map(key => {
+      const entry = monthMap[key];
+      const [year, month] = key.split('-').map(Number);
+      const d = new Date(year, month - 1);
+      return {
+        monthKey: key,
+        month: d.toLocaleDateString('en-US', { month: 'short' }),
+        label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        eFTP: entry.eFTP,
+        rideName: entry.rideName,
+      };
+    });
 
     return eftpData;
   };
@@ -3122,23 +3141,9 @@ Please analyze my current training status and provide personalized insights.`;
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                           <XAxis
-                            dataKey="monthKey"
+                            dataKey="month"
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
-                            tickFormatter={(value, index) => {
-                              const point = eftpHistoryData.find(d => d.monthKey === value);
-                              return point ? point.month : '';
-                            }}
-                            ticks={(() => {
-                              const seen = new Set();
-                              return eftpHistoryData
-                                .filter(d => {
-                                  if (seen.has(d.monthKey)) return false;
-                                  seen.add(d.monthKey);
-                                  return true;
-                                })
-                                .map(d => d.monthKey);
-                            })()}
                           />
                           <YAxis
                             stroke="#9CA3AF"
@@ -3155,7 +3160,7 @@ Please analyze my current training status and provide personalized insights.`;
                             strokeWidth={2}
                             fillOpacity={1}
                             fill="url(#colorEFTP)"
-                            dot={false}
+                            dot={{ fill: '#A855F7', strokeWidth: 2, r: 4 }}
                             activeDot={{ r: 6, fill: '#A855F7', stroke: '#fff', strokeWidth: 2 }}
                           />
                         </AreaChart>
