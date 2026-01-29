@@ -488,13 +488,14 @@ export default function ProgressionTracker() {
   const calculateEFTPHistory = (history) => {
     if (!history || history.length === 0) return [];
 
-    // Get date one year ago
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    // Rolling 11-month window so each month name appears only once on X-axis
+    const elevenMonthsAgo = new Date();
+    elevenMonthsAgo.setMonth(elevenMonthsAgo.getMonth() - 11);
+    elevenMonthsAgo.setDate(1); // start of that month
 
-    // Filter to workouts with eFTP in the last year
+    // Filter to workouts with eFTP in the window
     const rides = history
-      .filter(w => w.eFTP && new Date(w.date) >= oneYearAgo)
+      .filter(w => w.eFTP && new Date(w.date) >= elevenMonthsAgo)
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     if (rides.length === 0) return [];
