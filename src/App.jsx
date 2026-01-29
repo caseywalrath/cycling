@@ -3178,7 +3178,7 @@ Please analyze my current training status and provide personalized insights.`;
                 const elevation14d = last14Days.reduce((sum, w) => sum + (w.elevation || 0), 0);
 
                 return (
-                  <div className="grid grid-cols-5 gap-3 text-xs">
+                  <div className="grid grid-cols-4 gap-3 text-xs">
                     <div>
                       <div className="text-gray-400 mb-1">7 Days</div>
                       <div className="text-base font-bold">{loads.weeklyTSS} TSS</div>
@@ -3191,17 +3191,10 @@ Please analyze my current training status and provide personalized insights.`;
                       </div>
                       <div className="text-gray-500">{last28Days.length} rides</div>
                     </div>
-                    <div>
-                      <div className="text-gray-400 mb-1">Elevation (14d)</div>
-                      <div className="text-base font-bold">
-                        {elevation14d.toLocaleString()} ft
-                      </div>
-                      <div className="text-gray-500">{last14Days.length} rides</div>
-                    </div>
                     {longestRide ? (
                       <>
                         <div>
-                          <div className="text-gray-400 mb-1">Longest (30d)</div>
+                          <div className="text-gray-400 mb-1">Longest Ride (30 Days)</div>
                           <div className="text-base font-bold">{longestRide.duration} min</div>
                           <div className="text-gray-500">Duration</div>
                         </div>
@@ -3214,7 +3207,7 @@ Please analyze my current training status and provide personalized insights.`;
                     ) : (
                       <>
                         <div>
-                          <div className="text-gray-400 mb-1">Longest (30d)</div>
+                          <div className="text-gray-400 mb-1">Longest Ride (30 Days)</div>
                           <div className="text-base font-bold text-gray-600">--</div>
                           <div className="text-gray-500">Duration</div>
                         </div>
