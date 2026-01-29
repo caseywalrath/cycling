@@ -121,8 +121,29 @@ Single localStorage key stores:
 | `handleLogWorkout()` | Save new or edited ride |
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
+| `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
 
-## UI Layout (top to bottom, as of Session 5)
+## Charts (Tabbed: Hours, TSS, Elevation, eFTP)
+
+All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (height 200px).
+
+| Chart | Color | dataKey | Y-axis width | Dot style |
+|-------|-------|---------|-------------|-----------|
+| Weekly Hours | Orange `#FB923C` | `hours` | 45 | `r: 4` solid fill |
+| Weekly TSS | Blue `#3B82F6` | `tss` | 45 | `r: 4` solid fill |
+| Weekly Elevation | Green `#22C55E` | `elevation` | 55 | `r: 4` solid fill |
+| eFTP Progress | Purple `#A855F7` | `eFTP` | 55 | `r: 4` solid fill |
+
+**eFTP chart specifics:**
+- Data: `calculateEFTPHistory()` — one point per calendar month (highest eFTP that month)
+- Window: 11 months back from 1st of current month (avoids duplicate month labels on X-axis)
+- X-axis: `dataKey="month"` (short name: Jan, Feb, etc.), evenly spaced
+- Tooltip (`EFTPTooltip`): month/year label, peak wattage, ride name
+- Y-axis domain: `dataMin - 10` to `dataMax + 10`
+
+**Weekly charts** (Hours, TSS, Elevation): X-axis uses `dataKey="label"` with `interval="preserveStartEnd"`. Tooltips show week label, value, and ride count.
+
+## UI Layout (top to bottom, as of Session 6)
 
 1. **Header bar**: App title, FTP/eFTP display, Days to Event, Settings/Profile buttons
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges

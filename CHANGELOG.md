@@ -134,3 +134,15 @@
 - Training Summary compacted into two inline rows: `TSS 140 7d 302 14d 693 28d` and `Longest (30d) 121 min • 30.3 mi`
 - Reset Levels moved from full-width button to small text link in bottom-right corner of action bar
 - Files: `src/App.jsx`
+
+---
+
+## Session 6 - eFTP Chart & Dashboard Chart Improvements
+
+- **eFTP chart simplified to monthly peaks**: Shows one data point per month (highest eFTP that month) instead of every ride. Tooltip shows month/year, peak wattage, and ride name.
+- **Monthly X-axis labels**: eFTP chart uses evenly spaced month labels (Jan, Feb, Mar, etc.) instead of per-ride dates. 11-month rolling window avoids duplicate month names.
+- **eFTP tooltip shows ride name**: Third line displays ride name field (e.g., "VO2Max", "Z2") instead of user comments/notes.
+- **Purple dots restored on eFTP chart**: Matches dot style of Hours, TSS, and Elevation charts (`r: 4`, `activeDot r: 6`).
+- **Y-axis label width increased across all charts**: Prevents clipping of labels (especially 5-digit elevation numbers). Hours/TSS: `width={45}`, Elevation/eFTP: `width={55}`.
+- **Branch notification docs**: Added required Claude Code behavior to ARCHITECTURE.md — notify user of branch name at session start, end every change with pull instructions.
+- Files: `src/App.jsx`, `ARCHITECTURE.md`
