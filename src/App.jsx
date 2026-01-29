@@ -3197,51 +3197,28 @@ Please analyze my current training status and provide personalized insights.`;
                 const elevation14d = last14Days.reduce((sum, w) => sum + (w.elevation || 0), 0);
 
                 return (
-                  <div className="grid grid-cols-5 gap-3 text-xs">
-                    <div>
-                      <div className="text-gray-400 mb-1">7 Days</div>
-                      <div className="text-base font-bold">{loads.weeklyTSS} TSS</div>
-                      <div className="text-gray-500">{last7Days.length} rides</div>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex items-baseline gap-4">
+                      <span className="text-gray-400">TSS</span>
+                      <span className="font-bold text-base">{loads.weeklyTSS}</span>
+                      <span className="text-gray-500">7d</span>
+                      <span className="font-bold text-base">{loads.twoWeekTSS}</span>
+                      <span className="text-gray-500">14d</span>
+                      <span className="font-bold text-base">{last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)}</span>
+                      <span className="text-gray-500">28d</span>
                     </div>
-                    <div>
-                      <div className="text-gray-400 mb-1">14 Days</div>
-                      <div className="text-base font-bold">{loads.twoWeekTSS} TSS</div>
-                      <div className="text-gray-500">{last14Days.length} rides</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-gray-400">Longest (30d)</span>
+                      {longestRide ? (
+                        <>
+                          <span className="font-bold text-base">{longestRide.duration} min</span>
+                          <span className="text-gray-500">•</span>
+                          <span className="font-bold text-base">{longestRide.distance} mi</span>
+                        </>
+                      ) : (
+                        <span className="text-gray-600 font-bold text-base">--</span>
+                      )}
                     </div>
-                    <div>
-                      <div className="text-gray-400 mb-1">28 Days</div>
-                      <div className="text-base font-bold">
-                        {last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)} TSS
-                      </div>
-                      <div className="text-gray-500">{last28Days.length} rides</div>
-                    </div>
-                    {longestRide ? (
-                      <>
-                        <div>
-                          <div className="text-gray-400 mb-1">Longest Ride (30 Days)</div>
-                          <div className="text-base font-bold">{longestRide.duration} min</div>
-                          <div className="text-gray-500">Duration</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 mb-1">&nbsp;</div>
-                          <div className="text-base font-bold">{longestRide.distance} mi</div>
-                          <div className="text-gray-500">Distance</div>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div>
-                          <div className="text-gray-400 mb-1">Longest Ride (30 Days)</div>
-                          <div className="text-base font-bold text-gray-600">--</div>
-                          <div className="text-gray-500">Duration</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 mb-1">&nbsp;</div>
-                          <div className="text-base font-bold text-gray-600">--</div>
-                          <div className="text-gray-500">Distance</div>
-                        </div>
-                      </>
-                    )}
                   </div>
                 );
               })()}
