@@ -3618,35 +3618,23 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
-        {/* Export/Import */}
+        {/* Import/Export */}
         <div className="flex gap-3 text-sm mt-6 flex-wrap">
+          <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
+            Import
+            <input type="file" accept=".json" onChange={importData} className="hidden" />
+          </label>
           <button
             onClick={exportData}
             className="text-gray-400 hover:text-gray-300 transition"
           >
             Export
           </button>
-          <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
-            Import
-            <input type="file" accept=".json" onChange={importData} className="hidden" />
-          </label>
-          <button
-            onClick={() => setShowCloudSyncHelp(true)}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            How to Sync?
-          </button>
-          <button
-            onClick={() => setShowPasteImport(true)}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            Paste JSON
-          </button>
           <button
             onClick={() => setShowCSVImport(true)}
             className="text-gray-400 hover:text-gray-300 transition"
           >
-            Import CSV
+            Paste CSV
           </button>
         </div>
       </div>
