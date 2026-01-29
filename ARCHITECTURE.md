@@ -1,41 +1,5 @@
 # Architecture
 
-## Developer Context
-
-**User Experience Level**: Beginner/non-coder
-- Limited experience with Git, GitHub, and project development
-- Uses VS Code primarily for running `npm run dev` and pulling from Git
-- Interfaces with Claude through web/chat, not terminal-based development
-- Requires clear, step-by-step instructions with explicit file paths
-
-**Communication Guidelines for Claude Code**:
-- Use plain language, avoid jargon where possible
-- Always specify full file paths (e.g., `/src/App.jsx` not "the main file")
-- Explain *where* code changes are happening before making them
-- Verify branch state before implementing features
-- Show git commands explicitly: `git status`, `git pull`, `git checkout branch-name`
-- Explain deployment implications (what happens when code is pushed)
-- Confirm which branch should be used as base before starting work
-- Use specific line numbers when referencing code locations
-
-**Branch Management — Required Claude Code Behavior**:
-- Each Claude Code session is assigned a new `claude/` branch (e.g., `claude/fix-progression-levels-jyD2G`). These branches are **sequential, not parallel** — each one builds on top of the previous session's work. They are session bookmarks, not independent feature branches.
-- **Always notify the user** at the start of a session what branch you are working on and why a new branch was created. Example: "This session is on branch `claude/review-changelog-SDb6v`. It was created automatically for this session and includes all prior work."
-- **Always end every set of changes** with explicit pull instructions so the user can sync locally in VS Code:
-  ```
-  git fetch origin <branch-name>
-  git checkout <branch-name>
-  git pull origin <branch-name>
-  ```
-- If the user is already on the branch, remind them that only `git pull origin <branch-name>` is needed.
-
-**Common Issues to Prevent**:
-- Wrong branch base → old UI deploying (see CHANGELOG.md Session 4)
-- Features reverting due to unclear git state
-- Changes made to wrong files
-- User confusion about what version is "live"
-- User not knowing a new branch was created or how to pull it
-
 ## File Structure
 ```
 src/

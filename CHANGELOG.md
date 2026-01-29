@@ -146,3 +146,12 @@
 - **Y-axis label width increased across all charts**: Prevents clipping of labels (especially 5-digit elevation numbers). Hours/TSS: `width={45}`, Elevation/eFTP: `width={55}`.
 - **Branch notification docs**: Added required Claude Code behavior to ARCHITECTURE.md — notify user of branch name at session start, end every change with pull instructions.
 - Files: `src/App.jsx`, `ARCHITECTURE.md`
+
+---
+
+## Session 7 - Documentation Restructure
+
+- **CLAUDE.md rewritten**: Replaced generic template content with project-specific behavioral guide. Now contains: session-start requirements, developer context, communication guidelines, branch management rules, common issues to prevent, git workflow, and project quick reference.
+- **ARCHITECTURE.md cleaned up**: Removed behavioral/process sections (Developer Context, Communication Guidelines, Branch Management, Common Issues). Now purely structural/technical: file structure, component architecture, state management, data flow, key functions, charts, UI layout.
+- **Clear separation of concerns**: ARCHITECTURE.md is the authoritative reference for *what the app is*. CLAUDE.md is the guide for *how Claude should behave*.
+- Files: `CLAUDE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`
