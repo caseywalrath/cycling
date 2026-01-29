@@ -122,3 +122,13 @@
 - JSON export/import preserves `source` field on all ride entries automatically
 - **Rationale**: Normalized Power is a whole-ride metric that cannot distinguish interval types (e.g., VO2max intervals with recovery spin yield Sweet Spot NP). User-selected zone classification is the only reliable method.
 - Files: `src/App.jsx`
+
+### Additional UI Changes (Session 5 continued)
+- Removed Recovery zone from Progression Levels bar display
+- Bottom action bar: reordered to Import | Export | Paste CSV; removed "How to Sync?" and "Paste JSON"
+- Training Summary: removed Elevation (14d) column; renamed "Longest (30d)" to "Longest Ride (30 Days)"
+- Training loads: replaced "Previous Week TSS" (days 8-14) with cumulative "14-Day TSS" (days 0-14); Training Summary card now shows 7/14/28 day columns
+- "Copy for Claude" clipboard fix: added fallback for non-secure contexts (HTTP on LAN)
+- Replaced Recent Workouts card with full-width "Ride History" button below Instant Analysis
+- Increased Ride History modal scroll height from fixed 384px to 70% viewport height
+- Files: `src/App.jsx`

@@ -109,3 +109,31 @@ Single localStorage key stores:
 | `handleLogWorkout()` | Save new or edited ride |
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
+
+## UI Layout (top to bottom, as of Session 5)
+
+1. **Header bar**: App title, FTP/eFTP display, Days to Event, Settings/Profile buttons
+2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
+3. **Reset Levels button**: Full-width, resets all levels to 1.0
+4. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
+5. **Training Summary card**: 7 / 14 / 28 day TSS columns + Longest Ride (30 Days)
+6. **Charts**: Tabbed — Weekly TSS, Weekly Hours, Elevation, eFTP History
+7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
+8. **Ride History button**: Full-width, opens History modal
+9. **Fitness Progress bar**: CTL toward target 100
+10. **Bottom action bar**: Import | Export | Paste CSV
+
+### Modal system
+All secondary views are modals (`fixed inset-0 z-50`). Key modals:
+- **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID
+- **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride
+- **Post-Log Summary** (`showPostLogSummary`): Shows progression change after logging
+- **CSV Import** (`showCSVImport`): Paste textarea for intervals.icu CSV
+- **Profile** (`showProfileModal`): Weight, HR, age settings
+- **Event** (`showEventModal`): Goal event configuration
+
+### Clipboard
+`copyForAnalysis()` uses `navigator.clipboard.writeText()` with a `document.execCommand('copy')` fallback for HTTP/LAN contexts. The fallback creates a hidden textarea, selects it, and copies.
+
+### Training loads
+`calculateTrainingLoads()` returns `{ ctl, atl, tsb, weeklyTSS, twoWeekTSS }`. The field `twoWeekTSS` is cumulative (includes the 7-day window). Insights derive previous-week TSS as `twoWeekTSS - weeklyTSS` for week-over-week comparison.
