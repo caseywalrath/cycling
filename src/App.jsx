@@ -3272,6 +3272,7 @@ Please analyze my current training status and provide personalized insights.`;
               // Dynamic domain: round max percentile up to nearest 10 so polygon fills the chart
               const maxPct = Math.max(...radarData.map(d => d.percentile));
               const domainMax = Math.ceil(maxPct / 10) * 10;
+              const maxWatts = Math.max(...radarData.map(d => d.watts));
 
               // Custom tooltip for radar
               const RadarTooltip = ({ active, payload }) => {
@@ -3296,33 +3297,64 @@ Please analyze my current training status and provide personalized insights.`;
                     <span className="text-blue-400">Sprint</span> · <span className="text-green-400">Attack</span> · <span className="text-orange-400">Climb</span>
                     <span className="ml-2 text-gray-500">— vs. intervals.icu age 40</span>
                   </p>
-                  <ResponsiveContainer width="100%" height={320}>
-                    <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
-                      <PolarGrid stroke="#374151" />
-                      <PolarAngleAxis
-                        dataKey="label"
-                        tick={({ x, y, payload, index }) => {
-                          const d = radarData[index];
-                          const color = d.skill === 'Sprint' ? '#60A5FA' : d.skill === 'Attack' ? '#4ADE80' : '#FB923C';
-                          return (
-                            <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fill={color} fontSize={12} fontWeight="600">
-                              {payload.value}
-                            </text>
-                          );
-                        }}
-                      />
-                      <PolarRadiusAxis domain={[0, domainMax]} tick={false} axisLine={false} />
-                      <Tooltip content={<RadarTooltip />} />
-                      <Radar
-                        dataKey="percentile"
-                        stroke="#A855F7"
-                        fill="#A855F7"
-                        fillOpacity={0.35}
-                        strokeWidth={2}
-                        dot={{ fill: '#A855F7', r: 3 }}
-                      />
-                    </RadarChart>
-                  </ResponsiveContainer>
+                  <div className="flex">
+                    {/* Radar chart - 3/5 width */}
+                    <div className="w-3/5">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
+                          <PolarGrid stroke="#374151" />
+                          <PolarAngleAxis
+                            dataKey="label"
+                            tick={({ x, y, payload, index }) => {
+                              const d = radarData[index];
+                              const color = d.skill === 'Sprint' ? '#60A5FA' : d.skill === 'Attack' ? '#4ADE80' : '#FB923C';
+                              return (
+                                <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fill={color} fontSize={12} fontWeight="600">
+                                  {payload.value}
+                                </text>
+                              );
+                            }}
+                          />
+                          <PolarRadiusAxis domain={[0, domainMax]} tick={false} axisLine={false} />
+                          <Tooltip content={<RadarTooltip />} />
+                          <Radar
+                            dataKey="percentile"
+                            stroke="#A855F7"
+                            fill="#A855F7"
+                            fillOpacity={0.35}
+                            strokeWidth={2}
+                            dot={{ fill: '#A855F7', r: 3 }}
+                          />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {/* Horizontal power bars - 2/5 width */}
+                    <div className="w-2/5 flex flex-col justify-center gap-1.5 pl-2">
+                      {radarData.map((d, i) => {
+                        const color = d.skill === 'Sprint' ? '#60A5FA' : d.skill === 'Attack' ? '#4ADE80' : '#FB923C';
+                        const barPct = maxWatts > 0 ? (d.watts / maxWatts) * 100 : 0;
+                        return (
+                          <div key={i} className="group relative flex items-center gap-2">
+                            <span className="text-xs w-7 text-right shrink-0" style={{ color }}>{d.label}</span>
+                            <div className="flex-1 bg-gray-700 rounded-full h-3 overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{ width: `${barPct}%`, backgroundColor: color }}
+                              />
+                            </div>
+                            {/* Hover tooltip */}
+                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block z-10">
+                              <div className="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 shadow-lg whitespace-nowrap">
+                                <p className="font-semibold text-xs" style={{ color }}>{d.label} — {d.skill}</p>
+                                <p className="text-gray-300 text-xs">{d.watts}W</p>
+                                <p className="text-gray-400 text-xs">Top {d.percentile}%</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               );
             })()}
