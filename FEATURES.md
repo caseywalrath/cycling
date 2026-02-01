@@ -642,6 +642,7 @@ These can be implemented quickly for immediate benefit:
 4. **Zone Presets** - Save common NP values for each zone
 5. **Weekly Summary** - View/export week's stats summary
 6. **Dark/Light Mode Toggle** - Better display options
+7. **Zone Distribution Bar (4-week)** - Single compact horizontal stacked bar showing how training time broke down by power zone over the last 28 days. Complements the Power Skills radar — the radar shows capabilities, this shows how you're actually training. Low complexity, uses existing ride history zone data.
 7. **Keyboard Shortcuts** - Fast navigation (on desktop)
 8. **Recent Workouts Widget** - Quick re-log similar workouts
 
