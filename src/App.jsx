@@ -3228,17 +3228,19 @@ Please analyze my current training status and provide personalized insights.`;
 
             {/* Power Skills Radar Chart */}
             {powerCurveData && powerCurveData.length > 0 && (() => {
-              // 9 spokes: 3 per skill category
+              // Population reference: intervals.icu age-40 cohort
+              // Each entry: secs, label, skill, refWatts (user's known watts), refPct (population percentile)
+              // 30s and 10m interpolated from adjacent known data points; 30m interpolated from 20m and 60m
               const POWER_SKILLS = [
-                { secs: 5, label: '5s', skill: 'Sprint', color: '#3B82F6' },
-                { secs: 30, label: '30s', skill: 'Sprint', color: '#3B82F6' },
-                { secs: 60, label: '1m', skill: 'Sprint', color: '#3B82F6' },
-                { secs: 300, label: '5m', skill: 'Attack', color: '#22C55E' },
-                { secs: 600, label: '10m', skill: 'Attack', color: '#22C55E' },
-                { secs: 1200, label: '20m', skill: 'Attack', color: '#22C55E' },
-                { secs: 1800, label: '30m', skill: 'Climb', color: '#F97316' },
-                { secs: 3600, label: '1h', skill: 'Climb', color: '#F97316' },
-                { secs: 7200, label: '2h', skill: 'Climb', color: '#F97316' },
+                { secs: 5, label: '5s', skill: 'Sprint', refWatts: 712, refPct: 44.9 },
+                { secs: 30, label: '30s', skill: 'Sprint', refWatts: 553, refPct: 42.6 },
+                { secs: 60, label: '1m', skill: 'Sprint', refWatts: 362, refPct: 39.8 },
+                { secs: 300, label: '5m', skill: 'Attack', refWatts: 293, refPct: 53.9 },
+                { secs: 600, label: '10m', skill: 'Attack', refWatts: 265, refPct: 44.0 },
+                { secs: 1200, label: '20m', skill: 'Attack', refWatts: 209, refPct: 24.2 },
+                { secs: 1800, label: '30m', skill: 'Climb', refWatts: 203, refPct: 24.6 },
+                { secs: 3600, label: '1h', skill: 'Climb', refWatts: 184, refPct: 25.8 },
+                { secs: 7200, label: '2h', skill: 'Climb', refWatts: 158, refPct: 24.2 },
               ];
 
               // Find closest match in power curve data for each target duration
@@ -3255,29 +3257,24 @@ Please analyze my current training status and provide personalized insights.`;
                 return closest.watts;
               };
 
-              const dataPoints = POWER_SKILLS.map(s => ({
-                ...s,
-                watts: findWatts(s.secs),
-              }));
-
-              // Min/max normalization to 0-100 scale
-              const allWatts = dataPoints.map(d => d.watts);
-              const minW = Math.min(...allWatts);
-              const maxW = Math.max(...allWatts);
-              const range = maxW - minW || 1;
-
-              const radarData = dataPoints.map(d => ({
-                label: d.label,
-                skill: d.skill,
-                watts: d.watts,
-                normalized: Math.round(((d.watts - minW) / range) * 80 + 20), // scale 20-100 so min isn't invisible
-              }));
+              // Estimate percentile by proportional scaling from reference data point
+              const radarData = POWER_SKILLS.map(s => {
+                const watts = findWatts(s.secs);
+                const percentile = Math.min(100, Math.round(s.refPct * (watts / s.refWatts) * 10) / 10);
+                return {
+                  label: s.label,
+                  skill: s.skill,
+                  watts,
+                  percentile,
+                };
+              });
 
               return (
                 <div className="bg-gray-800 rounded-lg p-4">
                   <h3 className="font-medium mb-1">Power Skills</h3>
                   <p className="text-xs text-gray-400 mb-3">
                     <span className="text-blue-400">Sprint</span> · <span className="text-green-400">Attack</span> · <span className="text-orange-400">Climb</span>
+                    <span className="ml-2 text-gray-500">— vs. intervals.icu age 40</span>
                   </p>
                   <ResponsiveContainer width="100%" height={320}>
                     <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
@@ -3293,7 +3290,7 @@ Please analyze my current training status and provide personalized insights.`;
                                 {payload.value}
                               </text>
                               <text x={x} y={y + 13} textAnchor="middle" fill="#9CA3AF" fontSize={10}>
-                                {d.watts}W
+                                {d.watts}W · {d.percentile}%
                               </text>
                             </g>
                           );
@@ -3301,7 +3298,7 @@ Please analyze my current training status and provide personalized insights.`;
                       />
                       <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
                       <Radar
-                        dataKey="normalized"
+                        dataKey="percentile"
                         stroke="#A855F7"
                         fill="#A855F7"
                         fillOpacity={0.35}
