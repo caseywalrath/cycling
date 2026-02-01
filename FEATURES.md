@@ -646,15 +646,46 @@ These can be implemented quickly for immediate benefit:
 8. **Keyboard Shortcuts** - Fast navigation (on desktop)
 9. **Recent Workouts Widget** - Quick re-log similar workouts
 10. **Rider Phenotype Designation** - Automated classification based on power curve shape, inspired by TrainerRoad phenotypes: Sprinter (short, high-power efforts), Puncheur (repeated punchy surges over rolling terrain), Rouleur (powerful and consistent over flat/rolling terrain), Time Trialist (sustained steady solo efforts), Climber (long high-intensity climbs), All-Rounder (versatile across effort types). Could derive from Power Skills radar data by comparing relative strengths across Sprint/Attack/Climb categories. Low-medium complexity.
-11. **Training Form Designation** - Display current training form using intervals.icu categories: Transition, Fresh, Grey Zone, Optimal, High Risk. Calculated as Form (TSB) expressed as a percentage of Fitness (CTL), which scales the zones to match current fitness level (e.g., -20% rather than absolute -10). App already computes CTL/ATL/TSB — just needs the percentage calculation and category mapping with color-coded display (green=Fresh, yellow=Grey Zone, green=Optimal, red=High Risk). Low complexity.
-    **Implementation:** `TSB% = (TSB / CTL) × 100`, then map to zones:
-    | Status | TSB% Range | Meaning |
-    |---|---|---|
-    | Transition | Below -30% | Detraining, fitness declining |
-    | Fresh | -10% to +5% | Rested, ready to perform |
-    | Grey Zone | -30% to -10% | Fatigued but not optimally loading |
-    | Optimal | -10% to -30% | Productive training stress |
-    | High Risk | Beyond -30% | Overreaching, injury/burnout risk |
+11. **Training Status**
+
+    **Overview:** At-a-glance indicator of current training state derived from the relationship between Fitness (CTL), Fatigue (ATL), and Form (TSB). App already computes all three metrics. Uses TSB as a percentage of CTL rather than absolute values—this scales zones to the athlete's fitness level (a TSB of -15 means very different things at CTL 30 vs CTL 100). Display as a color-coded badge/pill, optionally showing TSB or TSB% in smaller text. Low complexity.
+
+    **Primary Calculation:**
+    ```
+    TSB = CTL - ATL
+    TSB% = (TSB / CTL) × 100
+    ```
+
+    **Status Categories:**
+    | Status | TSB% Range | Color | Interpretation |
+    |---|---|---|---|
+    | Transition | > +25% | Gray | Extended rest or detraining period |
+    | Fresh | +5% to +25% | Blue | Well-rested, suitable for testing or events |
+    | Grey Zone | -10% to +5% | Yellow | Maintenance, not strongly building or recovering |
+    | Optimal | -30% to -10% | Green | Productive overload, fitness likely improving |
+    | High Risk | < -30% | Red | Significant overreach, monitor for excessive fatigue |
+
+    **Low Fitness Override (CTL < 35):**
+    When CTL is below 35, percentage-based calculations become erratic—a single hard workout can produce wild TSB% swings that don't reflect meaningful physiological states. Substitute simplified status:
+    - ATL > CTL × 1.5 → "Building (Heavy Load)"
+    - ATL > CTL → "Building"
+    - ATL ≤ CTL → "Building (Fresh)"
+
+    This acknowledges early base-building as a distinct phase where standard categories don't apply cleanly. Avoids alarming "High Risk" warnings during normal early-season loading.
+
+    **Transition Detection:**
+    Transition should trigger not just on high positive TSB% but also when CTL is declining. Check for:
+    - TSB% > +25%, OR
+    - CTL has dropped more than 10% over the past 14 days while TSB remains positive
+
+    This catches scenarios where the athlete has stopped training and is losing fitness, even if TSB% hasn't reached extreme positive values.
+
+    **Instant Analysis Integration:**
+    When status is "High Risk" or CTL is declining into Transition, surface actionable guidance in Instant Analysis (e.g., "Consider a recovery day" or "Training load dropping—intentional taper or loss of consistency?").
+
+    **Future Refinements:**
+    - If workout-level RPE data is available, use subjective fatigue as a modifier. An athlete showing "Optimal" by the numbers but reporting high RPE on easy workouts may be deeper into fatigue than TSB suggests.
+    - If HRV data becomes available via intervals.icu wellness imports, HRV trend (rising, stable, declining) can validate status—declining HRV during "Optimal" loading may indicate the athlete is closer to "High Risk" than the numbers show.
 
 ---
 
