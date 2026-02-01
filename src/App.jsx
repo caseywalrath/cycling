@@ -3230,15 +3230,15 @@ Please analyze my current training status and provide personalized insights.`;
             {powerCurveData && powerCurveData.length > 0 && (() => {
               // 9 spokes: 3 per skill category
               const POWER_SKILLS = [
-                { secs: 15, label: '15s', skill: 'Sprint', color: '#3B82F6' },
+                { secs: 5, label: '5s', skill: 'Sprint', color: '#3B82F6' },
                 { secs: 30, label: '30s', skill: 'Sprint', color: '#3B82F6' },
                 { secs: 60, label: '1m', skill: 'Sprint', color: '#3B82F6' },
-                { secs: 120, label: '2m', skill: 'Attack', color: '#22C55E' },
                 { secs: 300, label: '5m', skill: 'Attack', color: '#22C55E' },
                 { secs: 600, label: '10m', skill: 'Attack', color: '#22C55E' },
-                { secs: 1200, label: '20m', skill: 'Climb', color: '#F97316' },
-                { secs: 2700, label: '45m', skill: 'Climb', color: '#F97316' },
-                { secs: 3600, label: '60m', skill: 'Climb', color: '#F97316' },
+                { secs: 1200, label: '20m', skill: 'Attack', color: '#22C55E' },
+                { secs: 1800, label: '30m', skill: 'Climb', color: '#F97316' },
+                { secs: 3600, label: '1h', skill: 'Climb', color: '#F97316' },
+                { secs: 7200, label: '2h', skill: 'Climb', color: '#F97316' },
               ];
 
               // Find closest match in power curve data for each target duration
