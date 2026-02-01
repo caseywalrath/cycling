@@ -646,6 +646,7 @@ These can be implemented quickly for immediate benefit:
 8. **Keyboard Shortcuts** - Fast navigation (on desktop)
 9. **Recent Workouts Widget** - Quick re-log similar workouts
 10. **Rider Phenotype Designation** - Automated classification based on power curve shape, inspired by TrainerRoad phenotypes: Sprinter (short, high-power efforts), Puncheur (repeated punchy surges over rolling terrain), Rouleur (powerful and consistent over flat/rolling terrain), Time Trialist (sustained steady solo efforts), Climber (long high-intensity climbs), All-Rounder (versatile across effort types). Could derive from Power Skills radar data by comparing relative strengths across Sprint/Attack/Climb categories. Low-medium complexity.
+11. **Training Form Designation** - Display current training form using intervals.icu categories: Transition, Fresh, Grey Zone, Optimal, High Risk. Calculated as Form (TSB) expressed as a percentage of Fitness (CTL), which scales the zones to match current fitness level (e.g., -20% rather than absolute -10). App already computes CTL/ATL/TSB — just needs the percentage calculation and category mapping with color-coded display (green=Fresh, yellow=Grey Zone, green=Optimal, red=High Risk). Low complexity.
 
 ---
 
