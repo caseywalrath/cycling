@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
 const ZONES = [
   { id: 'recovery', name: 'Recovery', color: '#6B7280', description: 'Z1: <130W' },
@@ -62,6 +62,9 @@ export default function ProgressionTracker() {
   });
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Power curve data state
+  const [powerCurveData, setPowerCurveData] = useState(null);
 
   // CSV import state
   const [showCSVImport, setShowCSVImport] = useState(false);
@@ -146,6 +149,11 @@ export default function ProgressionTracker() {
         setVo2maxEstimates(parsed.vo2maxEstimates);
       }
 
+      // Load power curve data if available
+      if (parsed.powerCurveData) {
+        setPowerCurveData(parsed.powerCurveData);
+      }
+
       // Calculate recent changes from history
       if (parsed.history && parsed.history.length > 0) {
         const changes = {};
@@ -169,9 +177,10 @@ export default function ProgressionTracker() {
       history,
       event,
       userProfile,
-      vo2maxEstimates
+      vo2maxEstimates,
+      powerCurveData
     }));
-  }, [levels, history, event, userProfile, vo2maxEstimates]);
+  }, [levels, history, event, userProfile, vo2maxEstimates, powerCurveData]);
 
   // Load intervals.icu config from localStorage
   useEffect(() => {
@@ -1941,6 +1950,7 @@ export default function ProgressionTracker() {
       intervalsFTP: intervalsFTP,
       event,
       userProfile,
+      powerCurveData,
       exportedAt: new Date().toISOString()
     }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -1973,6 +1983,7 @@ export default function ProgressionTracker() {
           if (parsed.userProfile) setUserProfile(parsed.userProfile);
           if (parsed.event) setEvent(parsed.event);
           if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
+          if (parsed.powerCurveData) setPowerCurveData(parsed.powerCurveData);
 
           alert(`✓ Data imported successfully!\n${parsed.history?.length || 0} workouts restored.`);
         } catch (err) {
@@ -1981,6 +1992,42 @@ export default function ProgressionTracker() {
       };
       reader.readAsText(file);
     }
+  };
+
+  const importPowerCurve = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result.trim();
+        const lines = text.split('\n');
+        const data = [];
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          // Split by tab or comma
+          const parts = line.split(/[\t,]+/);
+          if (parts.length < 2) continue;
+          const secs = parseInt(parts[0]);
+          const watts = parseInt(parts[1]);
+          // Skip header row or invalid data
+          if (isNaN(secs) || isNaN(watts)) continue;
+          data.push({ secs, watts });
+        }
+        if (data.length === 0) {
+          alert('No valid power curve data found. Expected two columns: seconds and watts.');
+          return;
+        }
+        setPowerCurveData(data);
+        alert(`✓ Power curve imported: ${data.length} data points loaded.`);
+      } catch (err) {
+        alert('Error reading power curve file. Please check the format.');
+      }
+    };
+    reader.readAsText(file);
+    // Reset file input so the same file can be re-imported
+    event.target.value = '';
   };
 
   const handlePasteImport = () => {
@@ -3179,6 +3226,94 @@ Please analyze my current training status and provide personalized insights.`;
               );
             })()}
 
+            {/* Power Skills Radar Chart */}
+            {powerCurveData && powerCurveData.length > 0 && (() => {
+              // 9 spokes: 3 per skill category
+              const POWER_SKILLS = [
+                { secs: 15, label: '15s', skill: 'Sprint', color: '#3B82F6' },
+                { secs: 30, label: '30s', skill: 'Sprint', color: '#3B82F6' },
+                { secs: 60, label: '1m', skill: 'Sprint', color: '#3B82F6' },
+                { secs: 120, label: '2m', skill: 'Attack', color: '#22C55E' },
+                { secs: 300, label: '5m', skill: 'Attack', color: '#22C55E' },
+                { secs: 600, label: '10m', skill: 'Attack', color: '#22C55E' },
+                { secs: 1200, label: '20m', skill: 'Climb', color: '#F97316' },
+                { secs: 2700, label: '45m', skill: 'Climb', color: '#F97316' },
+                { secs: 3600, label: '60m', skill: 'Climb', color: '#F97316' },
+              ];
+
+              // Find closest match in power curve data for each target duration
+              const findWatts = (targetSecs) => {
+                let closest = powerCurveData[0];
+                let minDiff = Math.abs(powerCurveData[0].secs - targetSecs);
+                for (const point of powerCurveData) {
+                  const diff = Math.abs(point.secs - targetSecs);
+                  if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = point;
+                  }
+                }
+                return closest.watts;
+              };
+
+              const dataPoints = POWER_SKILLS.map(s => ({
+                ...s,
+                watts: findWatts(s.secs),
+              }));
+
+              // Min/max normalization to 0-100 scale
+              const allWatts = dataPoints.map(d => d.watts);
+              const minW = Math.min(...allWatts);
+              const maxW = Math.max(...allWatts);
+              const range = maxW - minW || 1;
+
+              const radarData = dataPoints.map(d => ({
+                label: d.label,
+                skill: d.skill,
+                watts: d.watts,
+                normalized: Math.round(((d.watts - minW) / range) * 80 + 20), // scale 20-100 so min isn't invisible
+              }));
+
+              return (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <h3 className="font-medium mb-1">Power Skills</h3>
+                  <p className="text-xs text-gray-400 mb-3">
+                    <span className="text-blue-400">Sprint</span> · <span className="text-green-400">Attack</span> · <span className="text-orange-400">Climb</span>
+                  </p>
+                  <ResponsiveContainer width="100%" height={320}>
+                    <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+                      <PolarGrid stroke="#374151" />
+                      <PolarAngleAxis
+                        dataKey="label"
+                        tick={({ x, y, payload, index }) => {
+                          const d = radarData[index];
+                          const color = d.skill === 'Sprint' ? '#60A5FA' : d.skill === 'Attack' ? '#4ADE80' : '#FB923C';
+                          return (
+                            <g>
+                              <text x={x} y={y} textAnchor="middle" fill={color} fontSize={11} fontWeight="600">
+                                {payload.value}
+                              </text>
+                              <text x={x} y={y + 13} textAnchor="middle" fill="#9CA3AF" fontSize={10}>
+                                {d.watts}W
+                              </text>
+                            </g>
+                          );
+                        }}
+                      />
+                      <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+                      <Radar
+                        dataKey="normalized"
+                        stroke="#A855F7"
+                        fill="#A855F7"
+                        fillOpacity={0.35}
+                        strokeWidth={2}
+                        dot={{ fill: '#A855F7', r: 3 }}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              );
+            })()}
+
             {/* Training Summary */}
             <div className="bg-gray-800 rounded-lg p-4">
               <h3 className="font-medium mb-3">Training Summary</h3>
@@ -3619,6 +3754,10 @@ Please analyze my current training status and provide personalized insights.`;
             >
               Paste CSV
             </button>
+            <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
+              Import Power
+              <input type="file" accept=".csv,.tsv,.txt" onChange={importPowerCurve} className="hidden" />
+            </label>
           </div>
           <button
             onClick={() => {
