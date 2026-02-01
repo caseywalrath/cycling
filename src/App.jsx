@@ -3269,6 +3269,26 @@ Please analyze my current training status and provide personalized insights.`;
                 };
               });
 
+              // Dynamic domain: round max percentile up to nearest 10 so polygon fills the chart
+              const maxPct = Math.max(...radarData.map(d => d.percentile));
+              const domainMax = Math.ceil(maxPct / 10) * 10;
+
+              // Custom tooltip for radar
+              const RadarTooltip = ({ active, payload }) => {
+                if (active && payload && payload.length > 0) {
+                  const d = payload[0].payload;
+                  const color = d.skill === 'Sprint' ? '#60A5FA' : d.skill === 'Attack' ? '#4ADE80' : '#FB923C';
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-lg">
+                      <p style={{ color }} className="font-semibold text-sm">{d.label} — {d.skill}</p>
+                      <p className="text-gray-300 text-sm">{d.watts}W</p>
+                      <p className="text-gray-400 text-xs">Top {d.percentile}%</p>
+                    </div>
+                  );
+                }
+                return null;
+              };
+
               return (
                 <div className="bg-gray-800 rounded-lg p-4">
                   <h3 className="font-medium mb-1">Power Skills</h3>
@@ -3277,7 +3297,7 @@ Please analyze my current training status and provide personalized insights.`;
                     <span className="ml-2 text-gray-500">— vs. intervals.icu age 40</span>
                   </p>
                   <ResponsiveContainer width="100%" height={320}>
-                    <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+                    <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
                       <PolarGrid stroke="#374151" />
                       <PolarAngleAxis
                         dataKey="label"
@@ -3285,18 +3305,14 @@ Please analyze my current training status and provide personalized insights.`;
                           const d = radarData[index];
                           const color = d.skill === 'Sprint' ? '#60A5FA' : d.skill === 'Attack' ? '#4ADE80' : '#FB923C';
                           return (
-                            <g>
-                              <text x={x} y={y} textAnchor="middle" fill={color} fontSize={11} fontWeight="600">
-                                {payload.value}
-                              </text>
-                              <text x={x} y={y + 13} textAnchor="middle" fill="#9CA3AF" fontSize={10}>
-                                {d.watts}W · {d.percentile}%
-                              </text>
-                            </g>
+                            <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fill={color} fontSize={12} fontWeight="600">
+                              {payload.value}
+                            </text>
                           );
                         }}
                       />
-                      <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+                      <PolarRadiusAxis domain={[0, domainMax]} tick={false} axisLine={false} />
+                      <Tooltip content={<RadarTooltip />} />
                       <Radar
                         dataKey="percentile"
                         stroke="#A855F7"
