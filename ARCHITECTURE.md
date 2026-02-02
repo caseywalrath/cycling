@@ -87,6 +87,7 @@ Single localStorage key stores:
 | `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
+| `getCalendarDays()` | Generate month grid day objects (Monday-start, 35 or 42 cells) |
 
 ## Charts (Tabbed: Hours, TSS, Elevation, eFTP)
 
@@ -117,9 +118,10 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
 6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB% and description). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
 7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
-8. **Fitness Progress bar**: CTL toward target 100
-9. **Ride History button**: Full-width, opens History modal
-10. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
+8. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
+9. **Fitness Progress bar**: CTL toward target 100
+10. **Ride History button**: Full-width, opens History modal
+11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Key modals:

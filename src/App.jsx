@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
 const ZONES = [
@@ -65,6 +65,10 @@ export default function ProgressionTracker() {
 
   // Power curve data state
   const [powerCurveData, setPowerCurveData] = useState(null);
+
+  // Calendar state
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
 
   // CSV import state
   const [showCSVImport, setShowCSVImport] = useState(false);
@@ -2216,6 +2220,52 @@ Please analyze my current training status and provide personalized insights.`;
     return new Date(w.date) >= monthAgo;
   });
 
+  // Calendar: set of dates with rides for O(1) lookup
+  const rideDatesSet = useMemo(() => {
+    const set = new Set();
+    history.forEach(ride => { if (ride.date) set.add(ride.date); });
+    return set;
+  }, [history]);
+
+  // Calendar: generate day objects for a month grid (Monday-start)
+  const getCalendarDays = (year, month) => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+
+    // Convert to Monday-start: JS getDay() 0=Sun → we want 0=Mon
+    let startDow = firstDay.getDay() - 1;
+    if (startDow < 0) startDow = 6;
+
+    const days = [];
+
+    // Previous month trailing days
+    const prevLastDay = new Date(year, month, 0).getDate();
+    for (let i = startDow - 1; i >= 0; i--) {
+      const d = prevLastDay - i;
+      const pm = month === 0 ? 11 : month - 1;
+      const py = month === 0 ? year - 1 : year;
+      days.push({ day: d, dateStr: `${py}-${String(pm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: false });
+    }
+
+    // Current month days
+    for (let d = 1; d <= daysInMonth; d++) {
+      days.push({ day: d, dateStr: `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: true });
+    }
+
+    // Next month leading days
+    const totalCells = days.length <= 35 ? 35 : 42;
+    let nextDay = 1;
+    const nm = month === 11 ? 0 : month + 1;
+    const ny = month === 11 ? year + 1 : year;
+    while (days.length < totalCells) {
+      days.push({ day: nextDay, dateStr: `${ny}-${String(nm + 1).padStart(2, '0')}-${String(nextDay).padStart(2, '0')}`, isCurrentMonth: false });
+      nextDay++;
+    }
+
+    return days;
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-2xl mx-auto">
@@ -3490,6 +3540,82 @@ Please analyze my current training status and provide personalized insights.`;
                   })}
                 </div>
               )}
+            </div>
+
+            {/* Monthly Activity Calendar */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              {/* Header: nav arrows + month/year */}
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  onClick={() => {
+                    if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(calendarYear - 1); }
+                    else { setCalendarMonth(calendarMonth - 1); }
+                  }}
+                  className="text-gray-400 hover:text-white px-2 py-1 transition"
+                >
+                  &#9664;
+                </button>
+                <h3 className="font-medium">
+                  {new Date(calendarYear, calendarMonth).toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </h3>
+                <button
+                  onClick={() => {
+                    if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(calendarYear + 1); }
+                    else { setCalendarMonth(calendarMonth + 1); }
+                  }}
+                  className="text-gray-400 hover:text-white px-2 py-1 transition"
+                >
+                  &#9654;
+                </button>
+              </div>
+
+              {/* Day-of-week headers */}
+              <div className="grid grid-cols-7 text-center text-xs text-gray-500 mb-2">
+                {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+                  <div key={i} className="py-1">{d}</div>
+                ))}
+              </div>
+
+              {/* Day grid */}
+              <div className="grid grid-cols-7 gap-1">
+                {getCalendarDays(calendarYear, calendarMonth).map((dayObj, i) => {
+                  const hasRide = rideDatesSet.has(dayObj.dateStr);
+                  const todayStr = new Date().toISOString().split('T')[0];
+                  const isToday = dayObj.dateStr === todayStr;
+
+                  return (
+                    <div key={i} className="flex items-center justify-center py-0.5">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors ${
+                          hasRide && dayObj.isCurrentMonth
+                            ? 'bg-blue-500 text-white font-bold'
+                            : hasRide && !dayObj.isCurrentMonth
+                            ? 'bg-blue-500/40 text-gray-400'
+                            : !hasRide && dayObj.isCurrentMonth
+                            ? 'border border-gray-600 text-gray-400'
+                            : 'text-gray-700'
+                        } ${
+                          isToday && !hasRide
+                            ? 'border-2 border-blue-400 text-blue-400'
+                            : isToday && hasRide
+                            ? 'ring-2 ring-blue-300'
+                            : ''
+                        }`}
+                      >
+                        {hasRide ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
+                            <circle cx="6" cy="17" r="3" />
+                            <circle cx="18" cy="17" r="3" />
+                            <path d="M6 17L9 7h4l3 10M9 7l3 10 2-6" />
+                          </svg>
+                        ) : (
+                          dayObj.day
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Fitness Progress */}
