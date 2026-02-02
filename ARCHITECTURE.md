@@ -107,17 +107,18 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 
 **Weekly charts** (Hours, TSS, Elevation): X-axis uses `dataKey="label"` with `interval="preserveStartEnd"`. Tooltips show week label, value, and ride count.
 
-## UI Layout (top to bottom, as of Session 6)
+## UI Layout (top to bottom, as of Session 8)
 
 1. **Header bar**: App title, FTP/eFTP display, Days to Event, Settings/Profile buttons
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
-3. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
-4. **Training Summary card**: Two inline rows — `TSS [7d] [14d] [28d]` and `Longest (30d) [min] • [mi]`
-5. **Charts**: Tabbed — Weekly TSS, Weekly Hours, Elevation, eFTP History
-6. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
-7. **Ride History button**: Full-width, opens History modal
+3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
+4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import
+5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
+6. **Training Summary card**: Two inline rows — `TSS [7d] [14d] [28d]` and `Longest (30d) [min] • [mi]`
+7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
 8. **Fitness Progress bar**: CTL toward target 100
-9. **Bottom action bar**: Import | Export | Paste CSV (left) — Reset Levels (right, subtle text link)
+9. **Ride History button**: Full-width, opens History modal
+10. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Key modals:
