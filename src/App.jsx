@@ -305,7 +305,7 @@ export default function ProgressionTracker() {
   };
 
   const calculateTrainingLoads = () => {
-    if (history.length === 0) return { ctl: 0, atl: 0, tsb: 0, weeklyTSS: 0, prevWeeklyTSS: 0 };
+    if (history.length === 0) return { ctl: 0, atl: 0, tsb: 0, weeklyTSS: 0, prevWeeklyTSS: 0, ctl14dAgo: 0 };
 
     const sorted = [...history].sort((a, b) => new Date(a.date) - new Date(b.date));
     const today = new Date();
@@ -320,8 +320,13 @@ export default function ProgressionTracker() {
 
     let ctl = 0;
     let atl = 0;
+    let ctl14dAgo = 0;
     const ctlDecay = 2 / (42 + 1);
     const atlDecay = 2 / (7 + 1);
+
+    const fourteenDaysAgo = new Date(today);
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    const fourteenDaysAgoStr = fourteenDaysAgo.toISOString().split('T')[0];
 
     const currentDate = new Date(oldestDate);
     while (currentDate <= today) {
@@ -330,6 +335,10 @@ export default function ProgressionTracker() {
 
       ctl = ctl * (1 - ctlDecay) + dayTSS * ctlDecay;
       atl = atl * (1 - atlDecay) + dayTSS * atlDecay;
+
+      if (dateStr === fourteenDaysAgoStr) {
+        ctl14dAgo = ctl;
+      }
 
       currentDate.setDate(currentDate.getDate() + 1);
     }
@@ -353,6 +362,7 @@ export default function ProgressionTracker() {
       tsb: Math.round(ctl - atl),
       weeklyTSS,
       twoWeekTSS,
+      ctl14dAgo: Math.round(ctl14dAgo),
     };
   };
 
@@ -2143,6 +2153,27 @@ Please analyze my current training status and provide personalized insights.`;
     return { label: 'Very Tired', color: '#EF4444' };
   };
 
+  const getTrainingStatus = (ctl, atl, tsb, ctl14dAgo) => {
+    // Low fitness override: CTL < 35 makes TSB% erratic
+    if (ctl < 35) {
+      if (atl > ctl * 1.5) return { label: 'Building (Heavy Load)', color: '#F97316', description: 'Early base building with significant load' };
+      if (atl > ctl) return { label: 'Building', color: '#3B82F6', description: 'Building early fitness' };
+      return { label: 'Building (Fresh)', color: '#86EFAC', description: 'Building fitness, well-rested' };
+    }
+
+    const tsbPct = (tsb / ctl) * 100;
+
+    // Transition detection: high positive TSB% OR CTL declining >10% over 14 days with positive TSB
+    const ctlDecline = ctl14dAgo > 0 ? ((ctl14dAgo - ctl) / ctl14dAgo) * 100 : 0;
+    if (tsbPct > 25 || (ctlDecline > 10 && tsb > 0)) {
+      return { label: 'Transition', color: '#9CA3AF', description: 'Extended rest or detraining' };
+    }
+    if (tsbPct >= 5) return { label: 'Fresh', color: '#3B82F6', description: 'Well-rested, good for testing or events' };
+    if (tsbPct >= -10) return { label: 'Grey Zone', color: '#EAB308', description: 'Maintenance — not strongly building or recovering' };
+    if (tsbPct >= -30) return { label: 'Optimal', color: '#22C55E', description: 'Productive overload, fitness improving' };
+    return { label: 'High Risk', color: '#EF4444', description: 'Significant overreach — monitor fatigue' };
+  };
+
   const getInsightStyle = (type) => {
     switch (type) {
       case 'warning':
@@ -2168,6 +2199,7 @@ Please analyze my current training status and provide personalized insights.`;
 
   const loads = calculateTrainingLoads();
   const tsbStatus = getTSBStatus(loads.tsb);
+  const trainingStatus = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
   const insights = generateInsights(loads, history, levels);
   const currentIF = formData.normalizedPower / currentFTP;
   const currentTSS = calculateTSS(formData.normalizedPower, formData.duration);
@@ -3358,55 +3390,71 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             </div>
 
-            {/* Training Summary */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h3 className="font-medium mb-3">Training Summary</h3>
-              {(() => {
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-                const fourteenDaysAgo = new Date();
-                fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-                const outdoorRides = history.filter(w =>
-                  new Date(w.date) >= thirtyDaysAgo &&
-                  w.rideType === 'Outdoor' &&
-                  w.distance > 0
-                );
-                const longestRide = outdoorRides.length > 0
-                  ? outdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, outdoorRides[0])
-                  : null;
+            {/* Training Summary + Training Status (side by side) */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Training Summary */}
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h3 className="font-medium mb-3">Training Summary</h3>
+                {(() => {
+                  const thirtyDaysAgo = new Date();
+                  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                  const fourteenDaysAgo = new Date();
+                  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+                  const outdoorRides = history.filter(w =>
+                    new Date(w.date) >= thirtyDaysAgo &&
+                    w.rideType === 'Outdoor' &&
+                    w.distance > 0
+                  );
+                  const longestRide = outdoorRides.length > 0
+                    ? outdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, outdoorRides[0])
+                    : null;
 
-                // Calculate 14-day elevation
-                const last14Days = history.filter(w => {
-                  return new Date(w.date) >= fourteenDaysAgo;
-                });
-                const elevation14d = last14Days.reduce((sum, w) => sum + (w.elevation || 0), 0);
+                  return (
+                    <div className="space-y-3 text-xs">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-gray-400">TSS</span>
+                        <span className="font-bold text-base">{loads.weeklyTSS}</span>
+                        <span className="text-gray-500">7d</span>
+                        <span className="font-bold text-base">{loads.twoWeekTSS}</span>
+                        <span className="text-gray-500">14d</span>
+                        <span className="font-bold text-base">{last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)}</span>
+                        <span className="text-gray-500">28d</span>
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-gray-400">Longest (30d)</span>
+                        {longestRide ? (
+                          <>
+                            <span className="font-bold text-base">{longestRide.duration} min</span>
+                            <span className="text-gray-500">•</span>
+                            <span className="font-bold text-base">{longestRide.distance} mi</span>
+                          </>
+                        ) : (
+                          <span className="text-gray-600 font-bold text-base">--</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
 
-                return (
-                  <div className="space-y-3 text-xs">
-                    <div className="flex items-baseline gap-4">
-                      <span className="text-gray-400">TSS</span>
-                      <span className="font-bold text-base">{loads.weeklyTSS}</span>
-                      <span className="text-gray-500">7d</span>
-                      <span className="font-bold text-base">{loads.twoWeekTSS}</span>
-                      <span className="text-gray-500">14d</span>
-                      <span className="font-bold text-base">{last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)}</span>
-                      <span className="text-gray-500">28d</span>
-                    </div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-gray-400">Longest (30d)</span>
-                      {longestRide ? (
-                        <>
-                          <span className="font-bold text-base">{longestRide.duration} min</span>
-                          <span className="text-gray-500">•</span>
-                          <span className="font-bold text-base">{longestRide.distance} mi</span>
-                        </>
-                      ) : (
-                        <span className="text-gray-600 font-bold text-base">--</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
+              {/* Training Status */}
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h3 className="font-medium mb-3">Training Status</h3>
+                <div className="flex flex-col items-center justify-center h-[calc(100%-2rem)]">
+                  <span
+                    className="inline-block px-3 py-1 rounded-full text-sm font-semibold mb-2"
+                    style={{ backgroundColor: trainingStatus.color + '22', color: trainingStatus.color, border: `1px solid ${trainingStatus.color}44` }}
+                  >
+                    {trainingStatus.label}
+                  </span>
+                  {loads.ctl >= 35 && (
+                    <span className="text-xs text-gray-400">
+                      TSB% {loads.ctl > 0 ? ((loads.tsb / loads.ctl) * 100).toFixed(0) : 0}%
+                    </span>
+                  )}
+                  <p className="text-xs text-gray-500 text-center mt-2">{trainingStatus.description}</p>
+                </div>
+              </div>
             </div>
 
             {/* Instant Analysis */}

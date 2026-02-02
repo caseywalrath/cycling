@@ -86,6 +86,7 @@ Single localStorage key stores:
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
+| `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
 
 ## Charts (Tabbed: Hours, TSS, Elevation, eFTP)
 
@@ -114,7 +115,7 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
 4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import
 5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
-6. **Training Summary card**: Two inline rows — `TSS [7d] [14d] [28d]` and `Longest (30d) [min] • [mi]`
+6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB% and description). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
 7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
 8. **Fitness Progress bar**: CTL toward target 100
 9. **Ride History button**: Full-width, opens History modal
