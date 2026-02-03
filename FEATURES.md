@@ -1,7 +1,7 @@
 # Feature Wish List & Roadmap
 
 **Project:** Gran Fondo Utah Training Tracker
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-02-03
 **Status:** Active Development
 
 This document tracks feature requests, enhancements, and ideas for future development. Items are organized by priority and complexity.
@@ -18,6 +18,10 @@ This document tracks feature requests, enhancements, and ideas for future develo
 - Export/Import data (JSON)
 - PWA support for iPhone
 - Local data persistence
+- Weekly Hours/TSS/Elevation/eFTP charts (tabbed)
+- Power Skills radar chart with power curve import
+- Training Status badge (TSB%-based with 5 tiers)
+- Monthly activity calendar (Strava-style)
 
 ❌ **Known Limitations:**
 - intervals.icu sync doesn't work with Strava-sourced activities
@@ -114,12 +118,21 @@ Sweet Spot:
 ---
 
 ### 4. Calendar View
-**Priority:** MEDIUM
+**Priority:** ✅ COMPLETED (Basic) → LOW (Enhancements)
 **Complexity:** Medium
+**Status:** ✅ Basic monthly calendar implemented (2026-02-03)
 **Description:** Visual calendar showing past workouts and planned sessions
 
-**Features:**
-- Month/week view
+**Current Implementation:**
+- ✅ Monthly grid view (Monday-start weeks)
+- ✅ Navigation arrows to scroll between months
+- ✅ Ride days show solid blue circle with bike SVG icon
+- ✅ No-ride days show gray outline with day number
+- ✅ Today highlighted with blue border/ring
+- ✅ Adjacent-month days faded for context
+- ✅ O(1) ride date lookup via useMemo Set
+
+**Future Enhancements:**
 - Color-coded by zone
 - TSS displayed on each day
 - Weekly TSS totals
@@ -646,46 +659,22 @@ These can be implemented quickly for immediate benefit:
 8. **Keyboard Shortcuts** - Fast navigation (on desktop)
 9. **Recent Workouts Widget** - Quick re-log similar workouts
 10. **Rider Phenotype Designation** - Automated classification based on power curve shape, inspired by TrainerRoad phenotypes: Sprinter (short, high-power efforts), Puncheur (repeated punchy surges over rolling terrain), Rouleur (powerful and consistent over flat/rolling terrain), Time Trialist (sustained steady solo efforts), Climber (long high-intensity climbs), All-Rounder (versatile across effort types). Could derive from Power Skills radar data by comparing relative strengths across Sprint/Attack/Climb categories. Low-medium complexity.
-11. **Training Status**
+11. **Training Status** ✅ COMPLETED (2026-02-03)
 
-    **Overview:** At-a-glance indicator of current training state derived from the relationship between Fitness (CTL), Fatigue (ATL), and Form (TSB). App already computes all three metrics. Uses TSB as a percentage of CTL rather than absolute values—this scales zones to the athlete's fitness level (a TSB of -15 means very different things at CTL 30 vs CTL 100). Display as a color-coded badge/pill, optionally showing TSB or TSB% in smaller text. Low complexity.
+    **Status:** Implemented as color-coded badge in Training Status card (side-by-side with Training Summary).
 
-    **Primary Calculation:**
-    ```
-    TSB = CTL - ATL
-    TSB% = (TSB / CTL) × 100
-    ```
-
-    **Status Categories:**
-    | Status | TSB% Range | Color | Interpretation |
-    |---|---|---|---|
-    | Transition | > +25% | Gray | Extended rest or detraining period |
-    | Fresh | +5% to +25% | Blue | Well-rested, suitable for testing or events |
-    | Grey Zone | -10% to +5% | Yellow | Maintenance, not strongly building or recovering |
-    | Optimal | -30% to -10% | Green | Productive overload, fitness likely improving |
-    | High Risk | < -30% | Red | Significant overreach, monitor for excessive fatigue |
-
-    **Low Fitness Override (CTL < 35):**
-    When CTL is below 35, percentage-based calculations become erratic—a single hard workout can produce wild TSB% swings that don't reflect meaningful physiological states. Substitute simplified status:
-    - ATL > CTL × 1.5 → "Building (Heavy Load)"
-    - ATL > CTL → "Building"
-    - ATL ≤ CTL → "Building (Fresh)"
-
-    This acknowledges early base-building as a distinct phase where standard categories don't apply cleanly. Avoids alarming "High Risk" warnings during normal early-season loading.
-
-    **Transition Detection:**
-    Transition should trigger not just on high positive TSB% but also when CTL is declining. Check for:
-    - TSB% > +25%, OR
-    - CTL has dropped more than 10% over the past 14 days while TSB remains positive
-
-    This catches scenarios where the athlete has stopped training and is losing fitness, even if TSB% hasn't reached extreme positive values.
-
-    **Instant Analysis Integration:**
-    When status is "High Risk" or CTL is declining into Transition, surface actionable guidance in Instant Analysis (e.g., "Consider a recovery day" or "Training load dropping—intentional taper or loss of consistency?").
+    **Implementation:**
+    - ✅ TSB% calculation: `(TSB / CTL) × 100`
+    - ✅ 5 status tiers with colors: Transition (gray), Fresh (blue), Grey Zone (yellow), Optimal (green), High Risk (red)
+    - ✅ Low fitness override (CTL < 35): Shows "Building" / "Building (Heavy Load)" / "Building (Fresh)"
+    - ✅ Transition detection via CTL decline >10% over 14 days (tracks `ctl14dAgo`)
+    - ✅ Displays TSB% value when CTL ≥ 35
+    - ✅ Short description text for each status
 
     **Future Refinements:**
-    - If workout-level RPE data is available, use subjective fatigue as a modifier. An athlete showing "Optimal" by the numbers but reporting high RPE on easy workouts may be deeper into fatigue than TSB suggests.
-    - If HRV data becomes available via intervals.icu wellness imports, HRV trend (rising, stable, declining) can validate status—declining HRV during "Optimal" loading may indicate the athlete is closer to "High Risk" than the numbers show.
+    - Instant Analysis integration for High Risk / Transition guidance
+    - RPE-based fatigue modifier
+    - HRV validation if wellness data becomes available
 
 ---
 
@@ -721,5 +710,5 @@ When adding to this list:
 
 ---
 
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-02-03
 **Next Review:** When starting new development phase
