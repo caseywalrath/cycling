@@ -155,3 +155,41 @@
 - **ARCHITECTURE.md cleaned up**: Removed behavioral/process sections (Developer Context, Communication Guidelines, Branch Management, Common Issues). Now purely structural/technical: file structure, component architecture, state management, data flow, key functions, charts, UI layout.
 - **Clear separation of concerns**: ARCHITECTURE.md is the authoritative reference for *what the app is*. CLAUDE.md is the guide for *how Claude should behave*.
 - Files: `CLAUDE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`
+
+---
+
+## Session 8 - Training Status & Calendar (2026-02-03)
+
+### UI Layout Reorder
+- Moved Charts and Power Skills card **above** CTL/ATL/TSB training load cards (visual-first flow)
+- Moved Fitness Progress bar **above** Ride History button
+
+### Training Status Card (NEW)
+- Added `getTrainingStatus()` function with TSB%-based status calculation
+- 5 status tiers: Transition (gray), Fresh (blue), Grey Zone (yellow), Optimal (green), High Risk (red)
+- Low fitness override (CTL < 35): Shows "Building" / "Building (Heavy Load)" / "Building (Fresh)" instead of erratic percentage-based categories
+- Transition detection: triggers on TSB% > +25% OR CTL declining >10% over 14 days
+- Added `ctl14dAgo` field to `calculateTrainingLoads()` for 14-day CTL tracking
+- Displayed as color-coded pill badge with TSB% value and description
+- Placed side-by-side with Training Summary in 2-column grid
+
+### Monthly Activity Calendar (NEW)
+- Strava-style month grid (Monday-start weeks)
+- Navigation arrows to scroll between months, defaults to current month
+- Ride days: solid blue circle with inline SVG bike icon
+- No-ride days: gray outline circle with day number
+- Today: blue border/ring highlight
+- Adjacent-month days: faded for context
+- Added `calendarMonth` / `calendarYear` state for navigation
+- Added `rideDatesSet` (useMemo) for O(1) ride date lookup
+- Added `getCalendarDays()` helper for grid generation (handles 5/6-row months, year boundaries)
+- Placed between Instant Analysis and Fitness Progress
+
+### Documentation
+- Updated FEATURES.md: marked Calendar View (#4) and Training Status (#11) as ✅ COMPLETED
+- Updated ARCHITECTURE.md: new UI layout order, added `getTrainingStatus()` and `getCalendarDays()` to key functions, documented `ctl14dAgo` field
+
+### Files Changed
+- `src/App.jsx` — all feature code
+- `ARCHITECTURE.md` — UI layout, key functions, training loads
+- `FEATURES.md` — completion status updates
