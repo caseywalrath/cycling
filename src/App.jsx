@@ -845,48 +845,66 @@ export default function ProgressionTracker() {
     if (tsb < -25) {
       insights.push({
         type: 'warning',
-        message: 'TSB below -25: High fatigue accumulation. Consider extra recovery or reducing intensity.',
+        message: 'High fatigue accumulation. Consider extra recovery or reducing intensity.',
       });
     } else if (tsb < -15) {
       insights.push({
         type: 'caution',
-        message: 'TSB below -15: Significant fatigue. Monitor for signs of overreaching.',
+        message: 'Significant fatigue building up. Monitor for signs of overreaching.',
       });
     } else if (tsb > 25) {
       insights.push({
         type: 'info',
-        message: 'TSB above +25: Very fresh but fitness may be declining. Consider adding training stimulus.',
+        message: 'Very well rested, but fitness may be declining. Consider adding training stimulus.',
       });
     } else if (tsb >= 5 && tsb <= 20) {
       insights.push({
         type: 'positive',
-        message: 'TSB in optimal fresh range (+5 to +20): Good form for hard efforts or events.',
+        message: 'Good balance of freshness and fitness. Ready for hard efforts or events.',
       });
     }
 
     if (atl > ctl + 20) {
       insights.push({
         type: 'warning',
-        message: 'ATL exceeds CTL by 20+: Acute load spike. Risk of burnout if sustained.',
+        message: 'Recent training load spiking well above your baseline. Risk of burnout if sustained.',
       });
     } else if (atl > ctl + 10) {
       insights.push({
         type: 'caution',
-        message: 'ATL exceeds CTL by 10+: Building load aggressively. Ensure adequate recovery.',
+        message: 'Building training load aggressively. Ensure adequate recovery.',
       });
+    }
+
+    // Calculate week 3 TSS (days 15-21) to check for 2 consecutive low weeks
+    const week3Workouts = history.filter(w => {
+      const threeWeeksAgo = new Date();
+      threeWeeksAgo.setDate(threeWeeksAgo.getDate() - 21);
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      return new Date(w.date) >= threeWeeksAgo && new Date(w.date) < twoWeeksAgo;
+    });
+    const week3TSS = week3Workouts.reduce((sum, w) => sum + (w.tss || 0), 0);
+
+    if (prevWeeklyTSS > 0 && week3TSS > 0) {
+      const thisWeekChange = ((weeklyTSS - prevWeeklyTSS) / prevWeeklyTSS) * 100;
+      const lastWeekChange = ((prevWeeklyTSS - week3TSS) / week3TSS) * 100;
+
+      // Only warn if BOTH weeks are down significantly (2 consecutive low weeks)
+      if (thisWeekChange < -40 && lastWeekChange < -40) {
+        insights.push({
+          type: 'caution',
+          message: `Training load down for 2 weeks running. Intentional recovery or time to get back on track?`,
+        });
+      }
     }
 
     if (prevWeeklyTSS > 0) {
       const weekChange = ((weeklyTSS - prevWeeklyTSS) / prevWeeklyTSS) * 100;
-      if (weekChange < -40) {
-        insights.push({
-          type: 'info',
-          message: `Weekly TSS down ${Math.abs(Math.round(weekChange))}% from last week. Recovery week or missed sessions?`,
-        });
-      } else if (weekChange > 30) {
+      if (weekChange > 30) {
         insights.push({
           type: 'caution',
-          message: `Weekly TSS up ${Math.round(weekChange)}% from last week. Large jump—monitor fatigue.`,
+          message: `Training load up ${Math.round(weekChange)}% from last week. Large jump—monitor fatigue.`,
         });
       }
     }
@@ -894,17 +912,17 @@ export default function ProgressionTracker() {
     if (ctl < 30) {
       insights.push({
         type: 'info',
-        message: 'CTL below 30: Early base building phase. Focus on consistency.',
+        message: 'Early base building phase. Focus on consistency.',
       });
     } else if (ctl >= 70 && ctl < 85) {
       insights.push({
         type: 'positive',
-        message: 'CTL 70-85: Solid fitness base. On track for event readiness.',
+        message: 'Solid fitness base established. On track for your goals.',
       });
     } else if (ctl >= 85) {
       insights.push({
         type: 'positive',
-        message: 'CTL 85+: Strong fitness. Maintain and begin considering taper timing.',
+        message: 'Strong fitness level. Maintain and consider taper timing for key events.',
       });
     }
 
@@ -978,7 +996,7 @@ export default function ProgressionTracker() {
       } else if (longestRide.distance < 30 && ctl > 50) {
         insights.push({
           type: 'info',
-          message: `Longest ride: ${longestRide.distance}mi. Consider adding longer rides for event prep.`,
+          message: `Longest ride: ${longestRide.distance}mi. Consider adding longer rides for endurance.`,
         });
       }
     }
@@ -1024,25 +1042,6 @@ export default function ProgressionTracker() {
         insights.push({
           type: 'caution',
           message: `${last7DaysWorkouts.length} rides this week (down from ${prev7DaysWorkouts.length}). Consistency matters.`,
-        });
-      }
-    }
-
-    // Indoor vs outdoor composition
-    if (last14Days.length >= 5) {
-      const indoorCount = last14Days.filter(w => w.rideType === 'Indoor').length;
-      const outdoorCount = last14Days.filter(w => w.rideType === 'Outdoor').length;
-      const indoorPct = (indoorCount / last14Days.length) * 100;
-
-      if (indoorPct >= 75) {
-        insights.push({
-          type: 'info',
-          message: `${Math.round(indoorPct)}% indoor rides recently. Consider outdoor variety for skill work.`,
-        });
-      } else if (outdoorCount >= 8) {
-        insights.push({
-          type: 'positive',
-          message: `${outdoorCount} outdoor rides in last 14 days. Great outdoor engagement.`,
         });
       }
     }
@@ -1131,7 +1130,7 @@ export default function ProgressionTracker() {
       } else if (avgElevationPerMile < 30 && ctl > 50) {
         insights.push({
           type: 'info',
-          message: `Averaging ${Math.round(avgElevationPerMile)}ft/mi recently. Consider adding climbing for Gran Fondo prep.`,
+          message: `Averaging ${Math.round(avgElevationPerMile)}ft/mi recently. Consider adding climbing to build strength.`,
         });
       }
     }
@@ -2723,7 +2722,7 @@ Please analyze my current training status and provide personalized insights.`;
                     value={eventFormData.name}
                     onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
                     className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                    placeholder="Gran Fondo Utah"
+                    placeholder="My Target Event"
                   />
                 </div>
 
@@ -2759,7 +2758,7 @@ Please analyze my current training status and provide personalized insights.`;
                     min="0"
                     step="1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Recommended: 80-100 for Gran Fondo</p>
+                  <p className="text-xs text-gray-500 mt-1">Recommended: 80-100 for long endurance events</p>
                 </div>
               </div>
 
