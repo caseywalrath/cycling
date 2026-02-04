@@ -3695,7 +3695,7 @@ Please analyze my current training status and provide personalized insights.`;
                   type="date"
                   value={formData.date}
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  className="bg-gray-700 rounded px-2 py-2 text-sm"
                 />
               </div>
               <div>
@@ -3723,7 +3723,7 @@ Please analyze my current training status and provide personalized insights.`;
                 <label className="block text-sm text-gray-400 mb-1">Duration (minutes)</label>
                 <input
                   type="number"
-                  value={formData.duration}
+                  value={formData.duration || ''}
                   onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || 0 })}
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                   min="1"
@@ -3734,7 +3734,7 @@ Please analyze my current training status and provide personalized insights.`;
                 <label className="block text-sm text-gray-400 mb-1">Normalized Power (W)</label>
                 <input
                   type="number"
-                  value={formData.normalizedPower}
+                  value={formData.normalizedPower || ''}
                   onChange={(e) => setFormData({ ...formData, normalizedPower: parseInt(e.target.value) || 0 })}
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                   min="50"
@@ -3762,7 +3762,7 @@ Please analyze my current training status and provide personalized insights.`;
                 </label>
                 <input
                   type="number"
-                  value={formData.distance}
+                  value={formData.distance || ''}
                   onChange={(e) => setFormData({ ...formData, distance: parseFloat(e.target.value) || 0 })}
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                   min="0"
