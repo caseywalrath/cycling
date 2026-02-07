@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'Gran Fondo Utah Training',
-        short_name: 'GF Training',
+        name: 'Casey Rides',
+        short_name: 'Casey Rides',
         description: 'Cycling training tracker with TrainerRoad-style progression',
         theme_color: '#1e293b',
         background_color: '#111827',
