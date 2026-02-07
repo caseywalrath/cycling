@@ -2246,7 +2246,7 @@ ${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\
 **Recent Workouts:**
 ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
 
-Please analyze my current training status and provide personalized insights.`;
+Please analyze my current training and provide personalized insights.`;
 
     const copyToClipboard = (text) => {
       if (navigator.clipboard && window.isSecureContext) {
