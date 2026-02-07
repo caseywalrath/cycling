@@ -2087,9 +2087,11 @@ export default function ProgressionTracker() {
       GoogleDriveSync.init();
 
       // Prepare current local data for sync
+      // Pass exportedAt as-is (null if no local changes yet).
+      // The sync module treats null as epoch 0, so remote data always wins over a fresh/empty app.
       const localData = {
         syncVersion: 1,
-        exportedAt: exportedAt || new Date().toISOString(),
+        exportedAt: exportedAt,
         lastSyncedAt: lastSyncedAt,
         levels,
         history,
@@ -2124,9 +2126,14 @@ export default function ProgressionTracker() {
 
       setDriveSyncStatus(result);
 
-      // If we pushed data, update sync timestamp
+      // If we pushed data, update sync timestamps
       if (result.action === 'push') {
-        setLastSyncedAt(new Date().toISOString());
+        const now = new Date().toISOString();
+        setLastSyncedAt(now);
+        // If exportedAt was null (first-ever sync), set it so future syncs compare correctly
+        if (!exportedAt) {
+          setExportedAt(now);
+        }
       }
 
       // Clear status after 5 seconds
