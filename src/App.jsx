@@ -2089,6 +2089,7 @@ export default function ProgressionTracker() {
       // Prepare current local data for sync
       // Pass exportedAt as-is (null if no local changes yet).
       // The sync module treats null as epoch 0, so remote data always wins over a fresh/empty app.
+      console.log('[handleDriveSync] exportedAt:', exportedAt, '| history length:', history.length);
       const localData = {
         syncVersion: 1,
         exportedAt: exportedAt,
@@ -2106,6 +2107,7 @@ export default function ProgressionTracker() {
       // Perform sync
       const result = await GoogleDriveSync.sync(localData, (remoteData) => {
         // Pull callback: update local state with remote data
+        console.log('[handleDriveSync] Pull callback fired! Remote rides:', (remoteData.history || []).length);
         if (remoteData.levels) {
           setLevels(remoteData.levels);
           setDisplayLevels(remoteData.levels);

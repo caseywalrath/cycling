@@ -220,9 +220,11 @@ const GoogleDriveSync = {
     try {
       // Step 1: Authenticate
       await this.authenticate();
+      console.log('[Sync] Authenticated, token:', this.accessToken ? 'present' : 'missing');
 
       // Step 2: Find existing backup
       const existingFile = await this.findBackupFile();
+      console.log('[Sync] Find backup result:', existingFile);
 
       // Step 3: Handle first-time sync (no remote file)
       if (!existingFile) {
@@ -234,20 +236,44 @@ const GoogleDriveSync = {
         };
 
         await this.createBackup(dataToUpload);
+        const rideCount = (localData.history || []).length;
 
         return {
           status: 'created',
-          message: 'Backup created in Google Drive',
+          message: `Backup created in Google Drive (${rideCount} rides)`,
           action: 'push'
         };
       }
 
       // Step 4: Download remote backup
       const remoteData = await this.downloadBackup(existingFile.id);
+      const localRideCount = (localData.history || []).length;
+      const remoteRideCount = (remoteData.history || []).length;
+      console.log('[Sync] Local exportedAt:', localData.exportedAt, '| Remote exportedAt:', remoteData.exportedAt);
+      console.log('[Sync] Local rides:', localRideCount, '| Remote rides:', remoteRideCount);
 
       // Step 5: Compare timestamps
       const localTime = new Date(localData.exportedAt || 0).getTime();
       const remoteTime = new Date(remoteData.exportedAt || 0).getTime();
+      console.log('[Sync] Local time:', localTime, '| Remote time:', remoteTime);
+
+      // Step 5b: Safeguard — if local has no data but remote does, always pull
+      // This handles fresh installs, cleared cache, or any case where local is empty
+      if (localRideCount === 0 && remoteRideCount > 0) {
+        console.log('[Sync] Local is empty but remote has data — forcing pull');
+        remoteData.lastSyncedAt = new Date().toISOString();
+
+        if (onPull && typeof onPull === 'function') {
+          onPull(remoteData);
+        }
+
+        return {
+          status: 'pulled',
+          message: `Restored ${remoteRideCount} rides from Google Drive`,
+          action: 'pull',
+          data: remoteData
+        };
+      }
 
       // Step 6: Determine sync action
       if (localTime > remoteTime) {
@@ -262,7 +288,7 @@ const GoogleDriveSync = {
 
         return {
           status: 'pushed',
-          message: 'Local changes uploaded to Google Drive',
+          message: `Uploaded ${localRideCount} rides to Google Drive`,
           action: 'push'
         };
 
@@ -276,7 +302,7 @@ const GoogleDriveSync = {
 
         return {
           status: 'pulled',
-          message: 'Updated local data from Google Drive',
+          message: `Restored ${remoteRideCount} rides from Google Drive`,
           action: 'pull',
           data: remoteData
         };
@@ -284,13 +310,13 @@ const GoogleDriveSync = {
       } else {
         return {
           status: 'synced',
-          message: 'Already in sync',
+          message: `Already in sync (${localRideCount} rides)`,
           action: 'none'
         };
       }
 
     } catch (error) {
-      console.error('Sync error:', error);
+      console.error('[Sync] Error:', error);
       return {
         status: 'error',
         message: error.message || 'Sync failed',
