@@ -2203,8 +2203,26 @@ export default function ProgressionTracker() {
   const copyForAnalysis = () => {
     const loads = calculateTrainingLoads();
     const recentWorkouts = history.slice(0, 7);
+    const latestEFTP = history.find(w => w.eFTP)?.eFTP;
+    const daysToEvent = getDaysUntilEvent();
+    const status = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
+
+    // 28-day TSS
+    const fourWeeksAgo = new Date();
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    const twentyEightDayTSS = history
+      .filter(w => new Date(w.date) >= fourWeeksAgo)
+      .reduce((sum, w) => sum + (w.tss || 0), 0);
+
+    // Weekly training hours (last 4 weeks)
+    const weeklyHoursData = calculateWeeklyHours(history);
+    const last4Weeks = weeklyHoursData.slice(-4);
 
     const analysisText = `## Training Status - ${new Date().toISOString().split('T')[0]}
+
+**Athlete Profile:**
+- FTP: ${currentFTP}W${latestEFTP ? ` | eFTP: ${latestEFTP}W` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
+- Training Status: ${status.label} — ${status.description}
 
 **Training Loads:**
 - CTL (Fitness): ${loads.ctl}
@@ -2212,6 +2230,10 @@ export default function ProgressionTracker() {
 - TSB (Form): ${loads.tsb}
 - 7-Day TSS: ${loads.weeklyTSS}
 - 14-Day TSS: ${loads.twoWeekTSS}
+- 28-Day TSS: ${twentyEightDayTSS}
+
+**Weekly Training Hours (past 4 weeks):**
+${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
 
 **Progression Levels:**
 - Endurance: ${levels.endurance.toFixed(1)}
