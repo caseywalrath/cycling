@@ -37,7 +37,7 @@ Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModa
 ### Form State
 | State | Purpose |
 |-------|---------|
-| `formData` | Log ride form fields |
+| `formData` | Log ride form fields (includes optional `eFTP` field, shown only when editing) |
 | `editingRide` | ID of ride being edited (null = new ride) |
 
 ## Data Flow
@@ -74,8 +74,10 @@ When editing an imported ride, the handler detects the zone change (`wasUnclassi
 Recovery zone (`zone: 'recovery'`) is excluded from progression level updates regardless of source.
 
 ## Persistence
-Single localStorage key stores:
-- `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `exportedAt`, `lastSyncedAt`
+Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
+- `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`
+
+**Load/save architecture**: One load effect (runs once on mount with `try/catch`) and one save effect (skips initial mount via `isInitialMount` ref to prevent overwriting localStorage with empty defaults before state is populated). FTP is included in the main save — no separate FTP effects.
 
 ## Google Drive Sync
 - **Module**: `src/google-drive-sync.js` — standalone OAuth + Drive API logic using Google Identity Services

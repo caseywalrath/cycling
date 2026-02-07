@@ -230,3 +230,26 @@
 - `src/App.jsx` — sync state, handleDriveSync, markDataChanged, Sync button in header
 - `ARCHITECTURE.md` — file structure, persistence, sync docs, UI layout
 - `CHANGELOG.md` — this entry
+
+---
+
+## Session 10 - localStorage Fix & eFTP Editing (2026-02-07)
+
+### Critical Bug Fix: localStorage Data Loss
+- **Root cause**: Save `useEffect` ran on initial mount before load effect's `setState` calls took effect, overwriting localStorage with empty defaults. React's `StrictMode` (double-firing effects) compounded the issue.
+- **Fix**: Replaced broken `dataLoadedRef` guard with `isInitialMount` skip-first-render pattern — save effect skips its first execution entirely, only fires after state is populated.
+- **FTP persistence fix**: Main save effect was missing `ftp`/`intervalsFTP` fields, silently dropping FTP on every write. Separate FTP load/save effects created additional race conditions. Consolidated all data into single load/save effects.
+- **Error handling**: Added `try/catch` around all `JSON.parse` calls in load effects to prevent silent failures on corrupted data.
+
+### eFTP Editable via Ride History
+- Added optional eFTP (W) input field to the edit ride form (only visible when editing, not when logging new rides)
+- Pre-populates with existing eFTP value from imports; allows manual entry for rides without eFTP
+- Stored as integer or `null` (empty field saves as null, not shown in history)
+
+### App Rename
+- Browser tab title, PWA manifest `name`/`short_name`, and Apple mobile web app title updated from "Gran Fondo Utah Training" to "Casey Rides"
+
+### Files Changed
+- `src/App.jsx` — localStorage fix, eFTP edit field, formData updates
+- `index.html` — title rename
+- `vite.config.js` — PWA manifest name rename
