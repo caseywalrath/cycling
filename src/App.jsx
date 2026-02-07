@@ -54,6 +54,7 @@ export default function ProgressionTracker() {
   const [animatingZone, setAnimatingZone] = useState(null);
   const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours', 'tss', or 'elevation'
   const animationRef = useRef(null);
+  const dataLoadedRef = useRef(false);
 
   // intervals.icu integration state
   const [showIntervalsSyncModal, setShowIntervalsSyncModal] = useState(false);
@@ -189,9 +190,11 @@ export default function ProgressionTracker() {
         setRecentChanges(changes);
       }
     }
+    dataLoadedRef.current = true;
   }, []);
 
   useEffect(() => {
+    if (!dataLoadedRef.current) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       levels,
       history,
@@ -228,6 +231,7 @@ export default function ProgressionTracker() {
 
   // Save FTP and intervalsFTP to localStorage when they change
   useEffect(() => {
+    if (!dataLoadedRef.current) return;
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
