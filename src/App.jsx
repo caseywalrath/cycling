@@ -38,6 +38,14 @@ const INTERVALS_CONFIG_KEY = 'intervals-icu-config';
 const FTP = 235;
 const START_DATE = '2024-12-29'; // Import rides from this date onwards
 
+const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const formatDateWithDay = (dateStr) => {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const day = DAYS_OF_WEEK[new Date(y, m - 1, d).getDay()];
+  return `${dateStr} - ${day}`;
+};
+
 export default function ProgressionTracker() {
   const [levels, setLevels] = useState(DEFAULT_LEVELS);
   const [displayLevels, setDisplayLevels] = useState(DEFAULT_LEVELS);
@@ -2214,7 +2222,7 @@ export default function ProgressionTracker() {
 - Anaerobic: ${levels.anaerobic.toFixed(1)}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${w.date}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
+${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
 
 Please analyze my current training status and provide personalized insights.`;
 
@@ -4044,7 +4052,7 @@ Please analyze my current training status and provide personalized insights.`;
                             <span className="ml-2" title="Long Ride">🛣️</span>
                           )}
                         </div>
-                        <div className="text-gray-400 text-xs">{entry.date}</div>
+                        <div className="text-gray-400 text-xs">{formatDateWithDay(entry.date)}</div>
                       </div>
                     </div>
 
