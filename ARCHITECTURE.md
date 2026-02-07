@@ -3,12 +3,13 @@
 ## File Structure
 ```
 src/
-  App.jsx      # Single-file application (~3600 lines)
-  main.jsx     # React entry point
-  index.css    # Tailwind directives
+  App.jsx              # Single-file application (~3700 lines)
+  main.jsx             # React entry point
+  index.css            # Tailwind directives
+  google-drive-sync.js # Google Drive OAuth & sync module
 public/
-  pwa-*.png    # PWA icons
-vite.config.js # Vite + PWA config
+  pwa-*.png            # PWA icons
+vite.config.js         # Vite + PWA config
 ```
 
 ## Component Architecture
@@ -74,7 +75,16 @@ Recovery zone (`zone: 'recovery'`) is excluded from progression level updates re
 
 ## Persistence
 Single localStorage key stores:
-- `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`
+- `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `exportedAt`, `lastSyncedAt`
+
+## Google Drive Sync
+- **Module**: `src/google-drive-sync.js` — standalone OAuth + Drive API logic using Google Identity Services
+- **Auth**: OAuth 2.0 implicit grant via `drive.file` scope (only accesses files created by the app)
+- **Backup file**: `casey-rides-backup.json` in user's Google Drive root
+- **Conflict resolution**: "Last write wins" based on `exportedAt` timestamp
+- **Sync flow**: Authenticate → find/download remote → compare `exportedAt` → push (local newer) or pull (remote newer) or skip (equal)
+- **State**: `isDriveSyncing`, `driveSyncStatus`, `exportedAt`, `lastSyncedAt`
+- **`markDataChanged()`**: Called on every data mutation to update `exportedAt` — the single source of truth for sync conflict resolution
 
 ## Key Functions
 | Function | Purpose |
@@ -83,6 +93,8 @@ Single localStorage key stores:
 | `calculateTrainingLoads()` | CTL, ATL, TSB calculations |
 | `calculateNewLevel()` | Progression algorithm (expected vs actual RPE) |
 | `handleLogWorkout()` | Save new or edited ride |
+| `handleDriveSync()` | Google Drive sync (push/pull based on exportedAt) |
+| `markDataChanged()` | Update exportedAt timestamp on any data mutation |
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
@@ -122,6 +134,7 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 9. **Fitness Progress bar**: CTL toward target 100
 10. **Ride History button**: Full-width, opens History modal
 11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
+12. **Google Drive Sync button**: Blue "Sync to Google Drive" button with status message, separated by border
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Key modals:

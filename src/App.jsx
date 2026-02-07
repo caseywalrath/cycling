@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
+import GoogleDriveSync from './google-drive-sync.js';
 
 const ZONES = [
   { id: 'recovery', name: 'Recovery', color: '#6B7280', description: 'Z1: <130W' },
@@ -85,6 +86,12 @@ export default function ProgressionTracker() {
   // Cloud sync instructions modal
   const [showCloudSyncHelp, setShowCloudSyncHelp] = useState(false);
 
+  // Google Drive sync state
+  const [isDriveSyncing, setIsDriveSyncing] = useState(false);
+  const [driveSyncStatus, setDriveSyncStatus] = useState(null);
+  const [exportedAt, setExportedAt] = useState(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+
   // Event/Goal management
   const [event, setEvent] = useState({
     name: 'Gran Fondo Utah',
@@ -158,6 +165,14 @@ export default function ProgressionTracker() {
         setPowerCurveData(parsed.powerCurveData);
       }
 
+      // Load sync timestamps if available
+      if (parsed.exportedAt) {
+        setExportedAt(parsed.exportedAt);
+      }
+      if (parsed.lastSyncedAt) {
+        setLastSyncedAt(parsed.lastSyncedAt);
+      }
+
       // Calculate recent changes from history
       if (parsed.history && parsed.history.length > 0) {
         const changes = {};
@@ -182,9 +197,11 @@ export default function ProgressionTracker() {
       event,
       userProfile,
       vo2maxEstimates,
-      powerCurveData
+      powerCurveData,
+      exportedAt,
+      lastSyncedAt
     }));
-  }, [levels, history, event, userProfile, vo2maxEstimates, powerCurveData]);
+  }, [levels, history, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt]);
 
   // Load intervals.icu config from localStorage
   useEffect(() => {
@@ -237,6 +254,11 @@ export default function ProgressionTracker() {
       }
     }
   }, [history]); // Only check when history changes (new rides imported/logged)
+
+  // Mark data as changed (updates exportedAt timestamp for sync conflict resolution)
+  const markDataChanged = () => {
+    setExportedAt(new Date().toISOString());
+  };
 
   // Calculate zone descriptions dynamically based on current FTP
   const getZoneDescription = (zoneId, ftp) => {
@@ -1506,6 +1528,7 @@ export default function ProgressionTracker() {
         );
 
         setHistory(mergedHistory);
+        markDataChanged();
 
         let statusMsg = `✓ Imported ${imported} activities! Classify rides in Ride History to update progression levels.`;
         if (skippedNoPower > 0 || skippedDuplicate > 0 || fetchErrors > 0) {
@@ -1692,6 +1715,7 @@ export default function ProgressionTracker() {
         );
 
         setHistory(mergedHistory);
+        markDataChanged();
 
         setCSVImportStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data). Classify rides in Ride History to update progression levels.`);
 
@@ -1750,6 +1774,7 @@ export default function ProgressionTracker() {
 
       // Update history with edited entry
       setHistory(history.map(w => w.id === editingRide ? entry : w));
+      markDataChanged();
 
       // Update progression levels if zone was assigned/changed
       if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
@@ -1819,6 +1844,7 @@ export default function ProgressionTracker() {
       if (affectsProgression) {
         setLevels({ ...levels, [zone]: newLevel });
       }
+      markDataChanged();
 
       // Show summary modal
       setShowPostLogSummary(true);
@@ -1861,6 +1887,7 @@ export default function ProgressionTracker() {
   // Event management handlers
   const handleSaveEvent = () => {
     setEvent(eventFormData);
+    markDataChanged();
     setShowEventModal(false);
   };
 
@@ -1873,6 +1900,7 @@ export default function ProgressionTracker() {
         distance: 0,
         targetCTL: 0,
       });
+      markDataChanged();
       setShowEventModal(false);
     }
   };
@@ -1903,6 +1931,7 @@ export default function ProgressionTracker() {
 
     if (confirmed) {
       setHistory(history.filter(w => w.id !== workoutId));
+      markDataChanged();
     }
   };
 
@@ -1955,8 +1984,13 @@ export default function ProgressionTracker() {
   };
 
   const exportData = () => {
+    const now = new Date().toISOString();
     // Include all user data in export
     const data = JSON.stringify({
+      syncVersion: 1,
+      deviceId: null,
+      lastSyncedAt: lastSyncedAt || null,
+      exportedAt: now,
       levels,
       history,
       ftp: currentFTP,
@@ -1964,8 +1998,8 @@ export default function ProgressionTracker() {
       event,
       userProfile,
       powerCurveData,
-      exportedAt: new Date().toISOString()
     }, null, 2);
+    setExportedAt(now);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1997,6 +2031,7 @@ export default function ProgressionTracker() {
           if (parsed.event) setEvent(parsed.event);
           if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
           if (parsed.powerCurveData) setPowerCurveData(parsed.powerCurveData);
+          markDataChanged();
 
           alert(`✓ Data imported successfully!\n${parsed.history?.length || 0} workouts restored.`);
         } catch (err) {
@@ -2033,6 +2068,7 @@ export default function ProgressionTracker() {
           return;
         }
         setPowerCurveData(data);
+        markDataChanged();
         alert(`✓ Power curve imported: ${data.length} data points loaded.`);
       } catch (err) {
         alert('Error reading power curve file. Please check the format.');
@@ -2041,6 +2077,70 @@ export default function ProgressionTracker() {
     reader.readAsText(file);
     // Reset file input so the same file can be re-imported
     event.target.value = '';
+  };
+
+  const handleDriveSync = async () => {
+    setIsDriveSyncing(true);
+    setDriveSyncStatus(null);
+
+    try {
+      GoogleDriveSync.init();
+
+      // Prepare current local data for sync
+      const localData = {
+        syncVersion: 1,
+        exportedAt: exportedAt || new Date().toISOString(),
+        lastSyncedAt: lastSyncedAt,
+        levels,
+        history,
+        ftp: currentFTP,
+        intervalsFTP,
+        event,
+        userProfile,
+        vo2maxEstimates,
+        powerCurveData,
+      };
+
+      // Perform sync
+      const result = await GoogleDriveSync.sync(localData, (remoteData) => {
+        // Pull callback: update local state with remote data
+        if (remoteData.levels) {
+          setLevels(remoteData.levels);
+          setDisplayLevels(remoteData.levels);
+        }
+        if (remoteData.history) setHistory(remoteData.history);
+        if (remoteData.ftp) setCurrentFTP(remoteData.ftp);
+        if (remoteData.intervalsFTP) setIntervalsFTP(remoteData.intervalsFTP);
+        if (remoteData.event) {
+          setEvent(remoteData.event);
+          setEventFormData(remoteData.event);
+        }
+        if (remoteData.userProfile) setUserProfile(remoteData.userProfile);
+        if (remoteData.vo2maxEstimates) setVo2maxEstimates(remoteData.vo2maxEstimates);
+        if (remoteData.powerCurveData) setPowerCurveData(remoteData.powerCurveData);
+        if (remoteData.exportedAt) setExportedAt(remoteData.exportedAt);
+        if (remoteData.lastSyncedAt) setLastSyncedAt(remoteData.lastSyncedAt);
+      });
+
+      setDriveSyncStatus(result);
+
+      // If we pushed data, update sync timestamp
+      if (result.action === 'push') {
+        setLastSyncedAt(new Date().toISOString());
+      }
+
+      // Clear status after 5 seconds
+      setTimeout(() => setDriveSyncStatus(null), 5000);
+
+    } catch (error) {
+      console.error('Drive sync error:', error);
+      setDriveSyncStatus({
+        status: 'error',
+        message: 'Sync failed: ' + error.message
+      });
+    } finally {
+      setIsDriveSyncing(false);
+    }
   };
 
   const handlePasteImport = () => {
@@ -2072,6 +2172,7 @@ export default function ProgressionTracker() {
       // Import VO2max data if available
       if (parsed.userProfile) setUserProfile(parsed.userProfile);
       if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
+      markDataChanged();
 
       setShowPasteImport(false);
       setPasteContent('');
@@ -2900,6 +3001,7 @@ Please analyze my current training status and provide personalized insights.`;
                         setDisplayLevels(resetLevels);
                       }
                     }
+                    markDataChanged();
                     setShowProfileModal(false);
                   }}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium transition"
@@ -3989,6 +4091,7 @@ Please analyze my current training status and provide personalized insights.`;
                 };
                 setLevels(resetLevels);
                 setDisplayLevels(resetLevels);
+                markDataChanged();
                 alert('✓ All progression levels reset to 1.0');
               }
             }}
@@ -3996,6 +4099,38 @@ Please analyze my current training status and provide personalized insights.`;
           >
             Reset Levels
           </button>
+        </div>
+
+        {/* Google Drive Sync */}
+        <div className="mt-6 pt-4 border-t border-gray-700 flex items-center justify-center gap-3">
+          <button
+            onClick={handleDriveSync}
+            disabled={isDriveSyncing}
+            className={`px-4 py-2 rounded font-medium transition flex items-center gap-2 ${
+              isDriveSyncing
+                ? 'bg-gray-600 cursor-wait text-gray-400'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {isDriveSyncing ? (
+              <>
+                <span className="animate-spin inline-block">⟳</span>
+                Syncing...
+              </>
+            ) : (
+              <>
+                <span>☁</span>
+                Sync to Google Drive
+              </>
+            )}
+          </button>
+          {driveSyncStatus && (
+            <span className={`text-sm ${
+              driveSyncStatus.status === 'error' ? 'text-red-400' : 'text-green-400'
+            }`}>
+              {driveSyncStatus.message}
+            </span>
+          )}
         </div>
       </div>
     </div>

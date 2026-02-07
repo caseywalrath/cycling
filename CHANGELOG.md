@@ -193,3 +193,33 @@
 - `src/App.jsx` — all feature code
 - `ARCHITECTURE.md` — UI layout, key functions, training loads
 - `FEATURES.md` — completion status updates
+
+---
+
+## Session 9 - Google Drive Sync (2026-02-07)
+
+### Google Drive Sync (NEW)
+- **New module**: `src/google-drive-sync.js` — standalone Google Drive OAuth + sync logic
+- **OAuth**: Google Identity Services (GIS) implicit grant, `drive.file` scope
+- **Backup file**: `casey-rides-backup.json` stored in user's Google Drive root
+- **Conflict resolution**: "Last write wins" using `exportedAt` timestamp
+- **Sync behavior**: Push if local newer, pull if remote newer, skip if equal, create if no remote file
+- **Error handling**: 401 (token expiry with auto-retry), 429 (rate limit), offline detection
+- **UI**: Blue "Sync to Google Drive" button at bottom of app with status message
+
+### Data Change Tracking
+- Added `exportedAt` state — updated on every data mutation via `markDataChanged()`
+- Added `lastSyncedAt` state — updated after successful sync
+- `markDataChanged()` wired into: ride log/edit/delete, CSV import, intervals.icu sync, level reset, power curve import, event save/delete, profile save, file/paste import
+- Both fields persisted to localStorage and included in JSON export
+
+### Export/Import Updates
+- Export now includes `syncVersion`, `deviceId`, `lastSyncedAt` fields
+- Import calls `markDataChanged()` to update exportedAt timestamp
+
+### Files Changed
+- `src/google-drive-sync.js` — new file (Google Drive sync module)
+- `index.html` — added Google Identity Services script tag
+- `src/App.jsx` — sync state, handleDriveSync, markDataChanged, Sync button UI
+- `ARCHITECTURE.md` — file structure, persistence, sync docs, UI layout
+- `CHANGELOG.md` — this entry
