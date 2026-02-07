@@ -54,7 +54,7 @@ export default function ProgressionTracker() {
   const [animatingZone, setAnimatingZone] = useState(null);
   const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours', 'tss', or 'elevation'
   const animationRef = useRef(null);
-  const dataLoadedRef = useRef(false);
+  const isInitialMount = useRef(true);
 
   // intervals.icu integration state
   const [showIntervalsSyncModal, setShowIntervalsSyncModal] = useState(false);
@@ -138,66 +138,82 @@ export default function ProgressionTracker() {
   const [editingRide, setEditingRide] = useState(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const loadedLevels = parsed.levels || DEFAULT_LEVELS;
-      setLevels(loadedLevels);
-      setDisplayLevels(loadedLevels);
-      setHistory(parsed.history || []);
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const loadedLevels = parsed.levels || DEFAULT_LEVELS;
+        setLevels(loadedLevels);
+        setDisplayLevels(loadedLevels);
+        setHistory(parsed.history || []);
 
-      // Load event if available
-      if (parsed.event) {
-        setEvent(parsed.event);
-        setEventFormData(parsed.event);
-      }
+        // Load FTP
+        if (parsed.ftp) {
+          setCurrentFTP(parsed.ftp);
+        }
+        if (parsed.intervalsFTP) {
+          setIntervalsFTP(parsed.intervalsFTP);
+        }
 
-      // Load user profile if available
-      if (parsed.userProfile) {
-        setUserProfile(parsed.userProfile);
-      }
+        // Load event if available
+        if (parsed.event) {
+          setEvent(parsed.event);
+          setEventFormData(parsed.event);
+        }
 
-      // Load VO2max estimates if available
-      if (parsed.vo2maxEstimates) {
-        setVo2maxEstimates(parsed.vo2maxEstimates);
-      }
+        // Load user profile if available
+        if (parsed.userProfile) {
+          setUserProfile(parsed.userProfile);
+        }
 
-      // Load power curve data if available
-      if (parsed.powerCurveData) {
-        setPowerCurveData(parsed.powerCurveData);
-      }
+        // Load VO2max estimates if available
+        if (parsed.vo2maxEstimates) {
+          setVo2maxEstimates(parsed.vo2maxEstimates);
+        }
 
-      // Load sync timestamps if available
-      if (parsed.exportedAt) {
-        setExportedAt(parsed.exportedAt);
-      }
-      if (parsed.lastSyncedAt) {
-        setLastSyncedAt(parsed.lastSyncedAt);
-      }
+        // Load power curve data if available
+        if (parsed.powerCurveData) {
+          setPowerCurveData(parsed.powerCurveData);
+        }
 
-      // Calculate recent changes from history
-      if (parsed.history && parsed.history.length > 0) {
-        const changes = {};
-        ZONES.forEach(zone => {
-          const lastWorkout = parsed.history.find(w => w.zone === zone.id);
-          if (lastWorkout && lastWorkout.change !== 0) {
-            changes[zone.id] = {
-              change: lastWorkout.change,
-              date: lastWorkout.date,
-            };
-          }
-        });
-        setRecentChanges(changes);
+        // Load sync timestamps if available
+        if (parsed.exportedAt) {
+          setExportedAt(parsed.exportedAt);
+        }
+        if (parsed.lastSyncedAt) {
+          setLastSyncedAt(parsed.lastSyncedAt);
+        }
+
+        // Calculate recent changes from history
+        if (parsed.history && parsed.history.length > 0) {
+          const changes = {};
+          ZONES.forEach(zone => {
+            const lastWorkout = parsed.history.find(w => w.zone === zone.id);
+            if (lastWorkout && lastWorkout.change !== 0) {
+              changes[zone.id] = {
+                change: lastWorkout.change,
+                date: lastWorkout.date,
+              };
+            }
+          });
+          setRecentChanges(changes);
+        }
       }
+    } catch (e) {
+      console.error('Failed to load saved data from localStorage:', e);
     }
-    dataLoadedRef.current = true;
   }, []);
 
   useEffect(() => {
-    if (!dataLoadedRef.current) return;
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       levels,
       history,
+      ftp: currentFTP,
+      intervalsFTP,
       event,
       userProfile,
       vo2maxEstimates,
@@ -205,43 +221,19 @@ export default function ProgressionTracker() {
       exportedAt,
       lastSyncedAt
     }));
-  }, [levels, history, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt]);
+  }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt]);
 
   // Load intervals.icu config from localStorage
   useEffect(() => {
-    const savedConfig = localStorage.getItem(INTERVALS_CONFIG_KEY);
-    if (savedConfig) {
-      setIntervalsConfig(JSON.parse(savedConfig));
+    try {
+      const savedConfig = localStorage.getItem(INTERVALS_CONFIG_KEY);
+      if (savedConfig) {
+        setIntervalsConfig(JSON.parse(savedConfig));
+      }
+    } catch (e) {
+      console.error('Failed to load intervals.icu config:', e);
     }
   }, []);
-
-  // Load FTP from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.ftp) {
-        setCurrentFTP(parsed.ftp);
-      }
-      if (parsed.intervalsFTP) {
-        setIntervalsFTP(parsed.intervalsFTP);
-      }
-    }
-  }, []);
-
-  // Save FTP and intervalsFTP to localStorage when they change
-  useEffect(() => {
-    if (!dataLoadedRef.current) return;
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      parsed.ftp = currentFTP;
-      parsed.intervalsFTP = intervalsFTP;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-    } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ levels, history, ftp: currentFTP, intervalsFTP }));
-    }
-  }, [currentFTP, intervalsFTP]);
 
   // Check FTP vs eFTP difference and prompt user if > 10
   useEffect(() => {
