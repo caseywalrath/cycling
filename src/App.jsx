@@ -2218,7 +2218,7 @@ export default function ProgressionTracker() {
     const weeklyHoursData = calculateWeeklyHours(history);
     const last4Weeks = weeklyHoursData.slice(-4);
 
-    const analysisText = `## Training Status - ${new Date().toISOString().split('T')[0]}
+    const analysisText = `## Training Status - ${formatDateWithDay(new Date().toISOString().split('T')[0])}
 
 **Athlete Profile:**
 - FTP: ${currentFTP}W${latestEFTP ? ` | eFTP: ${latestEFTP}W` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
