@@ -129,6 +129,7 @@ export default function ProgressionTracker() {
     rideType: 'Indoor', // 'Indoor' or 'Outdoor'
     distance: 0, // miles
     elevation: 0, // feet
+    eFTP: '', // watts, optional — typically from intervals.icu but can be manually entered
     notes: '',
   });
 
@@ -1760,10 +1761,11 @@ export default function ProgressionTracker() {
       }
 
       const entry = {
-        ...oldWorkout, // Preserve any extra fields like intervalsId, eFTP
+        ...oldWorkout, // Preserve any extra fields like intervalsId
         ...formData,
         name: formData.name,
         id: editingRide,
+        eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
         previousLevel,
         newLevel,
         change,
@@ -1799,6 +1801,7 @@ export default function ProgressionTracker() {
         rideType: 'Indoor',
         distance: 0,
         elevation: 0,
+        eFTP: '',
         notes: '',
       });
       setEditingRide(null);
@@ -1862,6 +1865,7 @@ export default function ProgressionTracker() {
         rideType: 'Indoor',
         distance: 0,
         elevation: 0,
+        eFTP: '',
         notes: '',
       });
       setEditingRide(null);
@@ -1955,6 +1959,7 @@ export default function ProgressionTracker() {
       rideType: workout.rideType || 'Indoor',
       distance: workout.distance || 0,
       elevation: workout.elevation || 0,
+      eFTP: workout.eFTP || '',
       notes: workout.notes || '',
     });
 
@@ -1978,6 +1983,7 @@ export default function ProgressionTracker() {
       rideType: 'Indoor',
       distance: 0,
       elevation: 0,
+      eFTP: '',
       notes: '',
     });
     setShowLogRideModal(false);
@@ -3899,6 +3905,23 @@ Please analyze my current training status and provide personalized insights.`;
                 />
               </div>
             </div>
+
+            {editingRide && (
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-1">
+                  eFTP (W) <span className="text-gray-500 text-xs">(optional)</span>
+                </label>
+                <input
+                  type="number"
+                  value={formData.eFTP || ''}
+                  onChange={(e) => setFormData({ ...formData, eFTP: parseInt(e.target.value) || '' })}
+                  placeholder="e.g. 230"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  min="50"
+                  max="500"
+                />
+              </div>
+            )}
 
             {/* Calculated values preview */}
             <div className="bg-gray-700 rounded p-3 mb-4 grid grid-cols-2 gap-4 text-sm">
