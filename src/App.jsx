@@ -2389,6 +2389,17 @@ Please analyze my current training status and provide personalized insights.`;
               Log Ride
             </button>
             <button
+              onClick={handleDriveSync}
+              disabled={isDriveSyncing}
+              className={`text-sm px-3 py-1 rounded transition font-medium ${
+                isDriveSyncing
+                  ? 'bg-gray-600 cursor-wait text-gray-400'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              {isDriveSyncing ? 'Syncing...' : 'Sync'}
+            </button>
+            <button
               onClick={() => {
                 setEventFormData(event);
                 setShowEventModal(true);
@@ -2408,6 +2419,13 @@ Please analyze my current training status and provide personalized insights.`;
             </button>
           </div>
         </div>
+        {driveSyncStatus && (
+          <div className={`text-sm mb-2 ${
+            driveSyncStatus.status === 'error' ? 'text-red-400' : 'text-green-400'
+          }`}>
+            {driveSyncStatus.message}
+          </div>
+        )}
         <p className="text-gray-400 text-sm mb-4">
           FTP: {currentFTP}W
           {(() => {
@@ -4110,37 +4128,6 @@ Please analyze my current training status and provide personalized insights.`;
           </button>
         </div>
 
-        {/* Google Drive Sync */}
-        <div className="mt-6 pt-4 border-t border-gray-700 flex items-center justify-center gap-3">
-          <button
-            onClick={handleDriveSync}
-            disabled={isDriveSyncing}
-            className={`px-4 py-2 rounded font-medium transition flex items-center gap-2 ${
-              isDriveSyncing
-                ? 'bg-gray-600 cursor-wait text-gray-400'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
-          >
-            {isDriveSyncing ? (
-              <>
-                <span className="animate-spin inline-block">⟳</span>
-                Syncing...
-              </>
-            ) : (
-              <>
-                <span>☁</span>
-                Sync to Google Drive
-              </>
-            )}
-          </button>
-          {driveSyncStatus && (
-            <span className={`text-sm ${
-              driveSyncStatus.status === 'error' ? 'text-red-400' : 'text-green-400'
-            }`}>
-              {driveSyncStatus.message}
-            </span>
-          )}
-        </div>
       </div>
     </div>
   );

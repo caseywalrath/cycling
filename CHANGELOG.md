@@ -217,9 +217,16 @@
 - Export now includes `syncVersion`, `deviceId`, `lastSyncedAt` fields
 - Import calls `markDataChanged()` to update exportedAt timestamp
 
+### UI Refinements
+- Moved Sync button from bottom of app to **header bar**, next to Log Ride
+- Renamed from "Sync to Google Drive" to **"Sync"**, matching Log Ride button size/style (blue)
+- Sync status message displays below header when active (auto-clears after 5s)
+- Added empty-data safeguard: if local has 0 rides but remote has data, forces pull regardless of timestamps
+- Added console logging throughout sync flow for diagnostics
+
 ### Files Changed
 - `src/google-drive-sync.js` — new file (Google Drive sync module)
 - `index.html` — added Google Identity Services script tag
-- `src/App.jsx` — sync state, handleDriveSync, markDataChanged, Sync button UI
+- `src/App.jsx` — sync state, handleDriveSync, markDataChanged, Sync button in header
 - `ARCHITECTURE.md` — file structure, persistence, sync docs, UI layout
 - `CHANGELOG.md` — this entry

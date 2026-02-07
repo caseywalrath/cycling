@@ -123,7 +123,7 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 
 ## UI Layout (top to bottom, as of Session 8)
 
-1. **Header bar**: App title, FTP/eFTP display, Days to Event, Settings/Profile buttons
+1. **Header bar**: App title, FTP/eFTP display, Days to Event, Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
 4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import
@@ -134,7 +134,6 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 9. **Fitness Progress bar**: CTL toward target 100
 10. **Ride History button**: Full-width, opens History modal
 11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
-12. **Google Drive Sync button**: Blue "Sync to Google Drive" button with status message, separated by border
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Key modals:
