@@ -39,6 +39,13 @@ const FTP = 235;
 const START_DATE = '2024-12-29'; // Import rides from this date onwards
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// Return local YYYY-MM-DD string for a Date object (avoids UTC offset bugs from toISOString)
+const toLocalDateStr = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 const formatDateWithDay = (dateStr) => {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -130,7 +137,7 @@ export default function ProgressionTracker() {
     const latestEFTP = historyRef ? historyRef.find(w => w.eFTP)?.eFTP : null;
     return {
       name: '',
-      date: new Date().toISOString().split('T')[0],
+      date: toLocalDateStr(new Date()),
       zone: 'endurance',
       workoutLevel: ZONE_EXPECTED_RPE['endurance'],
       rpe: 5,
@@ -361,11 +368,11 @@ export default function ProgressionTracker() {
 
     const fourteenDaysAgo = new Date(today);
     fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    const fourteenDaysAgoStr = fourteenDaysAgo.toISOString().split('T')[0];
+    const fourteenDaysAgoStr = toLocalDateStr(fourteenDaysAgo);
 
     const currentDate = new Date(oldestDate);
     while (currentDate <= today) {
-      const dateStr = currentDate.toISOString().split('T')[0];
+      const dateStr = toLocalDateStr(currentDate);
       const dayTSS = dailyTSS[dateStr] || 0;
 
       ctl = ctl * (1 - ctlDecay) + dayTSS * ctlDecay;
@@ -419,7 +426,7 @@ export default function ProgressionTracker() {
       // Get Monday of that week (week starts on Monday, Strava convention)
       const monday = new Date(date);
       monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-      const weekKey = monday.toISOString().split('T')[0];
+      const weekKey = toLocalDateStr(monday);
 
       if (!weeklyData[weekKey]) {
         weeklyData[weekKey] = {
@@ -465,7 +472,7 @@ export default function ProgressionTracker() {
       // Get Monday of that week (week starts on Monday, Strava convention)
       const monday = new Date(date);
       monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-      const weekKey = monday.toISOString().split('T')[0];
+      const weekKey = toLocalDateStr(monday);
 
       if (!weeklyData[weekKey]) {
         weeklyData[weekKey] = {
@@ -510,7 +517,7 @@ export default function ProgressionTracker() {
       // Get Monday of that week (week starts on Monday, Strava convention)
       const monday = new Date(date);
       monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-      const weekKey = monday.toISOString().split('T')[0];
+      const weekKey = toLocalDateStr(monday);
 
       if (!weeklyData[weekKey]) {
         weeklyData[weekKey] = {
@@ -1991,7 +1998,7 @@ export default function ProgressionTracker() {
     const a = document.createElement('a');
     a.href = url;
     // Better filename with timestamp
-    const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const timestamp = toLocalDateStr(new Date()); // YYYY-MM-DD
     a.download = `casey-rides-backup-${timestamp}.json`;
     a.click();
     URL.revokeObjectURL(url); // Clean up
@@ -2194,7 +2201,7 @@ export default function ProgressionTracker() {
     const weeklyHoursData = calculateWeeklyHours(history);
     const last4Weeks = weeklyHoursData.slice(-4);
 
-    const analysisText = `## Training Status - ${formatDateWithDay(new Date().toISOString().split('T')[0])}
+    const analysisText = `## Training Status - ${formatDateWithDay(toLocalDateStr(new Date()))}
 
 **Athlete Profile:**
 - FTP: ${currentFTP}W${latestEFTP ? ` | eFTP: ${latestEFTP}W` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
@@ -2704,7 +2711,7 @@ Please analyze my current training and provide personalized insights.`;
                   <div className="font-bold text-blue-400 mb-2">Step 1: Export on Current Device</div>
                   <p className="text-sm text-gray-300 mb-2">
                     Click <span className="font-mono bg-gray-900 px-1 rounded">Export Data</span> below.
-                    This downloads a file named <span className="font-mono bg-gray-900 px-1 rounded">casey-rides-backup-{new Date().toISOString().split('T')[0]}.json</span>
+                    This downloads a file named <span className="font-mono bg-gray-900 px-1 rounded">casey-rides-backup-{toLocalDateStr(new Date())}.json</span>
                   </p>
                 </div>
 
@@ -3716,7 +3723,7 @@ Please analyze my current training and provide personalized insights.`;
               <div className="grid grid-cols-7 gap-1">
                 {getCalendarDays(calendarYear, calendarMonth).map((dayObj, i) => {
                   const hasRide = rideDatesSet.has(dayObj.dateStr);
-                  const todayStr = new Date().toISOString().split('T')[0];
+                  const todayStr = toLocalDateStr(new Date());
                   const isToday = dayObj.dateStr === todayStr;
 
                   return (
