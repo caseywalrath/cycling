@@ -4028,11 +4028,11 @@ Please analyze my current training and provide personalized insights.`;
                       </button>
                     </div>
 
-                    {/* Title row: Name - Zone Classification • ID • Flags */}
+                    {/* Title row: Name - Indoor/Outdoor - Zone (if indoor) • ID • Flags */}
                     <div className="flex justify-between items-start mb-2 pr-16">
                       <div className="flex-1">
                         <div className="font-medium">
-                          {entry.name || entry.notes || 'Workout'} - {getZoneName(entry.zone)}
+                          {entry.name || entry.notes || 'Workout'} - {entry.rideType || 'Indoor'}{entry.rideType !== 'Outdoor' && entry.zone ? ` - ${getZoneName(entry.zone)}` : entry.rideType !== 'Outdoor' && !entry.zone ? ' - Unclassified' : ''}
                           {entry.intervalsId && (
                             <span className="text-gray-500 text-xs font-mono ml-2">
                               • {entry.intervalsId}
@@ -4083,7 +4083,7 @@ Please analyze my current training and provide personalized insights.`;
                         {entry.workoutLevel != null ? `Level ${entry.workoutLevel}` : ''}
                         {entry.rpe != null ? ` • RPE ${entry.rpe}` : ''}
                         {entry.eFTP && <span className="text-gray-400 ml-2">• eFTP {entry.eFTP}W</span>}
-                        {!entry.zone && <span className="text-yellow-400 ml-1">• Needs classification</span>}
+                        {!entry.zone && entry.rideType !== 'Outdoor' && <span className="text-yellow-400 ml-1">• Needs classification</span>}
                       </span>
                       {entry.previousLevel != null && entry.newLevel != null ? (
                         <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
