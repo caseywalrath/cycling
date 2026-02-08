@@ -126,21 +126,25 @@ export default function ProgressionTracker() {
   const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
   const [analyzingActivity, setAnalyzingActivity] = useState(null);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    date: new Date().toISOString().split('T')[0],
-    zone: 'endurance',
-    workoutLevel: ZONE_EXPECTED_RPE['endurance'], // Auto-set based on zone
-    rpe: 5,
-    completed: true,
-    duration: 60,
-    normalizedPower: 150,
-    rideType: 'Indoor', // 'Indoor' or 'Outdoor'
-    distance: 0, // miles
-    elevation: 0, // feet
-    eFTP: '', // watts, optional — typically from intervals.icu but can be manually entered
-    notes: '',
-  });
+  const getDefaultFormData = (historyRef) => {
+    const latestEFTP = historyRef ? historyRef.find(w => w.eFTP)?.eFTP : null;
+    return {
+      name: '',
+      date: new Date().toISOString().split('T')[0],
+      zone: 'endurance',
+      workoutLevel: ZONE_EXPECTED_RPE['endurance'],
+      rpe: 5,
+      completed: true,
+      duration: 60,
+      normalizedPower: 150,
+      rideType: 'Indoor',
+      distance: 0,
+      elevation: 0,
+      eFTP: latestEFTP || '',
+      notes: '',
+    };
+  };
+  const [formData, setFormData] = useState(getDefaultFormData(null));
 
   // State for editing rides
   const [editingRide, setEditingRide] = useState(null);
@@ -1742,7 +1746,11 @@ export default function ProgressionTracker() {
   };
 
   const handleLogWorkout = () => {
-    const zone = formData.zone;
+    const isOutdoor = formData.rideType === 'Outdoor';
+    const zone = isOutdoor ? null : formData.zone;
+    const completed = isOutdoor ? true : formData.completed;
+    const distance = isOutdoor ? formData.distance : 0;
+    const elevation = isOutdoor ? formData.elevation : 0;
     const tss = calculateTSS(formData.normalizedPower, formData.duration);
     const intensityFactor = calculateIF(formData.normalizedPower);
 
@@ -1760,13 +1768,17 @@ export default function ProgressionTracker() {
       if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
         // Recalculate progression for the newly assigned zone
         previousLevel = levels[zone];
-        newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, formData.completed);
+        newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, completed);
         change = newLevel - previousLevel;
       }
 
       const entry = {
         ...oldWorkout, // Preserve any extra fields like intervalsId
         ...formData,
+        zone,
+        completed,
+        distance,
+        elevation,
         name: formData.name,
         id: editingRide,
         eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
@@ -1793,37 +1805,28 @@ export default function ProgressionTracker() {
       }
 
       // Reset form
-      setFormData({
-        name: '',
-        date: new Date().toISOString().split('T')[0],
-        zone: 'endurance',
-        workoutLevel: ZONE_EXPECTED_RPE['endurance'],
-        rpe: 5,
-        completed: true,
-        duration: 60,
-        normalizedPower: 150,
-        rideType: 'Indoor',
-        distance: 0,
-        elevation: 0,
-        eFTP: '',
-        notes: '',
-      });
+      setFormData(getDefaultFormData(history));
       setEditingRide(null);
       setShowLogRideModal(false);
       setShowHistoryModal(true);
     } else {
       // Creating new workout
-      // Recovery zone does not affect progression levels
-      const affectsProgression = zone !== 'recovery';
+      // Recovery zone and outdoor rides do not affect progression levels
+      const affectsProgression = zone !== null && zone !== 'recovery';
       const currentLevel = affectsProgression ? levels[zone] : null;
       const newLevel = affectsProgression
-        ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, formData.completed)
+        ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, completed)
         : null;
 
       const entry = {
         ...formData,
+        zone,
+        completed,
+        distance,
+        elevation,
         name: formData.name,
         id: Date.now(),
+        eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
         previousLevel: currentLevel,
         newLevel: newLevel,
         change: affectsProgression ? newLevel - currentLevel : 0,
@@ -1853,25 +1856,12 @@ export default function ProgressionTracker() {
       }
       markDataChanged();
 
-      // Show summary modal
+      // Close modal and show summary
+      setShowLogRideModal(false);
       setShowPostLogSummary(true);
 
       // Reset form
-      setFormData({
-        name: '',
-        date: new Date().toISOString().split('T')[0],
-        zone: 'endurance',
-        workoutLevel: ZONE_EXPECTED_RPE['endurance'],
-        rpe: 5,
-        completed: true,
-        duration: 60,
-        normalizedPower: 150,
-        rideType: 'Indoor',
-        distance: 0,
-        elevation: 0,
-        eFTP: '',
-        notes: '',
-      });
+      setFormData(getDefaultFormData(history));
       setEditingRide(null);
     }
   };
@@ -1975,21 +1965,7 @@ export default function ProgressionTracker() {
   // Cancel editing
   const handleCancelEdit = () => {
     setEditingRide(null);
-    setFormData({
-      name: '',
-      date: new Date().toISOString().split('T')[0],
-      zone: 'endurance',
-      workoutLevel: ZONE_EXPECTED_RPE['endurance'],
-      rpe: 5,
-      completed: true,
-      duration: 60,
-      normalizedPower: 150,
-      rideType: 'Indoor',
-      distance: 0,
-      elevation: 0,
-      eFTP: '',
-      notes: '',
-    });
+    setFormData(getDefaultFormData(history));
     setShowLogRideModal(false);
   };
 
@@ -3824,42 +3800,60 @@ Please analyze my current training and provide personalized insights.`;
                 </button>
               </div>
 
-            {/* Ride Name */}
-            <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-1">Ride Name</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                placeholder="e.g., Morning Endurance Ride"
-              />
-            </div>
-
+            {/* Row 1: Ride Name | Date */}
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm text-gray-400 mb-1 flex justify-between items-center">
-                  Date
-                  <button
-                    onClick={() => {
-                      const yesterday = new Date();
-                      yesterday.setDate(yesterday.getDate() - 1);
-                      setFormData({ ...formData, date: yesterday.toISOString().split('T')[0] });
-                    }}
-                    className="text-xs text-blue-400 hover:text-blue-300"
-                  >
-                    Yesterday
-                  </button>
-                </label>
+                <label className="block text-sm text-gray-400 mb-1">Ride Name</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  placeholder="e.g., Morning Ride"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Date</label>
                 <input
                   type="date"
                   value={formData.date}
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="bg-gray-700 rounded px-2 py-2 text-sm"
+                  className="w-full bg-gray-700 rounded px-2 py-2 text-sm"
                 />
               </div>
+            </div>
+
+            {/* Row 2: Ride Type | Completed All Intervals */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Primary Zone</label>
+                <label className="block text-sm text-gray-400 mb-1">Ride Type</label>
+                <select
+                  value={formData.rideType}
+                  onChange={(e) => setFormData({ ...formData, rideType: e.target.value })}
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                >
+                  <option value="Indoor">Indoor</option>
+                  <option value="Outdoor">Outdoor</option>
+                </select>
+              </div>
+              <div className="flex items-end pb-2">
+                <label className={`flex items-center gap-2 text-sm ${formData.rideType === 'Outdoor' ? 'text-gray-600' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={formData.rideType === 'Outdoor' ? false : formData.completed}
+                    onChange={(e) => setFormData({ ...formData, completed: e.target.checked })}
+                    className="rounded"
+                    disabled={formData.rideType === 'Outdoor'}
+                  />
+                  Completed all intervals
+                </label>
+              </div>
+            </div>
+
+            {/* Row 3: Primary Zone | Normalized Power */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={`block text-sm mb-1 ${formData.rideType === 'Outdoor' ? 'text-gray-600' : 'text-gray-400'}`}>Primary Zone</label>
                 <select
                   value={formData.zone}
                   onChange={(e) => setFormData({
@@ -3867,7 +3861,8 @@ Please analyze my current training and provide personalized insights.`;
                     zone: e.target.value,
                     workoutLevel: ZONE_EXPECTED_RPE[e.target.value]
                   })}
-                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  className={`w-full rounded px-3 py-2 text-sm ${formData.rideType === 'Outdoor' ? 'bg-gray-800 text-gray-600' : 'bg-gray-700'}`}
+                  disabled={formData.rideType === 'Outdoor'}
                 >
                   {ZONES.map((zone) => (
                     <option key={zone.id} value={zone.id}>
@@ -3875,20 +3870,6 @@ Please analyze my current training and provide personalized insights.`;
                     </option>
                   ))}
                 </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Duration (minutes)</label>
-                <input
-                  type="number"
-                  value={formData.duration || ''}
-                  onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                  min="1"
-                  max="600"
-                />
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Normalized Power (W)</label>
@@ -3903,37 +3884,49 @@ Please analyze my current training and provide personalized insights.`;
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            {/* Row 4: Duration | Distance | Elevation */}
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Ride Type</label>
-                <select
-                  value={formData.rideType}
-                  onChange={(e) => setFormData({ ...formData, rideType: e.target.value })}
-                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                >
-                  <option value="Indoor">Indoor</option>
-                  <option value="Outdoor">Outdoor</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">
-                  Distance (miles)
-                  {formData.rideType === 'Indoor' && <span className="text-gray-500 ml-1 text-xs">(optional)</span>}
-                </label>
+                <label className="block text-sm text-gray-400 mb-1">Duration (min)</label>
                 <input
                   type="number"
-                  value={formData.distance || ''}
-                  onChange={(e) => setFormData({ ...formData, distance: parseFloat(e.target.value) || 0 })}
+                  value={formData.duration || ''}
+                  onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || 0 })}
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
+                  min="1"
+                  max="600"
+                />
+              </div>
+              <div>
+                <label className={`block text-sm mb-1 ${formData.rideType === 'Indoor' ? 'text-gray-600' : 'text-gray-400'}`}>Distance (mi)</label>
+                <input
+                  type="number"
+                  value={formData.rideType === 'Indoor' ? '' : (formData.distance || '')}
+                  onChange={(e) => setFormData({ ...formData, distance: parseFloat(e.target.value) || 0 })}
+                  className={`w-full rounded px-3 py-2 text-sm ${formData.rideType === 'Indoor' ? 'bg-gray-800 text-gray-600' : 'bg-gray-700'}`}
                   min="0"
                   step="0.1"
                   max="200"
+                  disabled={formData.rideType === 'Indoor'}
+                />
+              </div>
+              <div>
+                <label className={`block text-sm mb-1 ${formData.rideType === 'Indoor' ? 'text-gray-600' : 'text-gray-400'}`}>Elevation (ft)</label>
+                <input
+                  type="number"
+                  value={formData.rideType === 'Indoor' ? '' : (formData.elevation || '')}
+                  onChange={(e) => setFormData({ ...formData, elevation: parseInt(e.target.value) || 0 })}
+                  className={`w-full rounded px-3 py-2 text-sm ${formData.rideType === 'Indoor' ? 'bg-gray-800 text-gray-600' : 'bg-gray-700'}`}
+                  min="0"
+                  max="20000"
+                  disabled={formData.rideType === 'Indoor'}
                 />
               </div>
             </div>
 
-            {editingRide && (
-              <div className="mb-4">
+            {/* Row 5: eFTP | RPE Slider */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
                 <label className="block text-sm text-gray-400 mb-1">
                   eFTP (W) <span className="text-gray-500 text-xs">(optional)</span>
                 </label>
@@ -3947,32 +3940,9 @@ Please analyze my current training and provide personalized insights.`;
                   max="500"
                 />
               </div>
-            )}
-
-            {/* Calculated values preview */}
-            <div className="bg-gray-700 rounded p-3 mb-4 grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-gray-400">Estimated TSS: </span>
-                <span className="font-mono font-bold">{currentTSS}</span>
-              </div>
-              <div>
-                <span className="text-gray-400">Intensity Factor: </span>
-                <span className="font-mono font-bold">{currentIF.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
-                  Expected RPE (from zone)
-                </label>
-                <div className="bg-gray-600 rounded px-3 py-2 text-sm font-mono">
-                  {formData.workoutLevel}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">
-                  Actual RPE: {formData.rpe}
+                  RPE: {formData.rpe} <span className="text-gray-500 text-xs">(Expected {formData.workoutLevel})</span>
                 </label>
                 <input
                   type="range"
@@ -3989,18 +3959,19 @@ Please analyze my current training and provide personalized insights.`;
               </div>
             </div>
 
-            <div className="mb-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={formData.completed}
-                  onChange={(e) => setFormData({ ...formData, completed: e.target.checked })}
-                  className="rounded"
-                />
-                Completed all intervals
-              </label>
+            {/* Calculated values preview */}
+            <div className="bg-gray-700 rounded p-3 mb-4 grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-gray-400">Estimated TSS: </span>
+                <span className="font-mono font-bold">{currentTSS}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">Intensity Factor: </span>
+                <span className="font-mono font-bold">{currentIF.toFixed(2)}</span>
+              </div>
             </div>
 
+            {/* Notes */}
             <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-1">Notes (optional)</label>
               <textarea
