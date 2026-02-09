@@ -3547,10 +3547,10 @@ Please analyze my current training and provide personalized insights.`;
                     <h3 className="font-medium">Power Skills</h3>
                     <button
                       onClick={() => setShowPhenotypeModal(true)}
-                      className="px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+                      className="w-2/5 px-3 py-2 rounded-md text-base font-medium transition-colors text-center"
                       style={{ backgroundColor: phenoColor + '22', color: phenoColor, border: `1px solid ${phenoColor}44` }}
                     >
-                      Phenotype: {phenotype}
+                      Rider Type: {phenotype}
                     </button>
                   </div>
                   <p className="text-xs text-gray-400 mb-3">
@@ -3621,7 +3621,7 @@ Please analyze my current training and provide personalized insights.`;
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                       <div className="bg-gray-800 rounded-lg p-5 w-full max-w-md">
                         <div className="flex justify-between items-center mb-4">
-                          <h2 className="font-bold text-lg" style={{ color: phenoColor }}>Phenotype: {phenotype}</h2>
+                          <h2 className="font-bold text-lg" style={{ color: phenoColor }}>Rider Type: {phenotype}</h2>
                           <button
                             onClick={() => setShowPhenotypeModal(false)}
                             className="text-gray-400 hover:text-white text-xl"
@@ -3638,7 +3638,7 @@ Please analyze my current training and provide personalized insights.`;
                             <span><span className="text-orange-400">Climb:</span> {climbAvg.toFixed(1)}%</span>
                           </div>
                         </div>
-                        <p className="text-xs text-gray-500">Your phenotype is determined by comparing your relative power across Sprint (5s–1m), Attack (5–20m), and Climb (30m–2h) durations. As your training evolves, your phenotype may shift.</p>
+                        <p className="text-xs text-gray-500">Your rider type is determined by comparing your relative power across Sprint (5s–1m), Attack (5–20m), and Climb (30m–2h) durations. As your training evolves, your rider type may shift.</p>
                       </div>
                     </div>
                   )}
