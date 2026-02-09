@@ -37,7 +37,7 @@ Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModa
 ### Form State
 | State | Purpose |
 |-------|---------|
-| `formData` | Log ride form fields (includes optional `eFTP` field, shown only when editing) |
+| `formData` | Log ride form fields (eFTP shown in both log and edit, defaults to latest from history) |
 | `editingRide` | ID of ride being edited (null = new ride) |
 
 ## Data Flow
@@ -55,6 +55,14 @@ ZONES           // Training zone definitions (recovery → anaerobic)
 DEFAULT_LEVELS  // Initial progression levels (all 1)
 ZONE_EXPECTED_RPE // Auto-assigned RPE by zone (3-9)
 STORAGE_KEY     // localStorage key: 'cycling-progression-data-v2'
+DAYS_OF_WEEK    // Day name lookup array (Sunday → Saturday)
+```
+
+## Utility Functions (module-level)
+```javascript
+toLocalDateStr(date)     // YYYY-MM-DD using local timezone (replaces toISOString)
+formatDateWithDay(str)   // "2026-02-05 - Thursday" from YYYY-MM-DD string
+getDefaultFormData(hist) // Default form values with latest eFTP from history
 ```
 
 ## Data Import Sources
@@ -102,6 +110,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
 | `getCalendarDays()` | Generate month grid day objects (Monday-start, 35 or 42 cells) |
+| `copyForAnalysis()` | Clipboard export: FTP, W/kg, eFTP, training status, loads (7/14/28d TSS), weekly hours (4wk), recent workouts with day-of-week and ride type |
 
 ## Charts (Tabbed: Hours, TSS, Elevation, eFTP)
 
@@ -125,21 +134,21 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 
 ## UI Layout (top to bottom, as of Session 8)
 
-1. **Header bar**: App title, FTP/eFTP display, Days to Event, Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
+1. **Header bar**: App title, FTP/W·kg/eFTP display, Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
-4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import
+4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import. **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.
 5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
 6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB% and description). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
 7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
 8. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
-9. **Fitness Progress bar**: CTL toward target 100
+9. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`
 10. **Ride History button**: Full-width, opens History modal
 11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
-All secondary views are modals (`fixed inset-0 z-50`). Key modals:
-- **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID
+All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (outside the modal) closes it (via `onClick` on backdrop + `stopPropagation` on inner content). Key modals:
+- **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID. Outdoor rides grey out Zone/Completed; Indoor greys out Distance/Elevation. Form closes immediately on Save.
 - **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride
 - **Post-Log Summary** (`showPostLogSummary`): Shows progression change after logging
 - **CSV Import** (`showCSVImport`): Paste textarea for intervals.icu CSV

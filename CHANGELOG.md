@@ -253,3 +253,50 @@
 - `src/App.jsx` — localStorage fix, eFTP edit field, formData updates
 - `index.html` — title rename
 - `vite.config.js` — PWA manifest name rename
+
+---
+
+## Session 11 - Form Redesign, Rider Type, Date Fixes & UX (2026-02-09)
+
+### Date Formatting
+- Day of week appended to all dates in Ride History and Copy for Claude (e.g., `2026-02-05 - Thursday`)
+- **UTC timezone bug fix**: Replaced all `toISOString().split('T')[0]` calls (10 instances) with `toLocalDateStr()` helper using local `getFullYear/getMonth/getDate`. Prevents wrong-day display in US timezones.
+
+### Copy for Claude Enhancements
+- Added: FTP, W/kg, eFTP, Days to Event, Training Status label
+- Added: 28-day TSS, weekly training hours (past 4 weeks with ride counts)
+- Added: Indoor/Outdoor ride type per workout; zone hidden for outdoor rides
+- Removed word "status" from closing prompt to avoid confusion with app-defined Training Status
+
+### Log Ride / Edit Workout Form Redesign
+- **New layout**: Ride Name | Date → Ride Type | Completed All Intervals → Primary Zone | NP → Duration | Distance | Elevation → eFTP | RPE → TSS/IF → Notes
+- **Conditional fields**: Outdoor greys out Primary Zone & Completed All Intervals (zone saves as `null`); Indoor greys out Distance & Elevation (zeroed on save)
+- **eFTP field** now in both Log Ride and Edit Workout (was edit-only); defaults to latest eFTP from history
+- **Elevation field** added (uses same data field as CSV imports)
+- **RPE restructured**: Removed Expected RPE box; renamed Actual RPE to "RPE: X (Expected Y)"
+- **Yesterday link removed**; default date is today
+- **Modal closes immediately** on Save Workout (post-log summary still appears as overlay)
+- Shared `getDefaultFormData(history)` helper for all form resets
+
+### Ride History Updates
+- Title row now shows `Name - Indoor/Outdoor - Zone` (indoor) or `Name - Outdoor` (outdoor)
+- "Needs classification" flag hidden for outdoor rides
+
+### Header & Fitness Progress
+- Added W/kg display: `FTP: 235W • 3.2 W/kg • eFTP: 241W`
+- Days to Event moved from header to Fitness Progress card: `Days to Event: X | CTL Target: 80-100`
+
+### Rider Type (NEW)
+- Phenotype algorithm based on Power Skills radar data (Sprint/Attack/Climb percentile averages)
+- 6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder
+- Color-coded "Rider Type: X" button in Power Skills card header (w-2/5, matches power bars width)
+- Click opens modal with plain-text explanation, category scores, and methodology
+
+### Modal UX
+- All 11 modals now close when clicking outside the popup (backdrop `onClick` + `stopPropagation` on inner content)
+
+### Files Changed
+- `src/App.jsx` — all feature code
+- `ARCHITECTURE.md` — updated for session 11 changes
+- `CHANGELOG.md` — this entry
+- `FEATURES.md` — Rider Type marked completed

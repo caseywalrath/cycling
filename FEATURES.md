@@ -1,7 +1,7 @@
 # Feature Wish List & Roadmap
 
 **Project:** Gran Fondo Utah Training Tracker
-**Last Updated:** 2026-02-03
+**Last Updated:** 2026-02-09
 **Status:** Active Development
 
 This document tracks feature requests, enhancements, and ideas for future development. Items are organized by priority and complexity.
@@ -20,6 +20,7 @@ This document tracks feature requests, enhancements, and ideas for future develo
 - Local data persistence
 - Weekly Hours/TSS/Elevation/eFTP charts (tabbed)
 - Power Skills radar chart with power curve import
+- Rider Type designation (6 phenotypes from power curve data)
 - Training Status badge (TSB%-based with 5 tiers)
 - Monthly activity calendar (Strava-style)
 
@@ -658,7 +659,15 @@ These can be implemented quickly for immediate benefit:
 7. **Zone Distribution Bar (4-week)** - Single compact horizontal stacked bar showing how training time broke down by power zone over the last 28 days. Complements the Power Skills radar — the radar shows capabilities, this shows how you're actually training. Low complexity, uses existing ride history zone data.
 8. **Keyboard Shortcuts** - Fast navigation (on desktop)
 9. **Recent Workouts Widget** - Quick re-log similar workouts
-10. **Rider Phenotype Designation** - Automated classification based on power curve shape, inspired by TrainerRoad phenotypes: Sprinter (short, high-power efforts), Puncheur (repeated punchy surges over rolling terrain), Rouleur (powerful and consistent over flat/rolling terrain), Time Trialist (sustained steady solo efforts), Climber (long high-intensity climbs), All-Rounder (versatile across effort types). Could derive from Power Skills radar data by comparing relative strengths across Sprint/Attack/Climb categories. Low-medium complexity.
+10. **Rider Type Designation** ✅ COMPLETED (2026-02-09)
+
+    **Status:** Implemented as color-coded button in Power Skills card header.
+
+    **Implementation:**
+    - ✅ Algorithm compares avg percentile across Sprint (5s–1m), Attack (5–20m), Climb (30m–2h)
+    - ✅ 6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder
+    - ✅ Color-coded button (w-2/5, matches power bars width)
+    - ✅ Click opens modal with plain-text explanation, category scores, methodology
 11. **Training Status** ✅ COMPLETED (2026-02-03)
 
     **Status:** Implemented as color-coded badge in Training Status card (side-by-side with Training Summary).
@@ -710,5 +719,5 @@ When adding to this list:
 
 ---
 
-**Last Updated:** 2026-02-03
+**Last Updated:** 2026-02-09
 **Next Review:** When starting new development phase
