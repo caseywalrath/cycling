@@ -82,6 +82,7 @@ export default function ProgressionTracker() {
 
   // Power curve data state
   const [powerCurveData, setPowerCurveData] = useState(null);
+  const [showPhenotypeModal, setShowPhenotypeModal] = useState(false);
 
   // Calendar state
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
@@ -3492,9 +3493,66 @@ Please analyze my current training and provide personalized insights.`;
                 return null;
               };
 
+              // --- Phenotype determination ---
+              const sprintAvg = radarData.filter(d => d.skill === 'Sprint').reduce((s, d) => s + d.percentile, 0) / 3;
+              const attackAvg = radarData.filter(d => d.skill === 'Attack').reduce((s, d) => s + d.percentile, 0) / 3;
+              const climbAvg = radarData.filter(d => d.skill === 'Climb').reduce((s, d) => s + d.percentile, 0) / 3;
+              const overallAvg = (sprintAvg + attackAvg + climbAvg) / 3;
+              const maxCat = Math.max(sprintAvg, attackAvg, climbAvg);
+              const minCat = Math.min(sprintAvg, attackAvg, climbAvg);
+              const spread = maxCat - minCat;
+
+              // Short-burst dominance: weight the 5s and 30s points more heavily
+              const shortBurstAvg = (radarData[0].percentile * 1.5 + radarData[1].percentile * 1.25 + radarData[2].percentile * 0.75) / 3.5;
+              // Sustained power: 20m, 30m, 1h
+              const sustainedAvg = (radarData.find(d => d.label === '20m').percentile + radarData.find(d => d.label === '30m').percentile + radarData.find(d => d.label === '1h').percentile) / 3;
+              // Long endurance: 1h, 2h
+              const enduranceAvg = (radarData.find(d => d.label === '1h').percentile + radarData.find(d => d.label === '2h').percentile) / 2;
+
+              let phenotype, phenoColor, phenoExplanation;
+
+              if (spread < 8) {
+                phenotype = 'All-Rounder';
+                phenoColor = '#A855F7'; // purple
+                phenoExplanation = `You're an All-Rounder because your power is evenly distributed across all effort durations. Your Sprint (${sprintAvg.toFixed(0)}%), Attack (${attackAvg.toFixed(0)}%), and Climb (${climbAvg.toFixed(0)}%) scores are all within ${spread.toFixed(0)} percentage points — no single weakness, no single dominance. You can compete across varied terrain and race situations.`;
+              } else if (shortBurstAvg > attackAvg && shortBurstAvg > climbAvg && sprintAvg >= attackAvg * 1.15) {
+                phenotype = 'Sprinter';
+                phenoColor = '#60A5FA'; // blue
+                phenoExplanation = `You're a Sprinter because you excel in short, explosive efforts. Your short-burst power (5s–1m) ranks in the top ${sprintAvg.toFixed(0)}%, significantly above your Attack (${attackAvg.toFixed(0)}%) and Climb (${climbAvg.toFixed(0)}%) scores. You generate your highest relative power in efforts under 1 minute.`;
+              } else if (sprintAvg > climbAvg && attackAvg > climbAvg && sprintAvg >= attackAvg * 0.9) {
+                phenotype = 'Puncheur';
+                phenoColor = '#4ADE80'; // green
+                phenoExplanation = `You're a Puncheur because you're strong in repeated, punchy surges. Your Sprint (${sprintAvg.toFixed(0)}%) and Attack (${attackAvg.toFixed(0)}%) power are both well above your Climb endurance (${climbAvg.toFixed(0)}%). You thrive on short, steep climbs and rolling terrain where quick bursts of power make the difference.`;
+              } else if (attackAvg >= sprintAvg && attackAvg >= climbAvg && sustainedAvg > enduranceAvg) {
+                phenotype = 'Rouleur';
+                phenoColor = '#FB923C'; // orange
+                phenoExplanation = `You're a Rouleur because you're powerful and consistent over flat and rolling terrain. Your Attack power (${attackAvg.toFixed(0)}%) leads your profile, with strong 5–20 minute sustained efforts (${sustainedAvg.toFixed(0)}%). You excel at setting tempo, driving breakaways, and maintaining high power when others fade.`;
+              } else if (climbAvg >= sprintAvg && sustainedAvg >= attackAvg * 0.95 && enduranceAvg > sprintAvg) {
+                phenotype = 'Time Trialist';
+                phenoColor = '#F472B6'; // pink
+                phenoExplanation = `You're a Time Trialist because you excel at steady, sustained solo efforts. Your sustained power across 20–60 minutes (${sustainedAvg.toFixed(0)}%) and endurance (${enduranceAvg.toFixed(0)}%) are your defining strengths. You don't rely on sprints or surges — instead you maintain a smooth, controlled effort over long durations.`;
+              } else if (climbAvg >= attackAvg && climbAvg > sprintAvg) {
+                phenotype = 'Climber';
+                phenoColor = '#FB923C'; // orange
+                phenoExplanation = `You're a Climber because you thrive when the road tilts upward. Your Climb power (${climbAvg.toFixed(0)}%) leads your profile, well above Sprint (${sprintAvg.toFixed(0)}%). Your endurance at 30m–2h durations (${enduranceAvg.toFixed(0)}%) shows you can sustain high intensity on long ascents where power-to-weight matters most.`;
+              } else {
+                phenotype = 'All-Rounder';
+                phenoColor = '#A855F7';
+                phenoExplanation = `You're an All-Rounder with a balanced power profile. Sprint (${sprintAvg.toFixed(0)}%), Attack (${attackAvg.toFixed(0)}%), Climb (${climbAvg.toFixed(0)}%) — you don't have a single standout specialty, but your versatility lets you compete across different race situations and terrain types.`;
+              }
+
               return (
                 <div className="bg-gray-800 rounded-lg p-4">
-                  <h3 className="font-medium mb-1">Power Skills</h3>
+                  <div className="flex justify-between items-start mb-1">
+                    <h3 className="font-medium">Power Skills</h3>
+                    <button
+                      onClick={() => setShowPhenotypeModal(true)}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+                      style={{ backgroundColor: phenoColor + '22', color: phenoColor, border: `1px solid ${phenoColor}44` }}
+                    >
+                      Phenotype: {phenotype}
+                    </button>
+                  </div>
                   <p className="text-xs text-gray-400 mb-3">
                     <span className="text-blue-400">Sprint</span> · <span className="text-green-400">Attack</span> · <span className="text-orange-400">Climb</span>
                     <span className="ml-2 text-gray-500">— vs. intervals.icu age 40</span>
@@ -3557,6 +3615,33 @@ Please analyze my current training and provide personalized insights.`;
                       })}
                     </div>
                   </div>
+
+                  {/* Phenotype Modal */}
+                  {showPhenotypeModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                      <div className="bg-gray-800 rounded-lg p-5 w-full max-w-md">
+                        <div className="flex justify-between items-center mb-4">
+                          <h2 className="font-bold text-lg" style={{ color: phenoColor }}>Phenotype: {phenotype}</h2>
+                          <button
+                            onClick={() => setShowPhenotypeModal(false)}
+                            className="text-gray-400 hover:text-white text-xl"
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <p className="text-gray-300 text-sm leading-relaxed mb-4">{phenoExplanation}</p>
+                        <div className="bg-gray-700 rounded p-3 mb-4">
+                          <p className="text-xs text-gray-400 mb-2">Category Scores (avg percentile)</p>
+                          <div className="flex justify-between text-sm">
+                            <span><span className="text-blue-400">Sprint:</span> {sprintAvg.toFixed(1)}%</span>
+                            <span><span className="text-green-400">Attack:</span> {attackAvg.toFixed(1)}%</span>
+                            <span><span className="text-orange-400">Climb:</span> {climbAvg.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500">Your phenotype is determined by comparing your relative power across Sprint (5s–1m), Attack (5–20m), and Climb (30m–2h) durations. As your training evolves, your phenotype may shift.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
