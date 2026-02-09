@@ -501,49 +501,41 @@ export default function ProgressionTracker() {
     return chartData;
   };
 
-  const calculateWeeklyElevation = (history) => {
+  const calculateMonthlyElevation = (history) => {
     if (!history || history.length === 0) return [];
 
-    // Get date 20 weeks ago
-    const twentyWeeksAgo = new Date();
-    twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
+    // Rolling 11-month window (same as eFTP chart)
+    const elevenMonthsAgo = new Date();
+    elevenMonthsAgo.setMonth(elevenMonthsAgo.getMonth() - 11);
+    elevenMonthsAgo.setDate(1);
 
-    // Filter to last 20 weeks
-    const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
+    const recentWorkouts = history.filter(w => new Date(w.date) >= elevenMonthsAgo);
 
-    // Group by week
-    const weeklyData = {};
+    // Group by calendar month
+    const monthMap = {};
     recentWorkouts.forEach(workout => {
-      const date = new Date(workout.date);
-      // Get Monday of that week (week starts on Monday, Strava convention)
-      const monday = new Date(date);
-      monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-      const weekKey = toLocalDateStr(monday);
+      const d = new Date(workout.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-      if (!weeklyData[weekKey]) {
-        weeklyData[weekKey] = {
-          weekStart: weekKey,
-          totalElevation: 0,
-          workouts: 0,
-        };
+      if (!monthMap[key]) {
+        monthMap[key] = { totalElevation: 0, workouts: 0 };
       }
-
-      weeklyData[weekKey].totalElevation += workout.elevation || 0;
-      weeklyData[weekKey].workouts += 1;
+      monthMap[key].totalElevation += workout.elevation || 0;
+      monthMap[key].workouts += 1;
     });
 
-    // Convert to array and sort by date
-    const chartData = Object.values(weeklyData)
-      .map(week => ({
-        weekStart: week.weekStart,
-        elevation: Math.round(week.totalElevation), // Round to integer
-        workouts: week.workouts,
-        // Format label as "Apr 7", "May 12", etc.
-        label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      }))
-      .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
-
-    return chartData;
+    return Object.keys(monthMap).sort().map(key => {
+      const entry = monthMap[key];
+      const [year, month] = key.split('-').map(Number);
+      const d = new Date(year, month - 1);
+      return {
+        monthKey: key,
+        month: d.toLocaleDateString('en-US', { month: 'short' }),
+        label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        elevation: Math.round(entry.totalElevation),
+        workouts: entry.workouts,
+      };
+    });
   };
 
   // Calculate eFTP history for rolling one-year chart
@@ -3114,20 +3106,20 @@ Please analyze my current training and provide personalized insights.`;
             {(() => {
               const weeklyTSSData = calculateWeeklyTSS(history);
               const weeklyHoursData = calculateWeeklyHours(history);
-              const weeklyElevationData = calculateWeeklyElevation(history);
+              const monthlyElevationData = calculateMonthlyElevation(history);
               const eftpHistoryData = calculateEFTPHistory(history);
 
               const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
               const currentWeekHours = weeklyHoursData.length > 0 ? weeklyHoursData[weeklyHoursData.length - 1].hours : 0;
-              const currentWeekElevation = weeklyElevationData.length > 0
-                ? weeklyElevationData[weeklyElevationData.length - 1].elevation
+              const currentMonthElevation = monthlyElevationData.length > 0
+                ? monthlyElevationData[monthlyElevationData.length - 1].elevation
                 : 0;
               const latestEFTP = eftpHistoryData.length > 0
                 ? eftpHistoryData[eftpHistoryData.length - 1].eFTP
                 : null;
 
               // Check if any data exists
-              const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || weeklyElevationData.length > 0 || eftpHistoryData.length > 0;
+              const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || monthlyElevationData.length > 0 || eftpHistoryData.length > 0;
 
               if (!hasData) return null;
 
@@ -3328,16 +3320,16 @@ Please analyze my current training and provide personalized insights.`;
                   )}
 
                   {/* Elevation Chart */}
-                  {weeklyChartView === 'elevation' && weeklyElevationData.length > 0 && (
+                  {weeklyChartView === 'elevation' && monthlyElevationData.length > 0 && (
                     <>
                       <div className="flex justify-between items-center mb-3">
-                        <h3 className="font-medium">Weekly Elevation Gained</h3>
+                        <h3 className="font-medium">Monthly Elevation Gained (1 Year)</h3>
                         <span className="text-sm text-gray-400">
-                          This week: <span className="text-green-400 font-bold">{currentWeekElevation.toLocaleString()} ft</span>
+                          This month: <span className="text-green-400 font-bold">{currentMonthElevation.toLocaleString()} ft</span>
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={weeklyElevationData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                        <AreaChart data={monthlyElevationData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorElevation" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#22C55E" stopOpacity={0.8}/>
@@ -3346,10 +3338,9 @@ Please analyze my current training and provide personalized insights.`;
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                           <XAxis
-                            dataKey="label"
+                            dataKey="month"
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
-                            interval="preserveStartEnd"
                           />
                           <YAxis
                             stroke="#9CA3AF"
