@@ -521,7 +521,7 @@ export default function ProgressionTracker() {
         monthMap[key] = { totalElevation: 0, workouts: 0 };
       }
       monthMap[key].totalElevation += workout.elevation || 0;
-      monthMap[key].workouts += 1;
+      if (workout.elevation > 0) monthMap[key].workouts += 1;
     });
 
     return Object.keys(monthMap).sort().map(key => {
