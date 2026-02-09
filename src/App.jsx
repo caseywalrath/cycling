@@ -2443,6 +2443,9 @@ Please analyze my current training and provide personalized insights.`;
         )}
         <p className="text-gray-400 text-sm mb-4">
           FTP: {currentFTP}W
+          {userProfile.weight > 0 && (
+            <span> • {(currentFTP / (userProfile.weight / 2.20462)).toFixed(1)} W/kg</span>
+          )}
           {(() => {
             // Get most recent eFTP from history
             const latestEFTP = history.find(w => w.eFTP)?.eFTP;
@@ -2450,10 +2453,6 @@ Please analyze my current training and provide personalized insights.`;
               return <span> • eFTP: <span className="text-purple-400">{latestEFTP}W</span></span>;
             }
             return null;
-          })()}
-          {(() => {
-            const daysToEvent = getDaysUntilEvent();
-            return daysToEvent !== null ? ` • Days to Event: ${daysToEvent}` : '';
           })()}
         </p>
 
@@ -3764,10 +3763,14 @@ Please analyze my current training and provide personalized insights.`;
             {/* Fitness Progress */}
             <div className="bg-gray-800 rounded-lg p-4">
               <h3 className="font-medium mb-2">Fitness Progress</h3>
+              <div className="text-xs text-gray-400 mb-2">
+                {(() => {
+                  const daysToEvent = getDaysUntilEvent();
+                  return daysToEvent !== null ? `Days to Event: ${daysToEvent} | ` : '';
+                })()}
+                CTL Target: 80-100
+              </div>
               <div className="w-full">
-                <div className="flex justify-between text-xs text-gray-400 mb-2">
-                  <span>CTL Target: 80-100 by June</span>
-                </div>
                 <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-blue-500 rounded-full transition-all"
