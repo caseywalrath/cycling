@@ -2459,8 +2459,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* Post-Log Summary Modal */}
         {showPostLogSummary && lastLoggedWorkout && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-sm text-center">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={closePostLogSummary}>
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
               <div className="text-4xl mb-3">
                 {lastLoggedWorkout.change > 0 ? '📈' : lastLoggedWorkout.change < 0 ? '📉' : '➡️'}
               </div>
@@ -2530,8 +2530,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* Paste Import Modal */}
         {showPasteImport && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => { setShowPasteImport(false); setPasteContent(''); setImportError(''); }}>
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
               <h2 className="font-bold mb-3">Import Data</h2>
               <p className="text-sm text-gray-400 mb-3">Paste your JSON data below:</p>
               <textarea
@@ -2567,8 +2567,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* CSV Import Modal */}
         {showCSVImport && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowCSVImport(false)}>
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
               <h2 className="font-bold mb-3 text-lg">Import CSV from intervals.icu</h2>
               <p className="text-sm text-gray-400 mb-3">
                 Paste your CSV export from intervals.icu below (tab-separated format):
@@ -2625,8 +2625,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* FTP Increase Detection Modal */}
         {showFTPModal && detectedFTP && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowFTPModal(false)}>
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
               <div className="text-center mb-4">
                 <div className="text-5xl mb-3">🎉</div>
                 <h2 className="font-bold text-2xl mb-2">FTP Increase Detected!</h2>
@@ -2689,8 +2689,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* Cloud Sync Instructions Modal */}
         {showCloudSyncHelp && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-lg">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowCloudSyncHelp(false)}>
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-bold text-xl">☁️ Cloud Sync Guide</h2>
                 <button
@@ -2763,8 +2763,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* intervals.icu Sync Modal */}
         {showIntervalsSyncModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowIntervalsSyncModal(false)}>
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
               <h2 className="font-bold mb-3 text-lg">Sync from intervals.icu</h2>
               <p className="text-sm text-gray-400 mb-4">
                 Import your rides from intervals.icu starting from December 29, 2024
@@ -2853,8 +2853,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* Event Management Modal */}
         {showEventModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowEventModal(false)}>
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
               <h2 className="font-bold mb-4 text-lg">Event/Goal Management</h2>
 
               <div className="space-y-4 mb-6">
@@ -2934,8 +2934,8 @@ Please analyze my current training and provide personalized insights.`;
         {/* Profile Settings Modal */}
         {/* Profile Modal */}
         {showProfileModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => { setShowProfileModal(false); }}>
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
               <h2 className="font-bold mb-4 text-lg">Profile Settings</h2>
 
               <div className="space-y-4 mb-6">
@@ -3618,8 +3618,8 @@ Please analyze my current training and provide personalized insights.`;
 
                   {/* Phenotype Modal */}
                   {showPhenotypeModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                      <div className="bg-gray-800 rounded-lg p-5 w-full max-w-md">
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowPhenotypeModal(false)}>
+                      <div className="bg-gray-800 rounded-lg p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-between items-center mb-4">
                           <h2 className="font-bold text-lg" style={{ color: phenoColor }}>Rider Type: {phenotype}</h2>
                           <button
@@ -3883,8 +3883,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* Log Ride Modal */}
         {showLogRideModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => editingRide ? handleCancelEdit() : setShowLogRideModal(false)}>
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold">{editingRide ? 'Edit Workout' : 'Log Workout'}</h2>
                 <button
@@ -4089,8 +4089,8 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* History Modal */}
         {showHistoryModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowHistoryModal(false)}>
+            <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold">Ride History</h2>
                 <button
