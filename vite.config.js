@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  base: '/cycling/',
   plugins: [
     react(),
     VitePWA({
@@ -15,8 +16,8 @@ export default defineConfig({
         theme_color: '#1e293b',
         background_color: '#111827',
         display: 'standalone',
-        scope: '/',
-        start_url: '/',
+        scope: '/cycling/',
+        start_url: '/cycling/',
         orientation: 'portrait',
         icons: [
           {
