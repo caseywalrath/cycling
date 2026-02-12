@@ -9,7 +9,10 @@ src/
   google-drive-sync.js # Google Drive OAuth & sync module
 public/
   pwa-*.png            # PWA icons
-vite.config.js         # Vite + PWA config
+.github/
+  workflows/
+    deploy.yml         # GitHub Actions → GitHub Pages deployment
+vite.config.js         # Vite + PWA config (base: /cycling/)
 ```
 
 ## Component Architecture
@@ -108,6 +111,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
+| `calculateMonthlyElevation()` | Monthly elevation totals (11-month rolling window, rides with elevation > 0) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
 | `getCalendarDays()` | Generate month grid day objects (Monday-start, 35 or 42 cells) |
 | `copyForAnalysis()` | Clipboard export: FTP, W/kg, eFTP, training status, loads (7/14/28d TSS), weekly hours (4wk), recent workouts with day-of-week and ride type |
@@ -120,7 +124,7 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 |-------|-------|---------|-------------|-----------|
 | Weekly Hours | Orange `#FB923C` | `hours` | 45 | `r: 4` solid fill |
 | Weekly TSS | Blue `#3B82F6` | `tss` | 45 | `r: 4` solid fill |
-| Weekly Elevation | Green `#22C55E` | `elevation` | 55 | `r: 4` solid fill |
+| Monthly Elevation | Green `#22C55E` | `elevation` | 55 | `r: 4` solid fill |
 | eFTP Progress | Purple `#A855F7` | `eFTP` | 55 | `r: 4` solid fill |
 
 **eFTP chart specifics:**
@@ -130,7 +134,13 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 - Tooltip (`EFTPTooltip`): month/year label, peak wattage, ride name
 - Y-axis domain: `dataMin - 10` to `dataMax + 10`
 
-**Weekly charts** (Hours, TSS, Elevation): X-axis uses `dataKey="label"` with `interval="preserveStartEnd"`. Tooltips show week label, value, and ride count.
+**Elevation chart specifics:**
+- Data: `calculateMonthlyElevation()` — one point per calendar month (total elevation that month)
+- Window: 11 months back from 1st of current month (matches eFTP chart)
+- X-axis: `dataKey="month"` (short name: Jan, Feb, etc.), evenly spaced
+- Tooltip: month/year label, total elevation, ride count (only rides with elevation > 0)
+
+**Weekly charts** (Hours, TSS): X-axis uses `dataKey="label"` with `interval="preserveStartEnd"`. Tooltips show week label, value, and ride count.
 
 ## UI Layout (top to bottom, as of Session 8)
 
@@ -160,3 +170,13 @@ All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (ou
 
 ### Training loads
 `calculateTrainingLoads()` returns `{ ctl, atl, tsb, weeklyTSS, twoWeekTSS, ctl14dAgo }`. The field `twoWeekTSS` is cumulative (includes the 7-day window). Insights derive previous-week TSS as `twoWeekTSS - weeklyTSS` for week-over-week comparison. The `ctl14dAgo` field captures CTL from 14 days ago for Training Status transition detection.
+
+## Deployment
+
+- **Hosting**: GitHub Pages at `https://caseywalrath.github.io/cycling/`
+- **Base path**: `base: '/cycling/'` in `vite.config.js` (all asset URLs prefixed with `/cycling/`)
+- **CI/CD**: GitHub Actions workflow (`.github/workflows/deploy.yml`) triggers on push to `main`
+  - Runs `npm ci` → `npm run build` → uploads `dist/` → deploys to Pages
+  - Uses `actions/configure-pages@v4` for proper Pages environment setup
+- **PWA**: `scope` and `start_url` set to `/cycling/` in manifest
+- **Branch model**: `main` is the deploy branch; `claude/` session branches merge into `main` via PR

@@ -295,8 +295,33 @@
 ### Modal UX
 - All 11 modals now close when clicking outside the popup (backdrop `onClick` + `stopPropagation` on inner content)
 
+### Elevation Chart
+- Changed from weekly (20-week) to monthly (rolling 12-month window), matching eFTP chart pattern
+- Aggregates elevation per calendar month with `calculateMonthlyElevation()`
+- Ride count tooltip only counts rides with elevation > 0
+
 ### Files Changed
 - `src/App.jsx` — all feature code
 - `ARCHITECTURE.md` — updated for session 11 changes
 - `CHANGELOG.md` — this entry
 - `FEATURES.md` — Rider Type marked completed
+
+---
+
+## Session 12 - GitHub Pages Deployment (2026-02-12)
+
+### GitHub Pages Setup
+- **Vite base path**: Set `base: '/cycling/'` in `vite.config.js` for subfolder deployment
+- **PWA paths**: Updated `scope` and `start_url` to `/cycling/`
+- **GitHub Actions workflow**: `.github/workflows/deploy.yml` — auto-builds and deploys on push to `main`
+  - Uses `actions/configure-pages@v4`, `upload-pages-artifact@v3`, `deploy-pages@v4`
+  - Includes build verification step (`ls dist/ && head dist/index.html`)
+  - Supports manual trigger via `workflow_dispatch`
+- **Live URL**: `https://caseywalrath.github.io/cycling/`
+- **`main` branch created**: First time repo has a `main` branch; set as default, all `claude/` branches merge into it
+
+### Files Changed
+- `vite.config.js` — base path, PWA scope/start_url
+- `.github/workflows/deploy.yml` — new file
+- `ARCHITECTURE.md` — deployment docs
+- `CHANGELOG.md` — this entry
