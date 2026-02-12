@@ -334,8 +334,8 @@ export default function ProgressionTracker() {
       .filter(w => new Date(w.date) >= weekAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
-    const prevWeeklyTSS = sorted
-      .filter(w => new Date(w.date) >= twoWeeksAgo && new Date(w.date) < weekAgo)
+    const twoWeekTSS = sorted
+      .filter(w => new Date(w.date) >= twoWeeksAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
     return {
@@ -343,7 +343,7 @@ export default function ProgressionTracker() {
       atl: Math.round(atl),
       tsb: Math.round(ctl - atl),
       weeklyTSS,
-      prevWeeklyTSS,
+      twoWeekTSS,
     };
   };
 
@@ -791,7 +791,8 @@ export default function ProgressionTracker() {
 
   const generateInsights = (loads, history, levels) => {
     const insights = [];
-    const { ctl, atl, tsb, weeklyTSS, prevWeeklyTSS } = loads;
+    const { ctl, atl, tsb, weeklyTSS, twoWeekTSS } = loads;
+    const prevWeeklyTSS = twoWeekTSS - weeklyTSS;
 
     if (tsb < -25) {
       insights.push({
@@ -1391,19 +1392,10 @@ export default function ProgressionTracker() {
           const tss = activityData.icu_training_load || activityData.training_load || activityData.tss ||
                       calculateTSS(np, Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60));
 
-          // Map to our zone
-          const zone = mapWorkoutTypeToZone(activityData);
-          const currentLevel = levels[zone];
+          // Imported rides are NOT auto-classified into zones.
+          // Zone classification and progression levels are only set via manual ride logging.
 
-          // Estimate workout level from IF
           const intensityFactor = np / currentFTP;
-          const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
-
-          // Get RPE if available (wellness data)
-          const rpe = activityData.feel || activityData.perceived_exertion || 5; // Default to 5 if not available
-
-          // Calculate new level
-          const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
 
           // Extract distance and ride type
           const distanceMeters = activityData.distance || 0;
@@ -1422,14 +1414,14 @@ export default function ProgressionTracker() {
           // Get eFTP if available
           const activityEFTP = activityData.icu_ftp || activityData.ftp || null;
 
-          // Create workout entry
+          // Create workout entry without zone classification
           const entry = {
             id: Date.now() + imported, // Unique ID
             intervalsId: activitySummary.id, // intervals.icu activity ID for VO2max analysis
             date: activityDate,
-            zone: zone,
-            workoutLevel: parseFloat(workoutLevel.toFixed(1)),
-            rpe: rpe,
+            zone: null, // No auto-classification — user must classify manually
+            workoutLevel: null,
+            rpe: null,
             completed: true,
             duration: Math.round((activityData.moving_time || activityData.elapsed_time || 0) / 60),
             normalizedPower: Math.round(np),
@@ -1439,17 +1431,15 @@ export default function ProgressionTracker() {
             eFTP: activityEFTP,
             name: activityData.name || 'Imported Ride',
             notes: 'Imported from intervals.icu',
-            previousLevel: currentLevel,
-            newLevel: newLevel,
-            change: newLevel - currentLevel,
+            previousLevel: null,
+            newLevel: null,
+            change: 0,
             tss: tss,
             intensityFactor: intensityFactor,
+            source: 'imported',
           };
 
           newWorkouts.push(entry);
-
-          // Update level for next workout calculation
-          levels[zone] = newLevel;
 
           imported++;
 
@@ -1469,23 +1459,8 @@ export default function ProgressionTracker() {
         );
 
         setHistory(mergedHistory);
-        setLevels({ ...levels });
-        setDisplayLevels({ ...levels });
 
-        // Recalculate recent changes
-        const changes = {};
-        ZONES.forEach(zone => {
-          const lastWorkout = mergedHistory.find(w => w.zone === zone.id);
-          if (lastWorkout && lastWorkout.change !== 0) {
-            changes[zone.id] = {
-              change: lastWorkout.change,
-              date: lastWorkout.date,
-            };
-          }
-        });
-        setRecentChanges(changes);
-
-        let statusMsg = `✓ Imported ${imported} activities!`;
+        let statusMsg = `✓ Imported ${imported} activities! Classify rides in Ride History to update progression levels.`;
         if (skippedNoPower > 0 || skippedDuplicate > 0 || fetchErrors > 0) {
           statusMsg += ` Skipped: ${skippedNoPower} without power, ${skippedDuplicate} duplicates, ${fetchErrors} fetch errors.`;
         }
@@ -1594,7 +1569,6 @@ export default function ProgressionTracker() {
       let imported = 0;
       let skipped = 0;
       const newWorkouts = [];
-      const tempLevels = { ...levels };
 
       // Process each data row
       for (let i = 1; i < lines.length; i++) {
@@ -1632,33 +1606,16 @@ export default function ProgressionTracker() {
           continue;
         }
 
-        // Map to zone based on NP
-        const ranges = getZonePowerRanges(currentFTP);
-        let zone = 'endurance';
-        if (np >= ranges.anaerobic.min) zone = 'anaerobic';
-        else if (np >= ranges.vo2max.min) zone = 'vo2max';
-        else if (np >= ranges.threshold.min) zone = 'threshold';
-        else if (np >= ranges.sweetspot.min) zone = 'sweetspot';
-        else if (np >= ranges.tempo.min) zone = 'tempo';
+        // Imported rides are NOT auto-classified into zones.
+        // Zone classification and progression levels are only set via manual ride logging.
 
-        const currentLevel = tempLevels[zone];
-
-        // Estimate workout level from IF
-        const workoutLevel = Math.min(10, Math.max(1, intensityFactor * 5));
-
-        // Default RPE to 5 (no RPE data in CSV)
-        const rpe = 5;
-
-        // Calculate new level
-        const newLevel = calculateNewLevel(currentLevel, workoutLevel, rpe, true);
-
-        // Create workout entry
+        // Create workout entry without zone classification
         const entry = {
           id: Date.now() + imported,
           date: activityDate,
-          zone: zone,
-          workoutLevel: parseFloat(workoutLevel.toFixed(1)),
-          rpe: rpe,
+          zone: null, // No auto-classification — user must classify manually
+          workoutLevel: null,
+          rpe: null,
           completed: true,
           duration: Math.round(duration),
           normalizedPower: Math.round(np),
@@ -1666,18 +1623,18 @@ export default function ProgressionTracker() {
           distance: Math.round(distance * 10) / 10, // Round to 1 decimal
           name: activityName,
           notes: 'Imported from CSV',
-          previousLevel: currentLevel,
-          newLevel: newLevel,
-          change: newLevel - currentLevel,
+          previousLevel: null,
+          newLevel: null,
+          change: 0,
           tss: tss,
           intensityFactor: intensityFactor,
           intervalsId: activityId, // intervals.icu activity ID for VO2max analysis
           elevation: elevationIdx >= 0 && cols[elevationIdx] ? Math.round(parseFloat(cols[elevationIdx]) * 3.28084) : 0, // Convert meters to feet
           eFTP: eftpIdx >= 0 && cols[eftpIdx] ? parseInt(cols[eftpIdx]) : null, // Continuous eFTP with decay from intervals.icu
+          source: 'imported',
         };
 
         newWorkouts.push(entry);
-        tempLevels[zone] = newLevel;
         imported++;
       }
 
@@ -1688,23 +1645,8 @@ export default function ProgressionTracker() {
         );
 
         setHistory(mergedHistory);
-        setLevels(tempLevels);
-        setDisplayLevels(tempLevels);
 
-        // Recalculate recent changes
-        const changes = {};
-        ZONES.forEach(zone => {
-          const lastWorkout = mergedHistory.find(w => w.zone === zone.id);
-          if (lastWorkout && lastWorkout.change !== 0) {
-            changes[zone.id] = {
-              change: lastWorkout.change,
-              date: lastWorkout.date,
-            };
-          }
-        });
-        setRecentChanges(changes);
-
-        setCSVImportStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data).`);
+        setCSVImportStatus(`✓ Imported ${imported} activities! Skipped ${skipped} (duplicates or missing data). Classify rides in Ride History to update progression levels.`);
 
         // Clear CSV content after successful import
         setTimeout(() => {
@@ -1731,21 +1673,46 @@ export default function ProgressionTracker() {
     if (editingRide) {
       // Editing existing workout
       const oldWorkout = history.find(w => w.id === editingRide);
+      const wasUnclassified = oldWorkout.zone === null || oldWorkout.source === 'imported';
+      const isNowClassified = zone !== null && zone !== 'recovery';
+
+      // If user is classifying an imported ride (or re-classifying), calculate progression
+      let previousLevel = oldWorkout.previousLevel;
+      let newLevel = oldWorkout.newLevel;
+      let change = oldWorkout.change;
+
+      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+        // Recalculate progression for the newly assigned zone
+        previousLevel = levels[zone];
+        newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, formData.completed);
+        change = newLevel - previousLevel;
+      }
 
       const entry = {
         ...oldWorkout, // Preserve any extra fields like intervalsId, eFTP
         ...formData,
         name: formData.name,
         id: editingRide,
-        previousLevel: oldWorkout.previousLevel,
-        newLevel: oldWorkout.newLevel,
-        change: oldWorkout.change,
+        previousLevel,
+        newLevel,
+        change,
         tss,
         intensityFactor,
+        source: 'manual', // Editing always marks as manually classified
       };
 
       // Update history with edited entry
       setHistory(history.map(w => w.id === editingRide ? entry : w));
+
+      // Update progression levels if zone was assigned/changed
+      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+        setLevels(prev => ({ ...prev, [zone]: newLevel }));
+        setDisplayLevels(prev => ({ ...prev, [zone]: newLevel }));
+        setRecentChanges(prev => ({
+          ...prev,
+          [zone]: { change, date: formData.date },
+        }));
+      }
 
       // Reset form
       setFormData({
@@ -1767,13 +1734,12 @@ export default function ProgressionTracker() {
       setShowHistoryModal(true);
     } else {
       // Creating new workout
-      const currentLevel = levels[zone];
-      const newLevel = calculateNewLevel(
-        currentLevel,
-        formData.workoutLevel,
-        formData.rpe,
-        formData.completed
-      );
+      // Recovery zone does not affect progression levels
+      const affectsProgression = zone !== 'recovery';
+      const currentLevel = affectsProgression ? levels[zone] : null;
+      const newLevel = affectsProgression
+        ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, formData.completed)
+        : null;
 
       const entry = {
         ...formData,
@@ -1781,26 +1747,31 @@ export default function ProgressionTracker() {
         id: Date.now(),
         previousLevel: currentLevel,
         newLevel: newLevel,
-        change: newLevel - currentLevel,
+        change: affectsProgression ? newLevel - currentLevel : 0,
         tss,
         intensityFactor,
+        source: 'manual',
       };
 
-      // Update recent changes
-      setRecentChanges(prev => ({
-        ...prev,
-        [zone]: {
-          change: entry.change,
-          date: entry.date,
-        },
-      }));
+      // Update recent changes (only for non-recovery zones)
+      if (affectsProgression) {
+        setRecentChanges(prev => ({
+          ...prev,
+          [zone]: {
+            change: entry.change,
+            date: entry.date,
+          },
+        }));
+      }
 
       // Set last logged workout for summary modal
       setLastLoggedWorkout(entry);
 
       // Update history and levels
       setHistory([entry, ...history]);
-      setLevels({ ...levels, [zone]: newLevel });
+      if (affectsProgression) {
+        setLevels({ ...levels, [zone]: newLevel });
+      }
 
       // Show summary modal
       setShowPostLogSummary(true);
@@ -1828,8 +1799,8 @@ export default function ProgressionTracker() {
     setShowPostLogSummary(false);
     setShowLogRideModal(false);
 
-    // Trigger animation after modal closes
-    if (lastLoggedWorkout) {
+    // Trigger animation after modal closes (only for rides with progression)
+    if (lastLoggedWorkout && lastLoggedWorkout.previousLevel != null && lastLoggedWorkout.newLevel != null) {
       setTimeout(() => {
         animateLevel(
           lastLoggedWorkout.zone,
@@ -1894,12 +1865,14 @@ export default function ProgressionTracker() {
     if (!workout) return;
 
     // Populate form with workout data
+    // For imported (unclassified) rides, default zone to 'endurance' so the user can select
+    const editZone = workout.zone || 'endurance';
     setFormData({
       name: workout.name || workout.notes || '',
       date: workout.date,
-      zone: workout.zone,
-      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[workout.zone],
-      rpe: workout.rpe,
+      zone: editZone,
+      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[editZone],
+      rpe: workout.rpe != null ? workout.rpe : 5,
       completed: workout.completed !== false,
       duration: workout.duration,
       normalizedPower: workout.normalizedPower,
@@ -2032,8 +2005,8 @@ export default function ProgressionTracker() {
 - CTL (Fitness): ${loads.ctl}
 - ATL (Fatigue): ${loads.atl}
 - TSB (Form): ${loads.tsb}
-- Weekly TSS: ${loads.weeklyTSS}
-- Previous Week TSS: ${loads.prevWeeklyTSS}
+- 7-Day TSS: ${loads.weeklyTSS}
+- 14-Day TSS: ${loads.twoWeekTSS}
 
 **Progression Levels:**
 - Endurance: ${levels.endurance.toFixed(1)}
@@ -2044,22 +2017,42 @@ export default function ProgressionTracker() {
 - Anaerobic: ${levels.anaerobic.toFixed(1)}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${w.date}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}, RPE ${w.rpe}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
+${recentWorkouts.map(w => `- ${w.date}: ${getZoneName(w.zone)}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
 
 Please analyze my current training status and provide personalized insights.`;
 
-    navigator.clipboard.writeText(analysisText).then(() => {
+    const copyToClipboard = (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+      }
+      // Fallback for non-secure contexts (e.g., HTTP on LAN)
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return Promise.resolve();
+    };
+
+    copyToClipboard(analysisText).then(() => {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
+    }).catch(() => {
+      alert('Copy failed. Your browser may not support clipboard access over HTTP.');
     });
   };
 
   const getZoneName = (zoneId) => {
+    if (!zoneId) return 'Unclassified';
     const zone = ZONES.find(z => z.id === zoneId);
     return zone ? zone.name : zoneId;
   };
 
   const getZoneColor = (zoneId) => {
+    if (!zoneId) return '#888';
     const zone = ZONES.find(z => z.id === zoneId);
     return zone ? zone.color : '#888';
   };
@@ -2180,31 +2173,39 @@ Please analyze my current training status and provide personalized insights.`;
                 {getChangeDescription(lastLoggedWorkout.change, lastLoggedWorkout.rpe, lastLoggedWorkout.workoutLevel, lastLoggedWorkout.previousLevel)}
               </p>
 
-              <div className="flex items-center justify-center gap-4 mb-4">
-                <div className="text-right">
-                  <div className="text-2xl font-mono text-gray-400">{lastLoggedWorkout.previousLevel.toFixed(1)}</div>
-                  <div className="text-xs text-gray-500">Before</div>
-                </div>
-                <div className="text-2xl">→</div>
-                <div className="text-left">
-                  <div className="text-2xl font-mono font-bold" style={{ color: getZoneColor(lastLoggedWorkout.zone) }}>
-                    {lastLoggedWorkout.newLevel.toFixed(1)}
+              {lastLoggedWorkout.previousLevel != null && lastLoggedWorkout.newLevel != null ? (
+                <>
+                  <div className="flex items-center justify-center gap-4 mb-4">
+                    <div className="text-right">
+                      <div className="text-2xl font-mono text-gray-400">{lastLoggedWorkout.previousLevel.toFixed(1)}</div>
+                      <div className="text-xs text-gray-500">Before</div>
+                    </div>
+                    <div className="text-2xl">→</div>
+                    <div className="text-left">
+                      <div className="text-2xl font-mono font-bold" style={{ color: getZoneColor(lastLoggedWorkout.zone) }}>
+                        {lastLoggedWorkout.newLevel.toFixed(1)}
+                      </div>
+                      <div className="text-xs text-gray-500">After</div>
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500">After</div>
-                </div>
-              </div>
 
-              <div
-                className={`inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 ${
-                  lastLoggedWorkout.change > 0
-                    ? 'bg-green-900/50 text-green-400'
-                    : lastLoggedWorkout.change < 0
-                    ? 'bg-red-900/50 text-red-400'
-                    : 'bg-gray-700 text-gray-400'
-                }`}
-              >
-                {formatChange(lastLoggedWorkout.change)}
-              </div>
+                  <div
+                    className={`inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 ${
+                      lastLoggedWorkout.change > 0
+                        ? 'bg-green-900/50 text-green-400'
+                        : lastLoggedWorkout.change < 0
+                        ? 'bg-red-900/50 text-red-400'
+                        : 'bg-gray-700 text-gray-400'
+                    }`}
+                  >
+                    {formatChange(lastLoggedWorkout.change)}
+                  </div>
+                </>
+              ) : (
+                <div className="mb-4 text-gray-400 text-sm">
+                  Recovery rides do not affect progression levels.
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-2 text-xs mb-4 bg-gray-700/50 rounded p-2">
                 <div>
@@ -2771,7 +2772,7 @@ Please analyze my current training status and provide personalized insights.`;
 
         {/* Progression Levels */}
         <div className="space-y-4">
-            {ZONES.map((zone) => (
+            {ZONES.filter((zone) => zone.id !== 'recovery').map((zone) => (
               <div key={zone.id}>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="font-medium flex items-center gap-2">
@@ -2811,29 +2812,7 @@ Please analyze my current training status and provide personalized insights.`;
               </div>
             ))}
 
-            {/* Reset Levels Button */}
-            <div className="pt-4 border-t border-gray-700">
-              <button
-                onClick={() => {
-                  if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
-                    const resetLevels = {
-                      endurance: 1.0,
-                      tempo: 1.0,
-                      sweetspot: 1.0,
-                      threshold: 1.0,
-                      vo2max: 1.0,
-                      anaerobic: 1.0,
-                    };
-                    setLevels(resetLevels);
-                    setDisplayLevels(resetLevels);
-                    alert('✓ All progression levels reset to 1.0');
-                  }
-                }}
-                className="w-full bg-gray-700 hover:bg-red-900/30 text-gray-400 hover:text-red-400 px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-red-500/30"
-              >
-                Reset Levels
-              </button>
-            </div>
+
 
             {/* Training Load Cards */}
             <div className="grid grid-cols-3 gap-3">
@@ -3196,53 +3175,28 @@ Please analyze my current training status and provide personalized insights.`;
                 const elevation14d = last14Days.reduce((sum, w) => sum + (w.elevation || 0), 0);
 
                 return (
-                  <div className="grid grid-cols-5 gap-3 text-xs">
-                    <div>
-                      <div className="text-gray-400 mb-1">7 Days</div>
-                      <div className="text-base font-bold">{loads.weeklyTSS} TSS</div>
-                      <div className="text-gray-500">{last7Days.length} rides</div>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex items-baseline gap-4">
+                      <span className="text-gray-400">TSS</span>
+                      <span className="font-bold text-base">{loads.weeklyTSS}</span>
+                      <span className="text-gray-500">7d</span>
+                      <span className="font-bold text-base">{loads.twoWeekTSS}</span>
+                      <span className="text-gray-500">14d</span>
+                      <span className="font-bold text-base">{last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)}</span>
+                      <span className="text-gray-500">28d</span>
                     </div>
-                    <div>
-                      <div className="text-gray-400 mb-1">28 Days</div>
-                      <div className="text-base font-bold">
-                        {last28Days.reduce((sum, w) => sum + (w.tss || 0), 0)} TSS
-                      </div>
-                      <div className="text-gray-500">{last28Days.length} rides</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-gray-400">Longest (30d)</span>
+                      {longestRide ? (
+                        <>
+                          <span className="font-bold text-base">{longestRide.duration} min</span>
+                          <span className="text-gray-500">•</span>
+                          <span className="font-bold text-base">{longestRide.distance} mi</span>
+                        </>
+                      ) : (
+                        <span className="text-gray-600 font-bold text-base">--</span>
+                      )}
                     </div>
-                    <div>
-                      <div className="text-gray-400 mb-1">Elevation (14d)</div>
-                      <div className="text-base font-bold">
-                        {elevation14d.toLocaleString()} ft
-                      </div>
-                      <div className="text-gray-500">{last14Days.length} rides</div>
-                    </div>
-                    {longestRide ? (
-                      <>
-                        <div>
-                          <div className="text-gray-400 mb-1">Longest (30d)</div>
-                          <div className="text-base font-bold">{longestRide.duration} min</div>
-                          <div className="text-gray-500">Duration</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 mb-1">&nbsp;</div>
-                          <div className="text-base font-bold">{longestRide.distance} mi</div>
-                          <div className="text-gray-500">Distance</div>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div>
-                          <div className="text-gray-400 mb-1">Longest (30d)</div>
-                          <div className="text-base font-bold text-gray-600">--</div>
-                          <div className="text-gray-500">Duration</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 mb-1">&nbsp;</div>
-                          <div className="text-base font-bold text-gray-600">--</div>
-                          <div className="text-gray-500">Distance</div>
-                        </div>
-                      </>
-                    )}
                   </div>
                 );
               })()}
@@ -3283,32 +3237,14 @@ Please analyze my current training status and provide personalized insights.`;
               )}
             </div>
 
-            {/* Recent Workouts Mini Table */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-medium">Recent Workouts</h3>
-                <button
-                  onClick={() => setShowHistoryModal(true)}
-                  className="text-sm px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 transition"
-                >
-                  Ride History
-                </button>
-              </div>
-              {history.length === 0 ? (
-                <p className="text-gray-400 text-sm">No workouts logged yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {history.slice(0, 5).map((entry) => (
-                    <div key={entry.id} className="flex justify-between text-sm py-1 border-b border-gray-700 last:border-0">
-                      <span className="text-gray-400">{entry.date}</span>
-                      <span>{getZoneName(entry.zone)}</span>
-                      <span className="text-gray-400">{entry.duration}min</span>
-                      <span className="font-mono">{entry.tss} TSS</span>
-                      <span className="font-mono text-gray-400">{entry.intensityFactor.toFixed(2)} IF</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Ride History Button */}
+            <div className="pt-4 border-t border-gray-700">
+              <button
+                onClick={() => setShowHistoryModal(true)}
+                className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-gray-500"
+              >
+                Ride History
+              </button>
             </div>
 
             {/* CTL Progress */}
@@ -3543,7 +3479,7 @@ Please analyze my current training status and provide personalized insights.`;
             {history.length === 0 ? (
               <p className="text-gray-400 text-sm">No workouts logged yet.</p>
             ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
+              <div className="space-y-3 max-h-[70vh] overflow-y-auto">
                 {history.map((entry) => (
                   <div key={entry.id} className="bg-gray-700 rounded p-3 text-sm relative">
                     <div className="absolute top-2 right-2 flex gap-1">
@@ -3615,12 +3551,18 @@ Please analyze my current training status and provide personalized insights.`;
                     {/* Level changes and eFTP */}
                     <div className="flex justify-between text-xs">
                       <span>
-                        Level {entry.workoutLevel} • RPE {entry.rpe}
+                        {entry.workoutLevel != null ? `Level ${entry.workoutLevel}` : ''}
+                        {entry.rpe != null ? ` • RPE ${entry.rpe}` : ''}
                         {entry.eFTP && <span className="text-gray-400 ml-2">• eFTP {entry.eFTP}W</span>}
+                        {!entry.zone && <span className="text-yellow-400 ml-1">• Needs classification</span>}
                       </span>
-                      <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
-                        {entry.previousLevel.toFixed(1)} → {entry.newLevel.toFixed(1)} ({formatChange(entry.change)})
-                      </span>
+                      {entry.previousLevel != null && entry.newLevel != null ? (
+                        <span className={entry.change > 0 ? 'text-green-400' : entry.change < 0 ? 'text-red-400' : 'text-gray-400'}>
+                          {entry.previousLevel.toFixed(1)} → {entry.newLevel.toFixed(1)} ({formatChange(entry.change)})
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">—</span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -3630,35 +3572,45 @@ Please analyze my current training status and provide personalized insights.`;
           </div>
         )}
 
-        {/* Export/Import */}
-        <div className="flex gap-3 text-sm mt-6 flex-wrap">
+        {/* Import/Export/Reset */}
+        <div className="flex justify-between text-sm mt-6">
+          <div className="flex gap-3">
+            <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
+              Import
+              <input type="file" accept=".json" onChange={importData} className="hidden" />
+            </label>
+            <button
+              onClick={exportData}
+              className="text-gray-400 hover:text-gray-300 transition"
+            >
+              Export
+            </button>
+            <button
+              onClick={() => setShowCSVImport(true)}
+              className="text-gray-400 hover:text-gray-300 transition"
+            >
+              Paste CSV
+            </button>
+          </div>
           <button
-            onClick={exportData}
-            className="text-gray-400 hover:text-gray-300 transition"
+            onClick={() => {
+              if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
+                const resetLevels = {
+                  endurance: 1.0,
+                  tempo: 1.0,
+                  sweetspot: 1.0,
+                  threshold: 1.0,
+                  vo2max: 1.0,
+                  anaerobic: 1.0,
+                };
+                setLevels(resetLevels);
+                setDisplayLevels(resetLevels);
+                alert('✓ All progression levels reset to 1.0');
+              }
+            }}
+            className="text-gray-500 hover:text-red-400 transition"
           >
-            Export
-          </button>
-          <label className="text-gray-400 hover:text-gray-300 transition cursor-pointer">
-            Import
-            <input type="file" accept=".json" onChange={importData} className="hidden" />
-          </label>
-          <button
-            onClick={() => setShowCloudSyncHelp(true)}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            How to Sync?
-          </button>
-          <button
-            onClick={() => setShowPasteImport(true)}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            Paste JSON
-          </button>
-          <button
-            onClick={() => setShowCSVImport(true)}
-            className="text-gray-400 hover:text-gray-300 transition"
-          >
-            Import CSV
+            Reset Levels
           </button>
         </div>
       </div>
