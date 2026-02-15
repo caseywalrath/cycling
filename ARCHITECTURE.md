@@ -64,9 +64,12 @@ DAYS_OF_WEEK    // Day name lookup array (Sunday → Saturday)
 ## Utility Functions (module-level)
 ```javascript
 toLocalDateStr(date)     // YYYY-MM-DD using local timezone (replaces toISOString)
+parseDateLocal(dateStr)  // Parse "YYYY-MM-DD" as local midnight (avoids UTC off-by-one)
 formatDateWithDay(str)   // "2026-02-05 - Thursday" from YYYY-MM-DD string
 getDefaultFormData(hist) // Default form values with latest eFTP from history
 ```
+
+**Important**: Never use `new Date("YYYY-MM-DD")` to parse date strings — it creates midnight UTC, which in US timezones becomes the previous evening. Always use `parseDateLocal()` for ride/event date strings.
 
 ## Data Import Sources
 1. **intervals.icu API** - Direct sync via athlete ID + API key

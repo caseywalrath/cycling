@@ -308,6 +308,23 @@
 
 ---
 
+## Session 13 - CTL/ATL/TSB Card Update Bug Fix (2026-02-15)
+
+### Critical Bug Fix: Training Load Cards Not Updating
+- **Symptom**: CTL, ATL, TSB cards showed stale values after logging rides — neither outdoor nor indoor rides caused any change
+- **Root cause**: UTC timezone parsing bug in `calculateTrainingLoads()`. `new Date("YYYY-MM-DD")` parses as midnight UTC, which in US timezones (e.g. Mountain Time, UTC-7) becomes the previous evening (~5PM local). The EMA loop walked day-by-day starting from this 5PM timestamp, and when it reached today's date at 5PM local, the loop condition `currentDate <= today` failed because the current time was earlier (e.g. 10AM). Result: today's rides were completely invisible to CTL/ATL/TSB.
+- **Fix**: Added `parseDateLocal(dateStr)` helper that parses "YYYY-MM-DD" as local midnight via `new Date(y, m-1, d)`. Applied across all date comparisons in the app.
+- **Scope**: Same UTC bug affected weekly/monthly chart data, insights, Training Summary, imports, and event countdown — all fixed
+
+### New Utility Function
+- `parseDateLocal(dateStr)` — module-level helper alongside `toLocalDateStr()`. Parses "YYYY-MM-DD" strings as local midnight instead of UTC midnight.
+
+### Files Changed
+- `src/App.jsx` — parseDateLocal helper, all date comparison fixes
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 12 - GitHub Pages Deployment (2026-02-12)
 
 ### GitHub Pages Setup
