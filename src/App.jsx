@@ -2233,14 +2233,6 @@ export default function ProgressionTracker() {
 **Weekly Training Hours (past 4 weeks):**
 ${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
 
-**Progression Levels:**
-- Endurance: ${levels.endurance.toFixed(1)}
-- Tempo: ${levels.tempo.toFixed(1)}
-- Sweet Spot: ${levels.sweetspot.toFixed(1)}
-- Threshold: ${levels.threshold.toFixed(1)}
-- VO2max: ${levels.vo2max.toFixed(1)}
-- Anaerobic: ${levels.anaerobic.toFixed(1)}
-
 **Recent Workouts:**
 ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
 
