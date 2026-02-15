@@ -46,6 +46,14 @@ const toLocalDateStr = (date) => {
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 };
+
+// Parse "YYYY-MM-DD" as local midnight (not UTC midnight).
+// new Date("YYYY-MM-DD") parses as midnight UTC, which in US timezones
+// becomes the previous evening — causing off-by-one day bugs.
+const parseDateLocal = (dateStr) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
 const formatDateWithDay = (dateStr) => {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -350,9 +358,9 @@ export default function ProgressionTracker() {
   const calculateTrainingLoads = () => {
     if (history.length === 0) return { ctl: 0, atl: 0, tsb: 0, weeklyTSS: 0, prevWeeklyTSS: 0, ctl14dAgo: 0 };
 
-    const sorted = [...history].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sorted = [...history].sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date));
     const today = new Date();
-    const oldestDate = new Date(sorted[0].date);
+    today.setHours(0, 0, 0, 0); // midnight local — consistent with parseDateLocal
 
     const dailyTSS = {};
     sorted.forEach(workout => {
@@ -371,7 +379,7 @@ export default function ProgressionTracker() {
     fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
     const fourteenDaysAgoStr = toLocalDateStr(fourteenDaysAgo);
 
-    const currentDate = new Date(oldestDate);
+    const currentDate = parseDateLocal(sorted[0].date); // midnight local
     while (currentDate <= today) {
       const dateStr = toLocalDateStr(currentDate);
       const dayTSS = dailyTSS[dateStr] || 0;
@@ -392,11 +400,11 @@ export default function ProgressionTracker() {
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
 
     const weeklyTSS = sorted
-      .filter(w => new Date(w.date) >= weekAgo)
+      .filter(w => parseDateLocal(w.date) >= weekAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
     const twoWeekTSS = sorted
-      .filter(w => new Date(w.date) >= twoWeeksAgo)
+      .filter(w => parseDateLocal(w.date) >= twoWeeksAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
     return {
@@ -415,15 +423,16 @@ export default function ProgressionTracker() {
 
     // Get date 20 weeks ago
     const twentyWeeksAgo = new Date();
+    twentyWeeksAgo.setHours(0, 0, 0, 0);
     twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
 
     // Filter to last 20 weeks
-    const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
+    const recentWorkouts = history.filter(w => parseDateLocal(w.date) >= twentyWeeksAgo);
 
     // Group by week
     const weeklyData = {};
     recentWorkouts.forEach(workout => {
-      const date = new Date(workout.date);
+      const date = parseDateLocal(workout.date);
       // Get Monday of that week (week starts on Monday, Strava convention)
       const monday = new Date(date);
       monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
@@ -449,9 +458,9 @@ export default function ProgressionTracker() {
         totalMinutes: week.totalMinutes,
         workouts: week.workouts,
         // Format label as "Apr 7", "May 12", etc.
-        label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        label: parseDateLocal(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       }))
-      .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
+      .sort((a, b) => parseDateLocal(a.weekStart) - parseDateLocal(b.weekStart));
 
     return chartData;
   };
@@ -461,15 +470,16 @@ export default function ProgressionTracker() {
 
     // Get date 20 weeks ago
     const twentyWeeksAgo = new Date();
+    twentyWeeksAgo.setHours(0, 0, 0, 0);
     twentyWeeksAgo.setDate(twentyWeeksAgo.getDate() - (20 * 7));
 
     // Filter to last 20 weeks
-    const recentWorkouts = history.filter(w => new Date(w.date) >= twentyWeeksAgo);
+    const recentWorkouts = history.filter(w => parseDateLocal(w.date) >= twentyWeeksAgo);
 
     // Group by week
     const weeklyData = {};
     recentWorkouts.forEach(workout => {
-      const date = new Date(workout.date);
+      const date = parseDateLocal(workout.date);
       // Get Monday of that week (week starts on Monday, Strava convention)
       const monday = new Date(date);
       monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
@@ -494,9 +504,9 @@ export default function ProgressionTracker() {
         tss: Math.round(week.totalTSS), // Round to integer
         workouts: week.workouts,
         // Format label as "Apr 7", "May 12", etc.
-        label: new Date(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        label: parseDateLocal(week.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       }))
-      .sort((a, b) => new Date(a.weekStart) - new Date(b.weekStart));
+      .sort((a, b) => parseDateLocal(a.weekStart) - parseDateLocal(b.weekStart));
 
     return chartData;
   };
@@ -509,12 +519,12 @@ export default function ProgressionTracker() {
     elevenMonthsAgo.setMonth(elevenMonthsAgo.getMonth() - 11);
     elevenMonthsAgo.setDate(1);
 
-    const recentWorkouts = history.filter(w => new Date(w.date) >= elevenMonthsAgo);
+    const recentWorkouts = history.filter(w => parseDateLocal(w.date) >= elevenMonthsAgo);
 
     // Group by calendar month
     const monthMap = {};
     recentWorkouts.forEach(workout => {
-      const d = new Date(workout.date);
+      const d = parseDateLocal(workout.date);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
       if (!monthMap[key]) {
@@ -549,15 +559,15 @@ export default function ProgressionTracker() {
 
     // Filter to workouts with eFTP in the window
     const rides = history
-      .filter(w => w.eFTP && new Date(w.date) >= elevenMonthsAgo)
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
+      .filter(w => w.eFTP && parseDateLocal(w.date) >= elevenMonthsAgo)
+      .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date));
 
     if (rides.length === 0) return [];
 
     // Group by calendar month → find max eFTP per month
     const monthMap = {};
     rides.forEach(w => {
-      const d = new Date(w.date);
+      const d = parseDateLocal(w.date);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       if (!monthMap[key] || w.eFTP > monthMap[key].eFTP) {
         monthMap[key] = {
@@ -910,10 +920,13 @@ export default function ProgressionTracker() {
     // Calculate week 3 TSS (days 15-21) to check for 2 consecutive low weeks
     const week3Workouts = history.filter(w => {
       const threeWeeksAgo = new Date();
+      threeWeeksAgo.setHours(0, 0, 0, 0);
       threeWeeksAgo.setDate(threeWeeksAgo.getDate() - 21);
       const twoWeeksAgo = new Date();
+      twoWeeksAgo.setHours(0, 0, 0, 0);
       twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-      return new Date(w.date) >= threeWeeksAgo && new Date(w.date) < twoWeeksAgo;
+      const rideDate = parseDateLocal(w.date);
+      return rideDate >= threeWeeksAgo && rideDate < twoWeeksAgo;
     });
     const week3TSS = week3Workouts.reduce((sum, w) => sum + (w.tss || 0), 0);
 
@@ -959,8 +972,9 @@ export default function ProgressionTracker() {
 
     const last14Days = history.filter(w => {
       const twoWeeksAgo = new Date();
+      twoWeeksAgo.setHours(0, 0, 0, 0);
       twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-      return new Date(w.date) >= twoWeeksAgo;
+      return parseDateLocal(w.date) >= twoWeeksAgo;
     });
     if (last14Days.length < 4) {
       insights.push({
@@ -972,8 +986,9 @@ export default function ProgressionTracker() {
     const zoneWorkouts = {};
     const last28Days = history.filter(w => {
       const fourWeeksAgo = new Date();
+      fourWeeksAgo.setHours(0, 0, 0, 0);
       fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-      return new Date(w.date) >= fourWeeksAgo;
+      return parseDateLocal(w.date) >= fourWeeksAgo;
     });
     last28Days.forEach(w => {
       zoneWorkouts[w.zone] = (zoneWorkouts[w.zone] || 0) + 1;
@@ -1011,9 +1026,10 @@ export default function ProgressionTracker() {
 
     // Longest ride analysis
     const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const recentOutdoorRides = history.filter(w =>
-      new Date(w.date) >= thirtyDaysAgo &&
+      parseDateLocal(w.date) >= thirtyDaysAgo &&
       w.rideType === 'Outdoor' &&
       w.distance > 0
     );
@@ -1035,15 +1051,19 @@ export default function ProgressionTracker() {
     // Weekly hours analysis
     const last7DaysWorkouts = history.filter(w => {
       const weekAgo = new Date();
+      weekAgo.setHours(0, 0, 0, 0);
       weekAgo.setDate(weekAgo.getDate() - 7);
-      return new Date(w.date) >= weekAgo;
+      return parseDateLocal(w.date) >= weekAgo;
     });
     const prev7DaysWorkouts = history.filter(w => {
       const twoWeeksAgo = new Date();
+      twoWeeksAgo.setHours(0, 0, 0, 0);
       twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
       const weekAgo = new Date();
+      weekAgo.setHours(0, 0, 0, 0);
       weekAgo.setDate(weekAgo.getDate() - 7);
-      return new Date(w.date) >= twoWeeksAgo && new Date(w.date) < weekAgo;
+      const rideDate = parseDateLocal(w.date);
+      return rideDate >= twoWeeksAgo && rideDate < weekAgo;
     });
 
     const thisWeekHours = last7DaysWorkouts.reduce((sum, w) => sum + w.duration, 0) / 60;
@@ -1079,13 +1099,13 @@ export default function ProgressionTracker() {
 
     // Consecutive days pattern
     if (history.length >= 7) {
-      const sortedRecent = [...history].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
+      const sortedRecent = [...history].sort((a, b) => parseDateLocal(b.date) - parseDateLocal(a.date)).slice(0, 7);
       let consecutiveDays = 1;
       let maxConsecutive = 1;
 
       for (let i = 0; i < sortedRecent.length - 1; i++) {
-        const current = new Date(sortedRecent[i].date);
-        const next = new Date(sortedRecent[i + 1].date);
+        const current = parseDateLocal(sortedRecent[i].date);
+        const next = parseDateLocal(sortedRecent[i + 1].date);
         const daysDiff = Math.round((current - next) / (1000 * 60 * 60 * 24));
 
         if (daysDiff === 1) {
@@ -1533,7 +1553,7 @@ export default function ProgressionTracker() {
       if (imported > 0) {
         // Merge with existing history and sort by date
         const mergedHistory = [...newWorkouts, ...history].sort((a, b) =>
-          new Date(b.date) - new Date(a.date)
+          parseDateLocal(b.date) - parseDateLocal(a.date)
         );
 
         setHistory(mergedHistory);
@@ -1720,7 +1740,7 @@ export default function ProgressionTracker() {
       if (imported > 0) {
         // Merge with existing history and sort by date
         const mergedHistory = [...newWorkouts, ...history].sort((a, b) =>
-          new Date(b.date) - new Date(a.date)
+          parseDateLocal(b.date) - parseDateLocal(a.date)
         );
 
         setHistory(mergedHistory);
@@ -1907,7 +1927,8 @@ export default function ProgressionTracker() {
   const getDaysUntilEvent = () => {
     if (!event.date) return null;
     const today = new Date();
-    const eventDate = new Date(event.date);
+    today.setHours(0, 0, 0, 0);
+    const eventDate = parseDateLocal(event.date);
     const diffTime = eventDate - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;
@@ -2185,9 +2206,10 @@ export default function ProgressionTracker() {
 
     // 28-day TSS
     const fourWeeksAgo = new Date();
+    fourWeeksAgo.setHours(0, 0, 0, 0);
     fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
     const twentyEightDayTSS = history
-      .filter(w => new Date(w.date) >= fourWeeksAgo)
+      .filter(w => parseDateLocal(w.date) >= fourWeeksAgo)
       .reduce((sum, w) => sum + (w.tss || 0), 0);
 
     // Weekly training hours (last 4 weeks)
@@ -2327,14 +2349,16 @@ Please analyze my current training and provide personalized insights.`;
 
   const last7Days = history.filter(w => {
     const weekAgo = new Date();
+    weekAgo.setHours(0, 0, 0, 0);
     weekAgo.setDate(weekAgo.getDate() - 7);
-    return new Date(w.date) >= weekAgo;
+    return parseDateLocal(w.date) >= weekAgo;
   });
 
   const last28Days = history.filter(w => {
     const monthAgo = new Date();
+    monthAgo.setHours(0, 0, 0, 0);
     monthAgo.setDate(monthAgo.getDate() - 28);
-    return new Date(w.date) >= monthAgo;
+    return parseDateLocal(w.date) >= monthAgo;
   });
 
   // Calendar: set of dates with rides for O(1) lookup
@@ -3665,11 +3689,13 @@ Please analyze my current training and provide personalized insights.`;
                 <h3 className="font-medium mb-3">Training Summary</h3>
                 {(() => {
                   const thirtyDaysAgo = new Date();
+                  thirtyDaysAgo.setHours(0, 0, 0, 0);
                   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                   const fourteenDaysAgo = new Date();
+                  fourteenDaysAgo.setHours(0, 0, 0, 0);
                   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
                   const outdoorRides = history.filter(w =>
-                    new Date(w.date) >= thirtyDaysAgo &&
+                    parseDateLocal(w.date) >= thirtyDaysAgo &&
                     w.rideType === 'Outdoor' &&
                     w.distance > 0
                   );
