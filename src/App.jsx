@@ -4042,27 +4042,33 @@ Please analyze my current training and provide personalized insights.`;
             {/* Fitness Progress */}
             <div className="bg-gray-800 rounded-lg p-4">
               <h3 className="font-medium mb-2">Fitness Progress</h3>
-              <div className="text-xs text-gray-400 mb-2">
-                {(() => {
-                  const daysToEvent = getDaysUntilEvent();
-                  return daysToEvent !== null ? `Days to Event: ${daysToEvent} | ` : '';
-                })()}
-                CTL Target: 80-100
-              </div>
-              <div className="w-full">
-                <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (loads.ctl / 100) * 100)}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>0</span>
-                  <span>Current: {loads.ctl}</span>
-                  <span>100</span>
-                </div>
-              </div>
+              {(() => {
+                const target = event.targetCTL > 0 ? event.targetCTL : 100;
+                const daysToEvent = getDaysUntilEvent();
+                return (
+                  <>
+                    <div className="text-xs text-gray-400 mb-2">
+                      {daysToEvent !== null ? `Days to Event: ${daysToEvent} | ` : ''}
+                      Target CTL: {target}
+                    </div>
+                    <div className="w-full">
+                      <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, (loads.ctl / target) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>0</span>
+                        <span>Current: {loads.ctl}</span>
+                        <span>{target}</span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
+
 
             {/* Ride History Button */}
             <div className="pt-4 border-t border-gray-700">
