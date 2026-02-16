@@ -139,6 +139,7 @@ export default function ProgressionTracker() {
   // Calendar state
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+  const [calendarPopup, setCalendarPopup] = useState(null); // { dateStr } or null
 
   // CSV import state
   const [showCSVImport, setShowCSVImport] = useState(false);
@@ -2447,6 +2448,18 @@ Please analyze my current training and provide personalized insights.`;
     return set;
   }, [history]);
 
+  // Calendar: rides grouped by date for popup display
+  const ridesByDate = useMemo(() => {
+    const map = {};
+    history.forEach(ride => {
+      if (ride.date) {
+        if (!map[ride.date]) map[ride.date] = [];
+        map[ride.date].push(ride);
+      }
+    });
+    return map;
+  }, [history]);
+
   // Calendar: generate day objects for a month grid (Monday-start)
   const getCalendarDays = (year, month) => {
     const firstDay = new Date(year, month, 1);
@@ -3919,6 +3932,7 @@ Please analyze my current training and provide personalized insights.`;
               <div className="flex items-center justify-between mb-3">
                 <button
                   onClick={() => {
+                    setCalendarPopup(null);
                     if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(calendarYear - 1); }
                     else { setCalendarMonth(calendarMonth - 1); }
                   }}
@@ -3931,6 +3945,7 @@ Please analyze my current training and provide personalized insights.`;
                 </h3>
                 <button
                   onClick={() => {
+                    setCalendarPopup(null);
                     if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(calendarYear + 1); }
                     else { setCalendarMonth(calendarMonth + 1); }
                   }}
@@ -3957,11 +3972,12 @@ Please analyze my current training and provide personalized insights.`;
                   return (
                     <div key={i} className="flex items-center justify-center py-0.5">
                       <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors ${
+                        onClick={hasRide ? () => setCalendarPopup(calendarPopup?.dateStr === dayObj.dateStr ? null : { dateStr: dayObj.dateStr }) : undefined}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors ${hasRide ? 'cursor-pointer' : ''} ${
                           hasRide && dayObj.isCurrentMonth
-                            ? 'bg-blue-500 text-white font-bold'
+                            ? 'bg-blue-500 text-white font-bold hover:bg-blue-400'
                             : hasRide && !dayObj.isCurrentMonth
-                            ? 'bg-blue-500/40 text-gray-400'
+                            ? 'bg-blue-500/40 text-gray-400 hover:bg-blue-500/60'
                             : !hasRide && dayObj.isCurrentMonth
                             ? 'border border-gray-600 text-gray-400'
                             : 'text-gray-700'
@@ -3971,6 +3987,8 @@ Please analyze my current training and provide personalized insights.`;
                             : isToday && hasRide
                             ? 'ring-2 ring-blue-300'
                             : ''
+                        } ${
+                          calendarPopup?.dateStr === dayObj.dateStr ? 'ring-2 ring-white' : ''
                         }`}
                       >
                         {hasRide ? (
@@ -3987,6 +4005,38 @@ Please analyze my current training and provide personalized insights.`;
                   );
                 })}
               </div>
+
+              {/* Ride popup — shown when a ride day is clicked */}
+              {calendarPopup && ridesByDate[calendarPopup.dateStr] && (
+                <div className="mt-3 border-t border-gray-700 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-400">{formatDateWithDay(calendarPopup.dateStr)}</span>
+                    <button
+                      onClick={() => setCalendarPopup(null)}
+                      className="text-gray-500 hover:text-gray-300 text-xs leading-none px-1"
+                      aria-label="Close"
+                    >✕</button>
+                  </div>
+                  {ridesByDate[calendarPopup.dateStr].map(ride => {
+                    const zone = ZONES.find(z => z.id === ride.zone);
+                    return (
+                      <div key={ride.id} className="flex items-center justify-between py-1.5 border-b border-gray-700/50 last:border-0">
+                        <div className="min-w-0 pr-2">
+                          <div className="text-sm text-white truncate">{ride.name || 'Untitled Ride'}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {ride.rideType || 'Indoor'}
+                            {zone ? <span> · <span style={{ color: zone.color }}>{zone.name}</span></span> : <span className="text-yellow-500"> · Unclassified</span>}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => { setCalendarPopup(null); handleEditRide(ride.id); }}
+                          className="flex-shrink-0 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-2 py-1 rounded transition"
+                        >Edit Ride →</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Fitness Progress */}
