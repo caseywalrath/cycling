@@ -28,8 +28,10 @@ All state via `useState` hooks. No external state library.
 ### Core State
 | State | Purpose |
 |-------|---------|
-| `levels` | Progression levels per zone (1-10 scale) |
-| `displayLevels` | Animated display values for levels |
+| `levels` | Base progression levels per zone (1-10 scale) — raw, unaffected by decay |
+| `displayLevels` | Animated display values for levels (used only during animation) |
+| `effectiveLevels` | `useMemo` — `applyDecay(levels, lastWorkedDates)`. Used for display and new workout calculations |
+| `lastWorkedDates` | `{ zoneId: 'YYYY-MM-DD' }` — when each zone was last directly trained (decay clock) |
 | `history` | Array of ride objects |
 | `currentFTP` | User's FTP setting |
 | `intervalsFTP` | eFTP from intervals.icu (with decay) |
@@ -57,6 +59,7 @@ User Input ──setState──────┘
 ZONES           // Training zone definitions (recovery → anaerobic)
 DEFAULT_LEVELS  // Initial progression levels (all 1)
 ZONE_EXPECTED_RPE // Auto-assigned RPE by zone (3-9)
+ZONE_ADJACENCY  // Zone neighbor map for trickle effect (one-hop, 20% factor each)
 STORAGE_KEY     // localStorage key: 'cycling-progression-data-v2'
 DAYS_OF_WEEK    // Day name lookup array (Sunday → Saturday)
 ```
@@ -67,6 +70,8 @@ toLocalDateStr(date)     // YYYY-MM-DD using local timezone (replaces toISOStrin
 parseDateLocal(dateStr)  // Parse "YYYY-MM-DD" as local midnight (avoids UTC off-by-one)
 formatDateWithDay(str)   // "2026-02-05 - Thursday" from YYYY-MM-DD string
 getDefaultFormData(hist) // Default form values with latest eFTP from history
+applyDecay(levels, lastWorkedDates) // Returns levels with decay applied (14-day grace,
+                         //   -0.1/week, VO2max/Anaerobic 1.5x, floor max(1.0, level*0.5))
 ```
 
 **Important**: Never use `new Date("YYYY-MM-DD")` to parse date strings — it creates midnight UTC, which in US timezones becomes the previous evening. Always use `parseDateLocal()` for ride/event date strings.
@@ -89,7 +94,7 @@ Recovery zone (`zone: 'recovery'`) is excluded from progression level updates re
 
 ## Persistence
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
-- `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`
+- `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`, `lastWorkedDates`
 
 **Load/save architecture**: One load effect (runs once on mount with `try/catch`) and one save effect (skips initial mount via `isInitialMount` ref to prevent overwriting localStorage with empty defaults before state is populated). FTP is included in the main save — no separate FTP effects.
 
@@ -108,7 +113,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `calculateTSS()` | Training Stress Score from NP and duration |
 | `calculateTrainingLoads()` | CTL, ATL, TSB calculations |
 | `calculateNewLevel()` | Progression algorithm (expected vs actual RPE) |
-| `handleLogWorkout()` | Save new or edited ride |
+| `handleLogWorkout()` | Save new or edited ride — applies trickle to adjacent zones, updates `lastWorkedDates` |
 | `handleDriveSync()` | Google Drive sync (push/pull based on exportedAt) |
 | `markDataChanged()` | Update exportedAt timestamp on any data mutation |
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |

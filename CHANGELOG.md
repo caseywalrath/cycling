@@ -1,5 +1,34 @@
 # Changelog
 
+## Session 14 - Progression Level Decay + Zone Trickle (2026-02-16)
+
+### Feature 1: Zone Decay
+- **New constant**: `ZONE_ADJACENCY` — one-hop neighbor map for each zone (20% factor)
+- **New module-level function**: `applyDecay(levels, lastWorkedDates)` — computes decay without mutating stored state
+- **New state**: `lastWorkedDates` (`{ zoneId: 'YYYY-MM-DD' }`) — tracks when each zone was last directly trained
+- **Derived state**: `effectiveLevels` (useMemo) — `applyDecay(levels, lastWorkedDates)`. This is what's shown in bars and used for new workout calculations. `levels` remains the raw/base value.
+- **Decay rules**: 14-day grace period, then −0.1/week. VO2max and Anaerobic decay 1.5× faster. Floor: `max(1.0, level × 0.5)`. Recovery zone excluded. Zones with no `lastWorkedDate` never decay.
+- **Progression bars**: Show effective (decayed) level in bar fill and number. Ghost bar (20% opacity) shows raw pre-decay level when decayed. "↓ Xd idle" badge in gray when decayed.
+- **`handleLogWorkout`**: Uses `effectiveLevels[zone]` (not raw `levels`) as starting point for new level calculations — users start from their current fitness.
+- **`lastWorkedDates` updated**: On new ride log (primary zone only). On edit when zone is assigned/changed. NOT updated by trickle.
+- **Reset Levels** (both the action bar button and the FTP-change reset in Profile modal): now also clears `lastWorkedDates`.
+- **`handleRecalculateLevels`** (FTP modal): clears `lastWorkedDates`.
+- **Persistence**: `lastWorkedDates` added to localStorage save/load, `exportData`, `importData`, `handlePasteImport`, `handleDriveSync` (local payload + pull callback).
+
+### Feature 2: Zone Trickle
+- **Trickle logic in `handleLogWorkout` (new ride path)**: When primary zone's level increases, adjacent zones each receive `primaryChange × 0.2` bonus. Cap: skip if adjacent zone already ≥ primary zone's new level. All level changes (primary + trickle) applied in a single `setLevels` call.
+- **Trickle stored in ride entry**: `entry.trickleEffects = [{ zone, amount }]` — used for post-log summary display.
+- **Post-log summary modal**: New section "Trickle bonus to adjacent zones" lists trickled zones and amounts (e.g. "Sweet Spot ~+0.10 (from Threshold workout)").
+- **Progression bars**: Trickle badges shown with `~` prefix and lighter green (`text-green-500 / bg-green-900/30`) to distinguish from direct-work badges.
+- **Trickle does NOT**: reset decay clock for adjacent zones; apply on negative/zero primary changes; push adjacent above primary zone's new level; apply in edit path.
+
+### Files Changed
+- `src/App.jsx` — all feature code
+- `ARCHITECTURE.md` — new constants, state, functions, persistence
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 1 - Initial Development (January 2026)
 
 ### Project Setup
