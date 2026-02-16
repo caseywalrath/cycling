@@ -39,6 +39,16 @@ const FTP = 235;
 const START_DATE = '2024-12-29'; // Import rides from this date onwards
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Zone adjacency map for trickle effect: a workout in one zone gives a small bonus to neighbors
+const ZONE_ADJACENCY = {
+  endurance: [{ zone: 'tempo', factor: 0.2 }],
+  tempo:     [{ zone: 'endurance', factor: 0.2 }, { zone: 'sweetspot', factor: 0.2 }],
+  sweetspot: [{ zone: 'tempo', factor: 0.2 }, { zone: 'threshold', factor: 0.2 }],
+  threshold: [{ zone: 'sweetspot', factor: 0.2 }, { zone: 'vo2max', factor: 0.2 }],
+  vo2max:    [{ zone: 'threshold', factor: 0.2 }, { zone: 'anaerobic', factor: 0.2 }],
+  anaerobic: [{ zone: 'vo2max', factor: 0.2 }],
+};
 // Return local YYYY-MM-DD string for a Date object (avoids UTC offset bugs from toISOString)
 const toLocalDateStr = (date) => {
   const y = date.getFullYear();
@@ -61,6 +71,38 @@ const formatDateWithDay = (dateStr) => {
   return `${dateStr} - ${day}`;
 };
 
+// Apply decay to progression levels based on days since last worked per zone.
+// Grace period: 14 days of inactivity, then -0.1/week (VO2max/Anaerobic decay 1.5x faster).
+// Floor: never below max(1.0, level * 0.5).
+// Recovery zone excluded. Zones with no lastWorkedDate are not decayed (first-time grace).
+const applyDecay = (levels, lastWorkedDates) => {
+  const HIGH_DECAY_ZONES = ['vo2max', 'anaerobic'];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const decayed = { ...levels };
+
+  Object.keys(levels).forEach(zone => {
+    if (zone === 'recovery') return;
+    const lastWorked = lastWorkedDates[zone];
+    if (!lastWorked) return; // No recorded date — no decay (infinite grace until first workout)
+
+    const lastDate = parseDateLocal(lastWorked);
+    const daysIdle = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+
+    if (daysIdle <= 14) return; // Grace period
+
+    const weeksOverdue = (daysIdle - 14) / 7;
+    const multiplier = HIGH_DECAY_ZONES.includes(zone) ? 1.5 : 1.0;
+    const decay = weeksOverdue * 0.1 * multiplier;
+
+    const floor = Math.max(1.0, levels[zone] * 0.5);
+    decayed[zone] = Math.max(floor, levels[zone] - decay);
+  });
+
+  return decayed;
+};
+
 export default function ProgressionTracker() {
   const [levels, setLevels] = useState(DEFAULT_LEVELS);
   const [displayLevels, setDisplayLevels] = useState(DEFAULT_LEVELS);
@@ -75,6 +117,8 @@ export default function ProgressionTracker() {
   const [lastLoggedWorkout, setLastLoggedWorkout] = useState(null);
   const [recentChanges, setRecentChanges] = useState({});
   const [animatingZone, setAnimatingZone] = useState(null);
+  // lastWorkedDates: { zoneId: 'YYYY-MM-DD' } — tracks when each zone was last directly trained
+  const [lastWorkedDates, setLastWorkedDates] = useState({});
   const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours', 'tss', or 'elevation'
   const animationRef = useRef(null);
   const isInitialMount = useRef(true);
@@ -165,6 +209,9 @@ export default function ProgressionTracker() {
   // State for editing rides
   const [editingRide, setEditingRide] = useState(null);
 
+  // Effective levels = base levels with decay applied (for display and new workout calculations)
+  const effectiveLevels = useMemo(() => applyDecay(levels, lastWorkedDates), [levels, lastWorkedDates]);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -212,6 +259,11 @@ export default function ProgressionTracker() {
           setLastSyncedAt(parsed.lastSyncedAt);
         }
 
+        // Load lastWorkedDates for decay tracking
+        if (parsed.lastWorkedDates) {
+          setLastWorkedDates(parsed.lastWorkedDates);
+        }
+
         // Calculate recent changes from history
         if (parsed.history && parsed.history.length > 0) {
           const changes = {};
@@ -247,9 +299,10 @@ export default function ProgressionTracker() {
       vo2maxEstimates,
       powerCurveData,
       exportedAt,
-      lastSyncedAt
+      lastSyncedAt,
+      lastWorkedDates,
     }));
-  }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt]);
+  }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
 
   // Load intervals.icu config from localStorage
   useEffect(() => {
@@ -1236,6 +1289,7 @@ export default function ProgressionTracker() {
     // Reset all progression levels to 1.0
     setLevels(DEFAULT_LEVELS);
     setDisplayLevels(DEFAULT_LEVELS);
+    setLastWorkedDates({});
 
     // Update FTP
     setCurrentFTP(detectedFTP);
@@ -1786,8 +1840,8 @@ export default function ProgressionTracker() {
       let change = oldWorkout.change;
 
       if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
-        // Recalculate progression for the newly assigned zone
-        previousLevel = levels[zone];
+        // Recalculate progression for the newly assigned zone using effective (decayed) level
+        previousLevel = effectiveLevels[zone];
         newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, completed);
         change = newLevel - previousLevel;
       }
@@ -1822,6 +1876,8 @@ export default function ProgressionTracker() {
           ...prev,
           [zone]: { change, date: formData.date },
         }));
+        // Update lastWorkedDates when zone is assigned/changed via edit
+        setLastWorkedDates(prev => ({ ...prev, [zone]: formData.date }));
       }
 
       // Reset form
@@ -1833,10 +1889,23 @@ export default function ProgressionTracker() {
       // Creating new workout
       // Recovery zone and outdoor rides do not affect progression levels
       const affectsProgression = zone !== null && zone !== 'recovery';
-      const currentLevel = affectsProgression ? levels[zone] : null;
+      // Use effectiveLevels (decay-adjusted) as the starting point for progression
+      const currentLevel = affectsProgression ? effectiveLevels[zone] : null;
       const newLevel = affectsProgression
         ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, completed)
         : null;
+      const primaryChange = affectsProgression ? newLevel - currentLevel : 0;
+
+      // Compute trickle effects for adjacent zones (only when primary change is positive)
+      const trickleEffects = [];
+      if (affectsProgression && primaryChange > 0 && ZONE_ADJACENCY[zone]) {
+        ZONE_ADJACENCY[zone].forEach(({ zone: adjZone, factor }) => {
+          // Don't trickle if adjacent zone is already at or above the primary zone's new level
+          if (effectiveLevels[adjZone] >= newLevel) return;
+          const trickleAmount = primaryChange * factor;
+          trickleEffects.push({ zone: adjZone, amount: trickleAmount });
+        });
+      }
 
       const entry = {
         ...formData,
@@ -1849,21 +1918,36 @@ export default function ProgressionTracker() {
         eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
         previousLevel: currentLevel,
         newLevel: newLevel,
-        change: affectsProgression ? newLevel - currentLevel : 0,
+        change: primaryChange,
         tss,
         intensityFactor,
         source: 'manual',
+        trickleEffects, // Stored for post-log summary display
       };
 
-      // Update recent changes (only for non-recovery zones)
+      // Apply all level updates (primary + trickle) in a single setLevels call
+      const updatedLevels = { ...levels };
       if (affectsProgression) {
-        setRecentChanges(prev => ({
-          ...prev,
-          [zone]: {
-            change: entry.change,
-            date: entry.date,
-          },
-        }));
+        updatedLevels[zone] = newLevel;
+      }
+      trickleEffects.forEach(({ zone: adjZone, amount }) => {
+        updatedLevels[adjZone] = Math.min(10, levels[adjZone] + amount);
+      });
+
+      // Update recent changes — primary zone + trickled zones
+      if (affectsProgression) {
+        const changesUpdate = {
+          [zone]: { change: primaryChange, date: formData.date },
+        };
+        trickleEffects.forEach(({ zone: adjZone, amount }) => {
+          changesUpdate[adjZone] = { change: amount, date: formData.date, trickle: true };
+        });
+        setRecentChanges(prev => ({ ...prev, ...changesUpdate }));
+      }
+
+      // Update lastWorkedDates for the primary zone only (trickle doesn't reset decay clock)
+      if (affectsProgression) {
+        setLastWorkedDates(prev => ({ ...prev, [zone]: formData.date }));
       }
 
       // Set last logged workout for summary modal
@@ -1871,9 +1955,7 @@ export default function ProgressionTracker() {
 
       // Update history and levels
       setHistory([entry, ...history]);
-      if (affectsProgression) {
-        setLevels({ ...levels, [zone]: newLevel });
-      }
+      setLevels(updatedLevels);
       markDataChanged();
 
       // Close modal and show summary
@@ -2005,6 +2087,7 @@ export default function ProgressionTracker() {
       event,
       userProfile,
       powerCurveData,
+      lastWorkedDates,
     }, null, 2);
     setExportedAt(now);
     const blob = new Blob([data], { type: 'application/json' });
@@ -2038,6 +2121,7 @@ export default function ProgressionTracker() {
           if (parsed.event) setEvent(parsed.event);
           if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
           if (parsed.powerCurveData) setPowerCurveData(parsed.powerCurveData);
+          if (parsed.lastWorkedDates) setLastWorkedDates(parsed.lastWorkedDates);
           markDataChanged();
 
           alert(`✓ Data imported successfully!\n${parsed.history?.length || 0} workouts restored.`);
@@ -2109,6 +2193,7 @@ export default function ProgressionTracker() {
         userProfile,
         vo2maxEstimates,
         powerCurveData,
+        lastWorkedDates,
       };
 
       // Perform sync
@@ -2131,6 +2216,7 @@ export default function ProgressionTracker() {
         if (remoteData.powerCurveData) setPowerCurveData(remoteData.powerCurveData);
         if (remoteData.exportedAt) setExportedAt(remoteData.exportedAt);
         if (remoteData.lastSyncedAt) setLastSyncedAt(remoteData.lastSyncedAt);
+        if (remoteData.lastWorkedDates) setLastWorkedDates(remoteData.lastWorkedDates);
       });
 
       setDriveSyncStatus(result);
@@ -2188,6 +2274,7 @@ export default function ProgressionTracker() {
       // Import VO2max data if available
       if (parsed.userProfile) setUserProfile(parsed.userProfile);
       if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
+      if (parsed.lastWorkedDates) setLastWorkedDates(parsed.lastWorkedDates);
       markDataChanged();
 
       setShowPasteImport(false);
@@ -2508,6 +2595,19 @@ Please analyze my current training and provide personalized insights.`;
               ) : (
                 <div className="mb-4 text-gray-400 text-sm">
                   Recovery rides do not affect progression levels.
+                </div>
+              )}
+
+              {/* Trickle effects from this workout */}
+              {lastLoggedWorkout.trickleEffects && lastLoggedWorkout.trickleEffects.length > 0 && (
+                <div className="mb-4 text-left bg-gray-700/30 rounded p-2">
+                  <div className="text-xs text-gray-400 mb-1">Trickle bonus to adjacent zones:</div>
+                  {lastLoggedWorkout.trickleEffects.map(({ zone: adjZone, amount }) => (
+                    <div key={adjZone} className="text-xs text-green-500 flex justify-between">
+                      <span>{getZoneName(adjZone)}</span>
+                      <span>~+{amount.toFixed(2)} (from {getZoneName(lastLoggedWorkout.zone)} workout)</span>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -3049,6 +3149,7 @@ Please analyze my current training and provide personalized insights.`;
                         };
                         setLevels(resetLevels);
                         setDisplayLevels(resetLevels);
+                        setLastWorkedDates({});
                       }
                     }
                     markDataChanged();
@@ -3077,32 +3178,65 @@ Please analyze my current training and provide personalized insights.`;
 
         {/* Progression Levels */}
         <div className="space-y-4">
-            {ZONES.filter((zone) => zone.id !== 'recovery').map((zone) => (
+            {ZONES.filter((zone) => zone.id !== 'recovery').map((zone) => {
+              const recentChange = recentChanges[zone.id];
+              const displayValue = animatingZone === zone.id
+                ? displayLevels[zone.id]
+                : effectiveLevels[zone.id];
+              const isDecayed = effectiveLevels[zone.id] < levels[zone.id];
+              const lastWorked = lastWorkedDates[zone.id];
+              const daysIdle = lastWorked
+                ? Math.floor((new Date().setHours(0,0,0,0) - parseDateLocal(lastWorked)) / (1000 * 60 * 60 * 24))
+                : null;
+
+              return (
               <div key={zone.id}>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="font-medium flex items-center gap-2">
                     {zone.name}
-                    {recentChanges[zone.id] && recentChanges[zone.id].change !== 0 && (
+                    {recentChange && recentChange.change !== 0 && (
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded ${
-                          recentChanges[zone.id].change > 0
-                            ? 'bg-green-900/50 text-green-400'
+                          recentChange.change > 0
+                            ? recentChange.trickle
+                              ? 'bg-green-900/30 text-green-500'
+                              : 'bg-green-900/50 text-green-400'
                             : 'bg-red-900/50 text-red-400'
                         }`}
-                        title={`Last change: ${recentChanges[zone.id].date}`}
+                        title={recentChange.trickle
+                          ? `Trickle from adjacent zone: ${recentChange.date}`
+                          : `Last change: ${recentChange.date}`}
                       >
-                        {formatChange(recentChanges[zone.id].change)}
+                        {recentChange.trickle ? '~' : ''}{formatChange(recentChange.change)}
+                      </span>
+                    )}
+                    {isDecayed && daysIdle !== null && (
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400"
+                        title={`Decayed due to ${daysIdle} days without training this zone`}
+                      >
+                        ↓ {daysIdle}d idle
                       </span>
                     )}
                   </span>
                   <span className="text-gray-400">{getZoneDescription(zone.id, currentFTP)}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 bg-gray-700 rounded-full h-5 overflow-hidden">
+                  <div className="flex-1 bg-gray-700 rounded-full h-5 overflow-hidden relative">
+                    {/* Ghost bar: shows raw (pre-decay) level when decayed */}
+                    {isDecayed && (
+                      <div
+                        className="absolute top-0 left-0 h-full rounded-full opacity-20"
+                        style={{
+                          width: `${(levels[zone.id] / 10) * 100}%`,
+                          backgroundColor: zone.color,
+                        }}
+                      />
+                    )}
                     <div
                       className={`h-full rounded-full ${animatingZone === zone.id ? '' : 'transition-all duration-500'}`}
                       style={{
-                        width: `${(displayLevels[zone.id] / 10) * 100}%`,
+                        width: `${(displayValue / 10) * 100}%`,
                         backgroundColor: zone.color,
                       }}
                     />
@@ -3111,11 +3245,12 @@ Please analyze my current training and provide personalized insights.`;
                     className={`w-10 text-right font-mono font-bold text-sm ${animatingZone === zone.id ? 'animate-pulse' : ''}`}
                     style={{ color: zone.color }}
                   >
-                    {displayLevels[zone.id].toFixed(1)}
+                    {displayValue.toFixed(1)}
                   </span>
                 </div>
               </div>
-            ))}
+              );
+            })}
 
 
             {/* Consolidated Weekly Charts */}
@@ -4242,6 +4377,7 @@ Please analyze my current training and provide personalized insights.`;
                 };
                 setLevels(resetLevels);
                 setDisplayLevels(resetLevels);
+                setLastWorkedDates({});
                 markDataChanged();
                 alert('✓ All progression levels reset to 1.0');
               }
