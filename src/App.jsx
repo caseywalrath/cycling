@@ -64,6 +64,14 @@ const parseDateLocal = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d);
 };
+const parseDuration = (input) => {
+  const str = String(input ?? '').trim();
+  const hMatch = str.match(/^(\d+)h(\d+)?$/i);
+  if (hMatch) return (parseInt(hMatch[1]) || 0) * 60 + (parseInt(hMatch[2]) || 0);
+  const colonMatch = str.match(/^(\d+):(\d+)$/);
+  if (colonMatch) return parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
+  return parseInt(str) || 0;
+};
 const formatDateWithDay = (dateStr) => {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -1826,7 +1834,8 @@ export default function ProgressionTracker() {
     const completed = isOutdoor ? true : formData.completed;
     const distance = isOutdoor ? formData.distance : 0;
     const elevation = isOutdoor ? formData.elevation : 0;
-    const tss = calculateTSS(formData.normalizedPower, formData.duration);
+    const duration = parseDuration(formData.duration);
+    const tss = calculateTSS(formData.normalizedPower, duration);
     const intensityFactor = calculateIF(formData.normalizedPower);
 
     if (editingRide) {
@@ -1854,6 +1863,7 @@ export default function ProgressionTracker() {
         completed,
         distance,
         elevation,
+        duration,
         name: formData.name,
         id: editingRide,
         eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
@@ -1914,6 +1924,7 @@ export default function ProgressionTracker() {
         completed,
         distance,
         elevation,
+        duration,
         name: formData.name,
         id: Date.now(),
         eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
@@ -2308,7 +2319,6 @@ export default function ProgressionTracker() {
 
 **Athlete Profile:**
 - FTP: ${currentFTP}W${latestEFTP ? ` | eFTP: ${latestEFTP}W` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
-- Training Status: ${status.label} — ${status.description}
 
 **Training Loads:**
 - CTL (Fitness): ${loads.ctl}
@@ -2322,9 +2332,7 @@ export default function ProgressionTracker() {
 ${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
-
-Please analyze my current training and provide personalized insights.`;
+${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}`;
 
     const copyToClipboard = (text) => {
       if (navigator.clipboard && window.isSecureContext) {
@@ -2425,7 +2433,7 @@ Please analyze my current training and provide personalized insights.`;
   const trainingStatus = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
   const insights = generateInsights(loads, history, levels);
   const currentIF = formData.normalizedPower / currentFTP;
-  const currentTSS = calculateTSS(formData.normalizedPower, formData.duration);
+  const currentTSS = calculateTSS(formData.normalizedPower, parseDuration(formData.duration));
 
   const last7Days = history.filter(w => {
     const weekAgo = new Date();
@@ -4183,12 +4191,12 @@ Please analyze my current training and provide personalized insights.`;
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Duration (min)</label>
                 <input
-                  type="number"
+                  type="text"
                   value={formData.duration || ''}
-                  onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
+                  onBlur={(e) => setFormData({ ...formData, duration: parseDuration(e.target.value) || 0 })}
+                  placeholder="e.g. 71 or 1h11"
                   className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                  min="1"
-                  max="600"
                 />
               </div>
               <div>
