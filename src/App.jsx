@@ -2308,7 +2308,6 @@ export default function ProgressionTracker() {
 
 **Athlete Profile:**
 - FTP: ${currentFTP}W${latestEFTP ? ` | eFTP: ${latestEFTP}W` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
-- Training Status: ${status.label} — ${status.description}
 
 **Training Loads:**
 - CTL (Fitness): ${loads.ctl}
@@ -2322,9 +2321,7 @@ export default function ProgressionTracker() {
 ${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}
-
-Please analyze my current training and provide personalized insights.`;
+${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}`;
 
     const copyToClipboard = (text) => {
       if (navigator.clipboard && window.isSecureContext) {
