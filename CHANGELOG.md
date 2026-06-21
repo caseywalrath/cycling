@@ -1,5 +1,24 @@
 # Changelog
 
+## Session 15 - Mobile Elevation Chart Y-axis Fix (2026-06-21)
+
+### Bug Fix: Elevation ("Altitude") Y-axis Overflow on Mobile
+- **Symptom**: On narrow mobile viewports, the Monthly Elevation chart's Y-axis
+  tick labels (e.g. `12,000ft`) ran offscreen.
+- **Root cause**: The axis `tickFormatter` produced wide labels using thousands
+  separators plus a `ft` suffix, exceeding the fixed `width={55}` axis column.
+- **Fix**: Shortened tick labels to a compact "k" form — `12,000ft` → `12k`,
+  `7,500ft` → `7.5k`, values under 1,000 shown as-is. The chart title and the
+  tooltip still show the full `ft` value, so no clarity is lost.
+- **Scope**: Only the Elevation chart needed this; Hours (`Xh`), TSS, and eFTP
+  (`XW`) axes have small 1–3 digit values and do not overflow.
+
+### Files Changed
+- `src/App.jsx` — Elevation chart Y-axis `tickFormatter`
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 14 - Progression Level Decay + Zone Trickle (2026-02-16)
 
 ### Feature 1: Zone Decay

@@ -3517,7 +3517,11 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                           <YAxis
                             stroke="#9CA3AF"
                             style={{ fontSize: '12px' }}
-                            tickFormatter={(value) => `${value.toLocaleString()}ft`}
+                            tickFormatter={(value) =>
+                              value >= 1000
+                                ? `${(value / 1000) % 1 === 0 ? value / 1000 : (value / 1000).toFixed(1)}k`
+                                : `${value}`
+                            }
                             width={55}
                           />
                           <Tooltip content={<ElevationTooltip />} />
