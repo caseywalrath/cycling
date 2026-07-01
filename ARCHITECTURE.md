@@ -79,8 +79,9 @@ applyDecay(levels, lastWorkedDates) // Returns levels with decay applied (14-day
 ## Data Import Sources
 1. **intervals.icu API** - Direct sync via athlete ID + API key
 2. **CSV paste** - Manual paste from intervals.icu export
+3. **FIT file upload (Session 16)** - "Import FIT File" button inside the Log Ride modal only. Parses `.fit` files client-side via the `fit-file-parser` npm package (`parseFitFile()`). Pre-fills Date, Duration, Normalized Power, Distance, Elevation, and Ride Type (Indoor/Outdoor, detected from GPS presence) into `formData`. Unlike the two bulk import sources below, this is not a separate unclassified ride source — it never sets Zone, Ride Name, or RPE, so the ride is saved through the normal `handleLogWorkout` path as `source: 'manual'` once the user fills in the rest and hits Save.
 
-**Important (Session 5)**: Imports do NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts.
+**Important (Session 5)**: CSV/API imports do NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts. FIT file upload (above) is exempt from this because it never attempts zone classification at all.
 
 ## Ride Source Model
 Every ride entry has a `source` field:
@@ -119,6 +120,8 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
+| `parseFitFile(arrayBuffer)` | Parses a `.fit` file into Log Ride form field values (date, duration, NP, distance, elevation, ride type) |
+| `calculateNormalizedPower(powerSamples)` | NP from a per-second power stream — 30s rolling average, 4th-power mean, 4th root |
 | `calculateMonthlyElevation()` | Monthly elevation totals (11-month rolling window, rides with elevation > 0) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
 | `getCalendarDays()` | Generate month grid day objects (Monday-start, 35 or 42 cells) |

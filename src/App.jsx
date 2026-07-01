@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 import GoogleDriveSync from './google-drive-sync.js';
+import FitParser from 'fit-file-parser';
 
 const ZONES = [
   { id: 'recovery', name: 'Recovery', color: '#6B7280', description: 'Z1: <130W' },
@@ -77,6 +78,88 @@ const formatDateWithDay = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   const day = DAYS_OF_WEEK[new Date(y, m - 1, d).getDay()];
   return `${dateStr} - ${day}`;
+};
+
+// Normalized Power: 30-second rolling average of the power stream, each rolling
+// average raised to the 4th power, averaged, then 4th-rooted. Assumes ~1Hz recording.
+// Returns null if there aren't enough samples for a single 30s window.
+const calculateNormalizedPower = (powerSamples) => {
+  if (!powerSamples || powerSamples.length < 30) return null;
+  let windowSum = 0;
+  let rollingCount = 0;
+  let fourthPowerSum = 0;
+  for (let i = 0; i < powerSamples.length; i++) {
+    windowSum += powerSamples[i];
+    if (i >= 30) windowSum -= powerSamples[i - 30];
+    if (i >= 29) {
+      fourthPowerSum += (windowSum / 30) ** 4;
+      rollingCount++;
+    }
+  }
+  return Math.round((fourthPowerSum / rollingCount) ** 0.25);
+};
+
+// Parse a .FIT file (ArrayBuffer) into Log Ride form field values.
+// Only pre-fills the fields a FIT file can actually tell us (date, duration,
+// power, distance, elevation, indoor/outdoor) — Zone, Ride Name, and RPE are
+// left for the user, same as the "Ride Source Model" rule for CSV/API imports.
+const parseFitFile = (arrayBuffer) => {
+  // Check the FIT header's ".FIT" signature (bytes 8-11) before handing the file to
+  // the parser. Non-FIT files (wrong file picked, renamed, etc.) can make the parser
+  // loop forever trying to recover a header it can never find — this fails fast instead.
+  const bytes = new Uint8Array(arrayBuffer);
+  const signature = bytes.length >= 12 ? String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) : '';
+  if (signature !== '.FIT') {
+    return Promise.reject(new Error("This doesn't look like a valid FIT file. Please choose a .fit file exported from your bike computer or training app."));
+  }
+
+  const parser = new FitParser({ force: true });
+  return new Promise((resolve, reject) => {
+    parser.parse(arrayBuffer, (error, data) => {
+      if (error) {
+        reject(new Error('Could not read this FIT file. It may be corrupted or in an unsupported format.'));
+        return;
+      }
+      const session = data.sessions && data.sessions[0];
+      if (!session) {
+        reject(new Error('No ride data found in this FIT file.'));
+        return;
+      }
+      const records = data.records || [];
+      const powerSamples = records.map(r => r.power).filter(p => p != null);
+
+      const hasGPS = records.some(r => r.position_lat != null || r.position_long != null);
+
+      let elevation = 0;
+      if (session.total_ascent != null) {
+        elevation = Math.round(session.total_ascent * 3.28084); // meters to feet
+      } else {
+        const altitudes = records
+          .map(r => r.altitude != null ? r.altitude : r.enhanced_altitude)
+          .filter(a => a != null);
+        let ascentMeters = 0;
+        for (let i = 1; i < altitudes.length; i++) {
+          const delta = altitudes[i] - altitudes[i - 1];
+          if (delta > 0) ascentMeters += delta;
+        }
+        elevation = Math.round(ascentMeters * 3.28084); // meters to feet
+      }
+
+      const normalizedPower = session.normalized_power
+        || calculateNormalizedPower(powerSamples)
+        || session.avg_power
+        || 0;
+
+      resolve({
+        date: toLocalDateStr(session.start_time),
+        duration: Math.round(session.total_timer_time / 60),
+        distance: Math.round((session.total_distance || 0) / 1000 * 0.621371 * 10) / 10, // meters to miles
+        elevation,
+        rideType: hasGPS ? 'Outdoor' : 'Indoor',
+        normalizedPower: Math.round(normalizedPower),
+      });
+    });
+  });
 };
 
 // Apply decay to progression levels based on days since last worked per zone.
@@ -2182,6 +2265,25 @@ export default function ProgressionTracker() {
     event.target.value = '';
   };
 
+  // Pre-fills Log Ride form fields from a .FIT file. Does not touch Zone, Ride
+  // Name, or RPE — the user still classifies and confirms those before saving.
+  const handleFitFileImport = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const parsed = await parseFitFile(e.target.result);
+        setFormData(prev => ({ ...prev, ...parsed }));
+      } catch (err) {
+        alert(err.message || 'Could not read this FIT file.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    // Reset file input so the same file can be re-imported
+    event.target.value = '';
+  };
+
   const handleDriveSync = async () => {
     setIsDriveSyncing(true);
     setDriveSyncStatus(null);
@@ -4105,6 +4207,14 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                   ×
                 </button>
               </div>
+
+            {/* FIT file import — pre-fills Date/Duration/NP/Distance/Elevation/Ride Type below; Zone/Name/RPE stay manual */}
+            <div className="mb-4">
+              <label className="inline-block bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-3 py-2 rounded cursor-pointer transition">
+                📁 Import FIT File
+                <input type="file" accept=".fit,.FIT" onChange={handleFitFileImport} className="hidden" />
+              </label>
+            </div>
 
             {/* Row 1: Ride Name | Date */}
             <div className="grid grid-cols-2 gap-4 mb-4">

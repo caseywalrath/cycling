@@ -1,5 +1,24 @@
 # Changelog
 
+## Session 16 - FIT File Import in Log Ride Modal (2026-07-01)
+
+### Feature: Import FIT File
+- New "📁 Import FIT File" button at the top of the Log Ride modal (both logging a new ride and editing an existing one).
+- Parses `.fit` files (Garmin/Wahoo/Zwift/TrainerRoad exports) entirely client-side using the `fit-file-parser` npm package (chosen over a hand-rolled binary parser to avoid re-implementing the FIT binary protocol's edge cases).
+- Pre-fills into `formData`: Date, Duration, Normalized Power, Distance, Elevation, and Ride Type (Indoor/Outdoor, detected from GPS position data in the file's records).
+- **Does NOT set Zone, Ride Name, or RPE** — the user still picks those and hits Save, exactly like manual entry today. This keeps the ride tagged `source: 'manual'` with no changes needed to `handleLogWorkout` or the Ride Source Model, and preserves the Session 5 rule that zone classification is always user-driven (NP-based auto-classification was unreliable for interval workouts).
+- **Normalized Power**: uses the device's own `normalized_power` field if present in the FIT file; otherwise computes it client-side from the per-second power stream (30s rolling average, 4th-power mean, 4th root — `calculateNormalizedPower()`); falls back to average power if no per-second stream exists.
+- **Elevation**: uses the FIT file's `total_ascent` if present; otherwise sums positive altitude deltas across records.
+- **Bug caught during testing**: feeding the parser a non-FIT file (wrong file picked by accident) caused it to loop indefinitely trying to recover a header, hanging the tab. Fixed by validating the FIT header's `.FIT` signature bytes before handing the file to the parser at all, so invalid files fail immediately with a clear alert instead of hanging.
+
+### Files Changed
+- `package.json` — added `fit-file-parser` dependency
+- `src/App.jsx` — `calculateNormalizedPower()`, `parseFitFile()`, `handleFitFileImport()`, Log Ride modal button
+- `ARCHITECTURE.md` — Data Import Sources, Key Functions
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 15 - Mobile Elevation Chart Y-axis Fix (2026-06-21)
 
 ### Bug Fix: Elevation ("Altitude") Y-axis Overflow on Mobile
