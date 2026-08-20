@@ -2378,6 +2378,27 @@ export default function ProgressionTracker() {
     const weeklyHoursData = calculateWeeklyHours(history);
     const last4Weeks = weeklyHoursData.slice(-4);
 
+    // Interval progressions: last 3 sessions per category, oldest -> newest
+    const shortDate = (dateStr) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    };
+    const intervalCategories = ZONES.filter(z => z.id !== 'recovery');
+    const intervalLines = intervalCategories
+      .map(z => {
+        const sessions = history
+          .filter(w => w.intervalData?.category === z.id)
+          .slice()
+          .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date))
+          .slice(-3);
+        if (sessions.length === 0) return null;
+        return `- ${z.name}: ${sessions.map(w => `${w.intervalData.label} (${shortDate(w.date)})`).join(' → ')}`;
+      })
+      .filter(Boolean);
+    const intervalProgressionsSection = intervalLines.length > 0
+      ? `\n\n## Interval Progressions\n${intervalLines.join('\n')}`
+      : '';
+
     const analysisText = `## Training Status - ${formatDateWithDay(toLocalDateStr(new Date()))}
 
 **Athlete Profile:**
@@ -2395,7 +2416,7 @@ export default function ProgressionTracker() {
 ${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}`;
+${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}${intervalProgressionsSection}`;
 
     const copyToClipboard = (text) => {
       if (navigator.clipboard && window.isSecureContext) {
