@@ -157,9 +157,212 @@ const parseFitFile = (arrayBuffer) => {
         elevation,
         rideType: hasGPS ? 'Outdoor' : 'Indoor',
         normalizedPower: Math.round(normalizedPower),
+        stream: downsampleRecords(records),
+        laps: data.laps || [],
       });
     });
   });
+};
+
+// Downsample a FIT records array into fixed-width time bins for the Workout Detail
+// chart. Each bin holds the average of the non-null power/HR samples inside it.
+// Returns null when there's no usable power data (nothing to chart or detect).
+const downsampleRecords = (records, binSeconds = 10) => {
+  if (!records || records.length === 0) return null;
+  const withPower = records.some(r => r.power != null);
+  if (!withPower) return null;
+
+  const t0 = records[0].timestamp ? new Date(records[0].timestamp).getTime() : null;
+  if (t0 == null) return null;
+
+  const powerSums = [];
+  const powerCounts = [];
+  const hrSums = [];
+  const hrCounts = [];
+
+  records.forEach(r => {
+    if (!r.timestamp) return;
+    const t = new Date(r.timestamp).getTime();
+    const bin = Math.floor((t - t0) / 1000 / binSeconds);
+    if (bin < 0) return;
+    if (r.power != null) {
+      powerSums[bin] = (powerSums[bin] || 0) + r.power;
+      powerCounts[bin] = (powerCounts[bin] || 0) + 1;
+    }
+    if (r.heart_rate != null) {
+      hrSums[bin] = (hrSums[bin] || 0) + r.heart_rate;
+      hrCounts[bin] = (hrCounts[bin] || 0) + 1;
+    }
+  });
+
+  const binCount = powerSums.length;
+  const power = [];
+  const hr = [];
+  for (let i = 0; i < binCount; i++) {
+    power.push(powerCounts[i] ? Math.round(powerSums[i] / powerCounts[i]) : null);
+    hr.push(hrCounts[i] ? Math.round(hrSums[i] / hrCounts[i]) : null);
+  }
+
+  return { binSeconds, power, hr };
+};
+
+// Interval detection constants (indoor ERG power is near-square-wave, so a simple
+// threshold + run-length approach works well). See INTERVAL_TRACKING_PLAN.md §4.
+const WORK_THRESHOLD = 0.85; // fraction of FTP that counts as "work"
+const MIN_WORK_SECONDS = 90; // shorter runs are discarded (micro-intervals are a known v1 limitation)
+const GAP_MERGE_BINS = 2; // merge work runs separated by a gap this small (handles power dropouts)
+
+const ZONE_POWER_RATIO_RANGES = [
+  { max: 0.76, zone: 'endurance' },
+  { max: 0.88, zone: 'tempo' },
+  { max: 0.95, zone: 'sweetspot' },
+  { max: 1.06, zone: 'threshold' },
+  { max: 1.21, zone: 'vo2max' },
+  { max: Infinity, zone: 'anaerobic' },
+];
+const categoryForRatio = (ratio) => ZONE_POWER_RATIO_RANGES.find(r => ratio < r.max).zone;
+
+// Build a compact label like "4x6 @ 280W" (single set) or "3x8 @ 250W + 4x1 @ 320W" (multiple).
+const buildIntervalLabel = (sets) => {
+  return sets.map(s => {
+    const minutes = Math.round((s.workSeconds / 60) * 2) / 2; // nearest 0.5 min
+    const minStr = Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1);
+    return `${s.reps}x${minStr} @ ${s.avgWatts}W`;
+  }).join(' + ');
+};
+
+// Detect interval structure from a downsampled power/HR stream. Returns
+// { segments, sets, category, label } or null if no work intervals were found
+// (e.g. a steady endurance ride — this is a normal, expected outcome).
+const detectIntervals = (stream, ftp, laps = null) => {
+  if (!stream || !stream.power || !ftp) return null;
+  const { power, hr, binSeconds } = stream;
+  const n = power.length;
+  if (n === 0) return null;
+
+  // 1. Smooth power with a 3-bin (30s @ 10s bins) centered rolling average, skipping nulls.
+  const smoothed = power.map((_, i) => {
+    const lo = Math.max(0, i - 1);
+    const hi = Math.min(n - 1, i + 1);
+    const vals = power.slice(lo, hi + 1).filter(v => v != null);
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  });
+
+  // 2/3. Find contiguous "work" runs (smoothed power >= threshold), merging small gaps.
+  const isWork = smoothed.map(v => v != null && v >= WORK_THRESHOLD * ftp);
+  const rawRuns = [];
+  let runStart = null;
+  for (let i = 0; i < n; i++) {
+    if (isWork[i]) {
+      if (runStart == null) runStart = i;
+    } else if (runStart != null) {
+      rawRuns.push([runStart, i - 1]);
+      runStart = null;
+    }
+  }
+  if (runStart != null) rawRuns.push([runStart, n - 1]);
+
+  const mergedRuns = [];
+  rawRuns.forEach(([s, e]) => {
+    const prev = mergedRuns[mergedRuns.length - 1];
+    if (prev && s - prev[1] - 1 <= GAP_MERGE_BINS) {
+      prev[1] = e;
+    } else {
+      mergedRuns.push([s, e]);
+    }
+  });
+
+  const minBins = Math.ceil(MIN_WORK_SECONDS / binSeconds);
+  const runs = mergedRuns.filter(([s, e]) => (e - s + 1) >= minBins);
+  if (runs.length === 0) return null;
+
+  const avgOf = (arr, s, e) => {
+    const vals = arr.slice(s, e + 1).filter(v => v != null);
+    if (vals.length === 0) return null;
+    return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  };
+
+  let segments = runs.map(([s, e]) => ({
+    startSec: s * binSeconds,
+    endSec: (e + 1) * binSeconds,
+    avgWatts: avgOf(power, s, e),
+    avgHR: avgOf(hr, s, e),
+  }));
+
+  // 5. Lap hint: if there are enough laps with power data, and lap-based segmentation
+  // yields more (all qualifying) segments than step detection, prefer it.
+  if (laps && laps.length >= 3) {
+    const lapWork = laps.filter(l => l.avg_power != null && l.avg_power >= WORK_THRESHOLD * ftp
+      && (l.total_timer_time || 0) >= MIN_WORK_SECONDS);
+    if (lapWork.length > segments.length) {
+      let cursor = 0;
+      const lapSegments = [];
+      laps.forEach(l => {
+        const dur = l.total_timer_time || 0;
+        const isLapWork = l.avg_power != null && l.avg_power >= WORK_THRESHOLD * ftp && dur >= MIN_WORK_SECONDS;
+        if (isLapWork) {
+          lapSegments.push({
+            startSec: Math.round(cursor),
+            endSec: Math.round(cursor + dur),
+            avgWatts: Math.round(l.avg_power),
+            avgHR: l.avg_heart_rate != null ? Math.round(l.avg_heart_rate) : null,
+          });
+        }
+        cursor += dur;
+      });
+      if (lapSegments.length > 0) segments = lapSegments;
+    }
+  }
+
+  // 6. Group segments into sets: same set if duration within ±15% and avgWatts within ±5%.
+  const sets = [];
+  segments.forEach((seg, idx) => {
+    const duration = seg.endSec - seg.startSec;
+    const prevGap = idx > 0 ? seg.startSec - segments[idx - 1].endSec : null;
+    let set = sets.find(s =>
+      Math.abs(s._avgDuration - duration) <= s._avgDuration * 0.15 &&
+      Math.abs(s.avgWatts - seg.avgWatts) <= s.avgWatts * 0.05
+    );
+    if (!set) {
+      set = { reps: 0, _durations: [], _watts: [], _hrs: [], _gaps: [], _avgDuration: duration, avgWatts: seg.avgWatts };
+      sets.push(set);
+    }
+    set.reps++;
+    set._durations.push(duration);
+    set._watts.push(seg.avgWatts);
+    if (seg.avgHR != null) set._hrs.push(seg.avgHR);
+    if (prevGap != null) set._gaps.push(prevGap);
+    set._avgDuration = set._durations.reduce((a, b) => a + b, 0) / set._durations.length;
+    set.avgWatts = Math.round(set._watts.reduce((a, b) => a + b, 0) / set._watts.length);
+  });
+
+  const median = (arr) => {
+    if (arr.length === 0) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+  const roundTo = (val, nearest) => val == null ? null : Math.round(val / nearest) * nearest;
+
+  const finalSets = sets.map(s => ({
+    reps: s.reps,
+    workSeconds: roundTo(median(s._durations), 30),
+    avgWatts: s.avgWatts,
+    avgHR: s._hrs.length ? Math.round(s._hrs.reduce((a, b) => a + b, 0) / s._hrs.length) : null,
+    restSeconds: s.reps > 1 ? roundTo(median(s._gaps), 15) : null,
+  }));
+
+  // 7. Category from the dominant set (most total work time).
+  const dominant = finalSets.reduce((best, s) =>
+    (s.reps * s.workSeconds) > (best.reps * best.workSeconds) ? s : best, finalSets[0]);
+  const category = categoryForRatio(dominant.avgWatts / ftp);
+
+  return {
+    segments,
+    sets: finalSets,
+    category,
+    label: buildIntervalLabel(finalSets),
+  };
 };
 
 // Apply decay to progression levels based on days since last worked per zone.
@@ -301,6 +504,13 @@ export default function ProgressionTracker() {
   // State for editing rides
   const [editingRide, setEditingRide] = useState(null);
 
+  // Interval tracking state (see INTERVAL_TRACKING_PLAN.md)
+  const [pendingFitDetail, setPendingFitDetail] = useState(null); // { stream, detection } from FIT import, awaiting save
+  const [showWorkoutDetail, setShowWorkoutDetail] = useState(null); // ride id or null
+  const [showProgressionModal, setShowProgressionModal] = useState(false);
+  const [progressionCategory, setProgressionCategory] = useState('sweetspot');
+  const [progressionMetric, setProgressionMetric] = useState('minutes'); // 'minutes' | 'watts'
+
   // Effective levels = base levels with decay applied (for display and new workout calculations)
   const effectiveLevels = useMemo(() => applyDecay(levels, lastWorkedDates), [levels, lastWorkedDates]);
 
@@ -381,19 +591,24 @@ export default function ProgressionTracker() {
       isInitialMount.current = false;
       return;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      levels,
-      history,
-      ftp: currentFTP,
-      intervalsFTP,
-      event,
-      userProfile,
-      vo2maxEstimates,
-      powerCurveData,
-      exportedAt,
-      lastSyncedAt,
-      lastWorkedDates,
-    }));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        levels,
+        history,
+        ftp: currentFTP,
+        intervalsFTP,
+        event,
+        userProfile,
+        vo2maxEstimates,
+        powerCurveData,
+        exportedAt,
+        lastSyncedAt,
+        lastWorkedDates,
+      }));
+    } catch (e) {
+      console.error('Failed to save data to localStorage:', e);
+      alert('⚠️ Could not save your data — browser storage may be full. Please export a backup (Export Data) soon so nothing is lost.');
+    }
   }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
 
   // Load intervals.icu config from localStorage
@@ -1645,11 +1860,19 @@ export default function ProgressionTracker() {
         tss,
         intensityFactor,
         source: 'manual', // Editing always marks as manually classified
+        ...(pendingFitDetail ? {
+          stream: pendingFitDetail.stream,
+          intervalData: pendingFitDetail.detection
+            ? { ...pendingFitDetail.detection, source: 'auto',
+                category: (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
+            : null,
+        } : {}),
       };
 
       // Update history with edited entry
       setHistory(history.map(w => w.id === editingRide ? entry : w));
       markDataChanged();
+      setPendingFitDetail(null);
 
       // Update progression levels if zone was assigned/changed
       if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
@@ -1707,6 +1930,13 @@ export default function ProgressionTracker() {
         intensityFactor,
         source: 'manual',
         trickleEffects, // Stored for post-log summary display
+        ...(pendingFitDetail ? {
+          stream: pendingFitDetail.stream,
+          intervalData: pendingFitDetail.detection
+            ? { ...pendingFitDetail.detection, source: 'auto',
+                category: (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
+            : null,
+        } : {}),
       };
 
       // Apply all level updates (primary + trickle) in a single setLevels call
@@ -1741,6 +1971,7 @@ export default function ProgressionTracker() {
       setHistory([entry, ...history]);
       setLevels(updatedLevels);
       markDataChanged();
+      setPendingFitDetail(null);
 
       // Close modal and show summary
       setShowLogRideModal(false);
@@ -1854,6 +2085,14 @@ export default function ProgressionTracker() {
     setEditingRide(null);
     setFormData(getDefaultFormData(history));
     setShowLogRideModal(false);
+    setPendingFitDetail(null);
+  };
+
+  // Closes the Log Ride modal (new-workout path) and discards any pending FIT
+  // stream/detection so it can't leak into a later, unrelated manual save.
+  const closeLogRideModal = () => {
+    setShowLogRideModal(false);
+    setPendingFitDetail(null);
   };
 
   const exportData = () => {
@@ -1956,6 +2195,9 @@ export default function ProgressionTracker() {
 
   // Pre-fills Log Ride form fields from a .FIT file. Does not touch Zone, Ride
   // Name, or RPE — the user still classifies and confirms those before saving.
+  // Also detects interval structure (power/HR streams + set/rep detection) and, if the
+  // FIT file's date matches an already-logged ride, offers to backfill that ride instead
+  // of creating a duplicate.
   const handleFitFileImport = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -1963,7 +2205,37 @@ export default function ProgressionTracker() {
     reader.onload = async (e) => {
       try {
         const parsed = await parseFitFile(e.target.result);
-        setFormData(prev => ({ ...prev, ...parsed }));
+        const existing = history.find(w => w.date === parsed.date);
+
+        if (existing) {
+          const existingName = existing.name || existing.notes || 'Workout';
+          const attach = window.confirm(
+            `A ride on ${parsed.date} already exists (${existingName}, ${existing.duration}min). ` +
+            `Attach interval data to it instead of creating a new ride?`
+          );
+          if (attach) {
+            const detection = currentFTP ? detectIntervals(parsed.stream, currentFTP, parsed.laps) : null;
+            setHistory(prev => prev.map(w => w.id === existing.id ? {
+              ...w,
+              stream: parsed.stream,
+              intervalData: detection ? { ...detection, source: 'auto' } : null,
+            } : w));
+            markDataChanged();
+            setShowLogRideModal(false);
+            setPendingFitDetail(null);
+            setShowWorkoutDetail(existing.id);
+            alert(detection
+              ? `✓ Interval data attached: ${detection.label}`
+              : `✓ Power/HR data attached (no structured intervals detected).`);
+            event.target.value = '';
+            return;
+          }
+          // Cancel → fall through to normal new-ride flow below
+        }
+
+        const detection = currentFTP ? detectIntervals(parsed.stream, currentFTP, parsed.laps) : null;
+        setFormData(prev => ({ ...prev, ...parsed, ...(detection ? { zone: detection.category } : {}) }));
+        setPendingFitDetail({ stream: parsed.stream, detection });
       } catch (err) {
         alert(err.message || 'Could not read this FIT file.');
       }
@@ -3844,12 +4116,12 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
 
         {/* Log Ride Modal */}
         {showLogRideModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => editingRide ? handleCancelEdit() : setShowLogRideModal(false)}>
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => editingRide ? handleCancelEdit() : closeLogRideModal()}>
             <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold">{editingRide ? 'Edit Workout' : 'Log Workout'}</h2>
                 <button
-                  onClick={() => editingRide ? handleCancelEdit() : setShowLogRideModal(false)}
+                  onClick={() => editingRide ? handleCancelEdit() : closeLogRideModal()}
                   className="text-gray-400 hover:text-white text-xl"
                 >
                   ×
@@ -3862,6 +4134,32 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                 📁 Import FIT File
                 <input type="file" accept=".fit,.FIT" onChange={handleFitFileImport} className="hidden" />
               </label>
+              {pendingFitDetail && (
+                <div className="mt-2 bg-gray-700 rounded p-2 flex items-start justify-between gap-2">
+                  <div className="text-sm">
+                    {pendingFitDetail.detection ? (
+                      <>
+                        <div className="text-yellow-400 font-mono">⚡ Detected: {pendingFitDetail.detection.label}</div>
+                        <div className="text-gray-400 text-xs mt-0.5">
+                          {getZoneName(pendingFitDetail.detection.category)} interval — will be saved with this ride.
+                          Adjust the Zone above if the category looks wrong.
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-gray-400 text-xs">
+                        No structured intervals detected — power/HR chart will still be saved.
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setPendingFitDetail(null)}
+                    className="text-gray-400 hover:text-white text-sm flex-shrink-0"
+                    title="Discard interval data"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Row 1: Ride Name | Date */}
