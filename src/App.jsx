@@ -508,7 +508,7 @@ export default function ProgressionTracker() {
   const [pendingFitDetail, setPendingFitDetail] = useState(null); // { stream, detection } from FIT import, awaiting save
   const [showWorkoutDetail, setShowWorkoutDetail] = useState(null); // ride id or null
   const [showProgressionModal, setShowProgressionModal] = useState(false);
-  const [progressionCategory, setProgressionCategory] = useState('sweetspot');
+  const [progressionCategory, setProgressionCategory] = useState(null); // null = no zone selected (default view)
   const [progressionMetric, setProgressionMetric] = useState('minutes'); // 'minutes' | 'watts'
 
   // Effective levels = base levels with decay applied (for display and new workout calculations)
@@ -4137,7 +4137,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
             {/* Workout Progression Button */}
             <div className="pt-2">
               <button
-                onClick={() => setShowProgressionModal(true)}
+                onClick={() => { setProgressionCategory(null); setShowProgressionModal(true); }}
                 className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-gray-500"
               >
                 📈 Workout Progression
@@ -4679,6 +4679,13 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
             .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date));
           const sessionsDesc = sessionsAsc.slice().reverse();
 
+          // Default view (no zone selected yet): most recent indoor workouts, any zone.
+          const recentIndoor = history
+            .filter(w => w.rideType !== 'Outdoor')
+            .slice()
+            .sort((a, b) => parseDateLocal(b.date) - parseDateLocal(a.date))
+            .slice(0, 5);
+
           const dominantSet = (sets) => sets.reduce((best, s) =>
             (s.reps * s.workSeconds) > (best.reps * best.workSeconds) ? s : best, sets[0]);
 
@@ -4749,7 +4756,43 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                   })}
                 </div>
 
-                {sessionsAsc.length === 0 ? (
+                {progressionCategory === null ? (
+                  recentIndoor.length === 0 ? (
+                    <p className="text-gray-400 text-sm">
+                      No indoor workouts logged yet. Log or import one to start tracking interval progressions.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-gray-400 text-xs mb-2">Select a zone above to see its progression trend. Most recent indoor workouts:</p>
+                      <div className="space-y-2">
+                        {recentIndoor.map(w => {
+                          const hasDetail = w.stream || w.intervalData;
+                          const zoneColor = ZONES.find(z => z.id === w.zone)?.color;
+                          return (
+                            <div
+                              key={w.id}
+                              onClick={hasDetail ? () => { setShowProgressionModal(false); setShowWorkoutDetail(w.id); } : undefined}
+                              className={`bg-gray-700 rounded p-3 text-sm transition ${hasDetail ? 'hover:bg-gray-600 cursor-pointer' : ''}`}
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="font-medium">{w.name || w.notes || 'Workout'}</span>
+                                <span className="text-gray-400 text-xs">{formatDateWithDay(w.date)}</span>
+                              </div>
+                              <div className="flex justify-between items-center mt-1">
+                                <span className="text-xs" style={zoneColor ? { color: zoneColor } : {}}>
+                                  {getZoneName(w.zone)}
+                                </span>
+                                {w.intervalData?.label && (
+                                  <span className="font-mono text-yellow-400 text-xs">{w.intervalData.label}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )
+                ) : sessionsAsc.length === 0 ? (
                   <p className="text-gray-400 text-sm">
                     No tracked {activeZone?.name} workouts yet. Import a FIT file from the Log Ride screen to start tracking interval progressions.
                   </p>
