@@ -3,7 +3,7 @@
 ## File Structure
 ```
 src/
-  App.jsx              # Single-file application (~3700 lines)
+  App.jsx              # Single-file application (~4900 lines)
   main.jsx             # React entry point
   index.css            # Tailwind directives
   google-drive-sync.js # Google Drive OAuth & sync module
@@ -20,7 +20,7 @@ Single component (`ProgressionTracker`) with modal-based navigation. No componen
 
 ### UI Sections (rendered conditionally)
 - **Main View**: Dashboard with metrics cards, progression levels, charts
-- **Modals**: Log Ride, History, Settings, Profile, Event, CSV Import, intervals.icu Sync
+- **Modals**: Log Ride, History, Settings, Profile, Event, CSV Import, intervals.icu Sync, Workout Detail, Workout Progression
 
 ## State Management
 All state via `useState` hooks. No external state library.
@@ -44,6 +44,15 @@ Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModa
 |-------|---------|
 | `formData` | Log ride form fields (eFTP shown in both log and edit, defaults to latest from history) |
 | `editingRide` | ID of ride being edited (null = new ride) |
+| `pendingFitDetail` | `{ stream, detection }` from a FIT import, awaiting Save — spread onto the new/edited ride entry in `handleLogWorkout()`, cleared on every Log Ride modal exit path |
+
+### Interval Tracking State (Session 18)
+| State | Purpose |
+|-------|---------|
+| `showWorkoutDetail` | Ride ID for the Workout Detail modal, or `null` |
+| `showProgressionModal` | Workout Progression modal visibility |
+| `progressionCategory` | Active zone tab in the Progression modal (defaults `'sweetspot'`) |
+| `progressionMetric` | Trend chart metric: `'minutes'` or `'watts'` |
 
 ## Data Flow
 ```
@@ -72,6 +81,9 @@ formatDateWithDay(str)   // "2026-02-05 - Thursday" from YYYY-MM-DD string
 getDefaultFormData(hist) // Default form values with latest eFTP from history
 applyDecay(levels, lastWorkedDates) // Returns levels with decay applied (14-day grace,
                          //   -0.1/week, VO2max/Anaerobic 1.5x, floor max(1.0, level*0.5))
+downsampleRecords(records, binSeconds=10) // FIT records -> { binSeconds, power[], hr[] }, null if no power data
+detectIntervals(stream, ftp, laps)  // Step-detection on smoothed power -> { segments, sets, category, label } or null
+buildIntervalLabel(sets)            // Sets -> display string, e.g. "4x6 @ 280W"
 ```
 
 **Important**: Never use `new Date("YYYY-MM-DD")` to parse date strings — it creates midnight UTC, which in US timezones becomes the previous evening. Always use `parseDateLocal()` for ride/event date strings.
@@ -83,6 +95,8 @@ applyDecay(levels, lastWorkedDates) // Returns levels with decay applied (14-day
 
 **Important (Session 5)**: CSV/API imports do NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts. FIT file upload (above) is exempt from this because it never attempts zone classification at all.
 
+**Interval detection exception (Session 18)**: FIT import now also pre-selects the Zone field to the category `detectIntervals()` derives from the ride's actual interval structure (power segments vs. FTP). This is a narrow, explicitly agreed exception to the Session 5 rule above — the user still confirms/adjusts the Zone before Save, and it's structural detection, not the rejected NP-based guessing.
+
 ## Ride Source Model
 Every ride entry has a `source` field:
 - `'imported'` — From CSV or intervals.icu API. Has `zone: null`, no progression data.
@@ -93,11 +107,27 @@ When editing an imported ride, the handler detects the zone change (`wasUnclassi
 
 Recovery zone (`zone: 'recovery'`) is excluded from progression level updates regardless of source.
 
+## Interval Data (Session 18)
+Two optional fields on ride history entries, both `undefined` on rides that predate this feature — every consumer null-checks:
+```javascript
+stream: { binSeconds: 10, power: [145, 150, ...], hr: [98, 101, ...] } // downsampled per-ride stream, ~8-12KB/ride
+intervalData: {
+  source: 'auto' | 'manual',
+  category: 'sweetspot',  // one of the ZONES ids
+  label: '4x6 @ 280W',
+  sets: [{ reps, workSeconds, avgWatts, avgHR, restSeconds }],
+  segments: [{ startSec, endSec, avgWatts, avgHR }], // every detected work segment, chart shading source
+}
+```
+Both fields live inside the same `history` entries and round-trip through the existing localStorage/Export/Import/Google Drive sync paths with no separate storage — no IndexedDB, no new storage key. `detectIntervals()` produces `intervalData` from a FIT-derived `stream`; a ride can have a `stream` with `intervalData: null` (steady ride, no intervals found).
+
+**FIT backfill**: importing a FIT file whose date matches an already-logged ride offers to attach `stream`/`intervalData` to that ride in place, instead of creating a duplicate. TSS, zone, and progression fields on the existing ride are untouched by a backfill.
+
 ## Persistence
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 - `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`, `lastWorkedDates`
 
-**Load/save architecture**: One load effect (runs once on mount with `try/catch`) and one save effect (skips initial mount via `isInitialMount` ref to prevent overwriting localStorage with empty defaults before state is populated). FTP is included in the main save — no separate FTP effects.
+**Load/save architecture**: One load effect (runs once on mount with `try/catch`) and one save effect (skips initial mount via `isInitialMount` ref to prevent overwriting localStorage with empty defaults before state is populated; the `setItem` call itself is wrapped in `try/catch` since Session 18 — a quota error alerts the user to export a backup instead of silently failing). FTP is included in the main save — no separate FTP effects.
 
 ## Google Drive Sync
 - **Module**: `src/google-drive-sync.js` — standalone OAuth + Drive API logic using Google Identity Services
@@ -125,7 +155,10 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `calculateMonthlyElevation()` | Monthly elevation totals (11-month rolling window, rides with elevation > 0) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
 | `getCalendarDays()` | Generate month grid day objects (Monday-start, 35 or 42 cells) |
-| `copyForAnalysis()` | Clipboard export: FTP, W/kg, eFTP, training status, loads (7/14/28d TSS), weekly hours (4wk), recent workouts with day-of-week and ride type |
+| `copyForAnalysis()` | Clipboard export: FTP, W/kg, eFTP, training status, loads (7/14/28d TSS), weekly hours (4wk), recent workouts with day-of-week and ride type, interval progressions (last 3 sessions/category, if any) |
+| `downsampleRecords(records, binSeconds)` | FIT records → 10s-binned `{ binSeconds, power[], hr[] }` for the Workout Detail chart |
+| `detectIntervals(stream, ftp, laps)` | Step-detection (85% FTP threshold, 90s min work, small-gap merging) with a lap-based fallback; groups segments into sets and categorizes by dominant set's %FTP |
+| `buildIntervalLabel(sets)` | Sets → display string, e.g. `"4x6 @ 280W"` |
 
 ## Charts (Tabbed: Hours, TSS, Elevation, eFTP)
 
@@ -164,16 +197,19 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 7. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
 8. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`
 9. **Ride History button**: Full-width, opens History modal
-10. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
+10. **Workout Progression button** (Session 18): Full-width, directly below Ride History, opens the Interval Progression modal
+11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (outside the modal) closes it (via `onClick` on backdrop + `stopPropagation` on inner content). Key modals:
-- **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID. Outdoor rides grey out Zone/Completed; Indoor greys out Distance/Elevation. Form closes immediately on Save.
-- **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride
+- **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID. Outdoor rides grey out Zone/Completed; Indoor greys out Distance/Elevation. Form closes immediately on Save. Since Session 18, a FIT import that detects intervals shows a confirmation panel under the Import FIT File button (`pendingFitDetail`) before Save.
+- **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride. Since Session 18, entries with `stream`/`intervalData` show a "📊" button (opens Workout Detail) and the detected interval label as a tag.
 - **Post-Log Summary** (`showPostLogSummary`): Shows progression change after logging
 - **CSV Import** (`showCSVImport`): Paste textarea for intervals.icu CSV
 - **Profile** (`showProfileModal`): Weight, HR, age settings
 - **Event** (`showEventModal`): Goal event configuration
+- **Workout Detail** (`showWorkoutDetail`, Session 18): Power/HR timeline chart (Recharts `ComposedChart`) with detected intervals shaded via `ReferenceArea`, plus an interval table. Opened from Ride History's 📊 button, the Progression modal's session list, or automatically after a FIT backfill.
+- **Workout Progression** (`showProgressionModal`, Session 18): Per-category (zone) interval session history with a work-minutes/avg-watts trend chart and a newest-first session list — the planning view for deciding the next block's duration/wattage.
 
 ### Clipboard
 `copyForAnalysis()` uses `navigator.clipboard.writeText()` with a `document.execCommand('copy')` fallback for HTTP/LAN contexts. The fallback creates a hidden textarea, selects it, and copies.

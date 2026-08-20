@@ -1,6 +1,6 @@
 # Implementation Plan: Indoor Interval Tracking & Progression
 
-**Status:** Approved design, not yet implemented
+**Status:** Implemented in Session 18
 **Designed:** Session 17 follow-up (2026-08-20)
 **Target:** Phases 1 + 2 in a single build. Phase 3 is future work — do NOT build it.
 
