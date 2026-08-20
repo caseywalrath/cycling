@@ -20,6 +20,7 @@
 - New "📈 Workout Progression" dashboard button below Ride History, opening a modal (`showProgressionModal`) with a tab per training zone (recovery excluded) and a session count badge.
 - Trend chart (Recharts `AreaChart`, zone-colored) toggles between total work minutes and work-time-weighted average watts across a category's sessions.
 - Session list (newest first) shows date, label, and the dominant set's average HR — this is the planning view: e.g. seeing the last three Sweet Spot sessions were 2x20/2x22/2x25 @ 195W to decide whether to push watts or duration next. Clicking a session opens its Workout Detail modal. Empty-category state points the user at FIT import.
+- **Default view (no zone tab selected)**: opening the modal no longer pre-selects a zone. With nothing selected, it shows the 5 most recent indoor workouts and their zones (clickable through to Workout Detail when interval data exists) instead of one category's trend chart. Selecting a tab switches to that zone's chart/session-list view as above.
 
 ### Feature: Copy for Claude interval progressions
 - `copyForAnalysis()` now appends an `## Interval Progressions` section (skipped entirely if no ride has `intervalData`) listing up to the last 3 sessions per category, oldest → newest, e.g. `Sweet Spot: 2x20 @ 195W (Jul 30) → 2x22 @ 195W (Aug 6) → 2x25 @ 195W (Aug 13)`.

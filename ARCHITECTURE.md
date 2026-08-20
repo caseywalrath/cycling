@@ -51,7 +51,7 @@ Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModa
 |-------|---------|
 | `showWorkoutDetail` | Ride ID for the Workout Detail modal, or `null` |
 | `showProgressionModal` | Workout Progression modal visibility |
-| `progressionCategory` | Active zone tab in the Progression modal (defaults `'sweetspot'`) |
+| `progressionCategory` | Active zone tab in the Progression modal; `null` = no tab selected (default view: 5 most recent indoor workouts) |
 | `progressionMetric` | Trend chart metric: `'minutes'` or `'watts'` |
 
 ## Data Flow
@@ -209,7 +209,7 @@ All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (ou
 - **Profile** (`showProfileModal`): Weight, HR, age settings
 - **Event** (`showEventModal`): Goal event configuration
 - **Workout Detail** (`showWorkoutDetail`, Session 18): Power/HR timeline chart (Recharts `ComposedChart`) with detected intervals shaded via `ReferenceArea`, plus an interval table. Opened from Ride History's 📊 button, the Progression modal's session list, or automatically after a FIT backfill.
-- **Workout Progression** (`showProgressionModal`, Session 18): Per-category (zone) interval session history with a work-minutes/avg-watts trend chart and a newest-first session list — the planning view for deciding the next block's duration/wattage.
+- **Workout Progression** (`showProgressionModal`, Session 18): Opens with no zone tab selected — that default view lists the 5 most recent indoor workouts with their zones. Selecting a category tab (`progressionCategory`) switches to that zone's interval session history: a work-minutes/avg-watts trend chart and a newest-first session list — the planning view for deciding the next block's duration/wattage.
 
 ### Clipboard
 `copyForAnalysis()` uses `navigator.clipboard.writeText()` with a `document.execCommand('copy')` fallback for HTTP/LAN contexts. The fallback creates a hidden textarea, selects it, and copies.
