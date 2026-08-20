@@ -1,5 +1,62 @@
 # Changelog
 
+## Session 18 - Indoor Interval Tracking & Progression (2026-08-20)
+
+### Feature: Interval detection from FIT files
+- `parseFitFile()` now keeps a downsampled power/HR stream (`downsampleRecords()`, 10-second bins) and lap data instead of discarding per-second records after computing NP. Rides without power data still return `stream: null` — no behavior change for those.
+- New `detectIntervals(stream, ftp, laps)`: step-detection on a 3-bin (30s) smoothed power trace. A bin counts as "work" at ≥85% FTP (`WORK_THRESHOLD`); work runs shorter than 90s (`MIN_WORK_SECONDS`) are discarded as noise; runs separated by a ≤20s gap are merged (handles momentary power dropouts). Falls back to FIT lap boundaries when laps yield more qualifying segments than step detection (handles variable-power intervals ERG step detection would miss). Segments are grouped into sets (±15% duration, ±5% watts) and categorized by the dominant set's %FTP into the same zone IDs used everywhere else (endurance/tempo/sweetspot/threshold/vo2max/anaerobic).
+- `buildIntervalLabel()` turns sets into a display string like `4x6 @ 280W` (or `3x8 @ 250W + 4x1 @ 320W` for multiple sets).
+- Detection runs on every FIT import. A confirmation panel in the Log Ride modal shows the detected label and pre-selects the Zone field to the detected category (the user can still change it before saving) — this is a narrow, explicitly agreed exception to the Session 5 "no auto-classification" rule, since it comes from actual interval structure rather than an NP guess.
+
+### Feature: FIT backfill for already-logged rides
+- Importing a FIT file whose date matches an existing ride now prompts: attach the interval/stream data to that ride, or fall through to the normal new-ride flow. Attaching updates only `stream`/`intervalData` on the existing entry in place — TSS, zone, and progression levels are untouched — then opens the new Workout Detail modal so the result is visible immediately.
+
+### Feature: Workout Detail modal
+- New modal (`showWorkoutDetail`, ride ID), opened via a new "📊" button in Ride History entries (shown only when a ride has `stream` or `intervalData`) or automatically after a FIT backfill.
+- Recharts `ComposedChart`: power as a stepped `Area`, heart rate as a `Line` on a secondary right-hand axis (omitted entirely if the ride has no HR data), and a `ReferenceArea` per detected segment shading the work intervals. Below the chart, a compact table of each interval's duration/watts/HR.
+- Ride History entries now show the detected interval label (e.g. `4x6 @ 280W`) as a small tag next to the ride name when present.
+
+### Feature: Interval Progression modal
+- New "📈 Workout Progression" dashboard button below Ride History, opening a modal (`showProgressionModal`) with a tab per training zone (recovery excluded) and a session count badge.
+- Trend chart (Recharts `AreaChart`, zone-colored) toggles between total work minutes and work-time-weighted average watts across a category's sessions.
+- Session list (newest first) shows date, label, and the dominant set's average HR — this is the planning view: e.g. seeing the last three Sweet Spot sessions were 2x20/2x22/2x25 @ 195W to decide whether to push watts or duration next. Clicking a session opens its Workout Detail modal. Empty-category state points the user at FIT import.
+
+### Feature: Copy for Claude interval progressions
+- `copyForAnalysis()` now appends an `## Interval Progressions` section (skipped entirely if no ride has `intervalData`) listing up to the last 3 sessions per category, oldest → newest, e.g. `Sweet Spot: 2x20 @ 195W (Jul 30) → 2x22 @ 195W (Aug 6) → 2x25 @ 195W (Aug 13)`.
+
+### Data model
+- Two new optional fields on ride history entries, both `undefined` on rides that predate this feature (manual, CSV, API, or old FIT imports) — every consumer null-checks:
+  - `stream: { binSeconds, power: [...], hr: [...] }` — downsampled per-ride power/HR, ~8-12KB for a 2-hour ride at 10s bins.
+  - `intervalData: { source: 'auto'|'manual', category, label, sets: [{reps, workSeconds, avgWatts, avgHR, restSeconds}], segments: [{startSec, endSec, avgWatts, avgHR}] }`.
+- No IndexedDB, no new storage key — both fields round-trip through the existing single `STORAGE_KEY` object (and therefore through Export/Import and Google Drive sync) automatically since `history` was already fully persisted.
+- The localStorage save effect is now wrapped in `try/catch`; a quota error surfaces an alert telling the user to export a backup instead of silently failing to save.
+- intervals.icu interval import remains explicitly out of scope (future work) — the `intervalData` shape was designed to be compatible with a future importer from that source.
+
+### Files Changed
+- `src/App.jsx` — `downsampleRecords()`, `detectIntervals()`, `buildIntervalLabel()`, `parseFitFile()` (stream/laps), `handleFitFileImport()` (backfill + detection), `handleLogWorkout()` (persists `pendingFitDetail`), `handleCancelEdit()`/`closeLogRideModal()` (clear `pendingFitDetail`), Workout Detail modal, Interval Progression modal + dashboard button, Ride History 📊 button + interval label tag, `copyForAnalysis()` interval section, localStorage save effect try/catch
+- `ARCHITECTURE.md` — data model, key functions, modal system, UI layout
+- `CHANGELOG.md` — this entry
+- `INTERVAL_TRACKING_PLAN.md` — status updated to implemented
+
+---
+
+## Session 17 - Remove Instant Analysis Card, Relocate Copy for Claude (2026-08-20)
+
+### Removed: Instant Analysis Card
+- Removed the "Instant Analysis" card (auto-generated insights list) from the dashboard.
+- Removed its supporting code: `generateInsights()` (~300-line rule-based insight generator) and `getInsightStyle()` (insight icon/color mapping). Both were only used by this card.
+
+### Relocated: Copy for Claude Button
+- The "Copy for Claude" button (calls `copyForAnalysis()`, unchanged) now lives inside the **Training Status** card, directly below the status pill/TSB%, instead of its own card. `copyForAnalysis()` already built its clipboard text independently of the insights list, so no logic changes were needed — only the button's JSX location and styling (small gray/green pill button, `mt-3` spacing to sit under the TSB% line).
+- Removed the plain-text status description (e.g. "Productive overload, fitness improving") that used to sit below the TSB% line in the Training Status card, replaced by the relocated button in that spot. The status label pill and TSB% are unchanged.
+
+### Files Changed
+- `src/App.jsx` — removed Instant Analysis card JSX, `generateInsights()`, `getInsightStyle()`, `insights` variable; moved Copy for Claude button into Training Status card; removed status description paragraph
+- `ARCHITECTURE.md` — UI layout renumbered, Training Summary + Training Status description updated
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 16 - FIT File Import in Log Ride Modal (2026-07-01)
 
 ### Feature: Import FIT File

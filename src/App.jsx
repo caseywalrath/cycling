@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ComposedChart, Line, ReferenceArea, Legend } from 'recharts';
 import GoogleDriveSync from './google-drive-sync.js';
 import FitParser from 'fit-file-parser';
 
@@ -157,9 +157,212 @@ const parseFitFile = (arrayBuffer) => {
         elevation,
         rideType: hasGPS ? 'Outdoor' : 'Indoor',
         normalizedPower: Math.round(normalizedPower),
+        stream: downsampleRecords(records),
+        laps: data.laps || [],
       });
     });
   });
+};
+
+// Downsample a FIT records array into fixed-width time bins for the Workout Detail
+// chart. Each bin holds the average of the non-null power/HR samples inside it.
+// Returns null when there's no usable power data (nothing to chart or detect).
+const downsampleRecords = (records, binSeconds = 10) => {
+  if (!records || records.length === 0) return null;
+  const withPower = records.some(r => r.power != null);
+  if (!withPower) return null;
+
+  const t0 = records[0].timestamp ? new Date(records[0].timestamp).getTime() : null;
+  if (t0 == null) return null;
+
+  const powerSums = [];
+  const powerCounts = [];
+  const hrSums = [];
+  const hrCounts = [];
+
+  records.forEach(r => {
+    if (!r.timestamp) return;
+    const t = new Date(r.timestamp).getTime();
+    const bin = Math.floor((t - t0) / 1000 / binSeconds);
+    if (bin < 0) return;
+    if (r.power != null) {
+      powerSums[bin] = (powerSums[bin] || 0) + r.power;
+      powerCounts[bin] = (powerCounts[bin] || 0) + 1;
+    }
+    if (r.heart_rate != null) {
+      hrSums[bin] = (hrSums[bin] || 0) + r.heart_rate;
+      hrCounts[bin] = (hrCounts[bin] || 0) + 1;
+    }
+  });
+
+  const binCount = powerSums.length;
+  const power = [];
+  const hr = [];
+  for (let i = 0; i < binCount; i++) {
+    power.push(powerCounts[i] ? Math.round(powerSums[i] / powerCounts[i]) : null);
+    hr.push(hrCounts[i] ? Math.round(hrSums[i] / hrCounts[i]) : null);
+  }
+
+  return { binSeconds, power, hr };
+};
+
+// Interval detection constants (indoor ERG power is near-square-wave, so a simple
+// threshold + run-length approach works well). See INTERVAL_TRACKING_PLAN.md §4.
+const WORK_THRESHOLD = 0.85; // fraction of FTP that counts as "work"
+const MIN_WORK_SECONDS = 90; // shorter runs are discarded (micro-intervals are a known v1 limitation)
+const GAP_MERGE_BINS = 2; // merge work runs separated by a gap this small (handles power dropouts)
+
+const ZONE_POWER_RATIO_RANGES = [
+  { max: 0.76, zone: 'endurance' },
+  { max: 0.88, zone: 'tempo' },
+  { max: 0.95, zone: 'sweetspot' },
+  { max: 1.06, zone: 'threshold' },
+  { max: 1.21, zone: 'vo2max' },
+  { max: Infinity, zone: 'anaerobic' },
+];
+const categoryForRatio = (ratio) => ZONE_POWER_RATIO_RANGES.find(r => ratio < r.max).zone;
+
+// Build a compact label like "4x6 @ 280W" (single set) or "3x8 @ 250W + 4x1 @ 320W" (multiple).
+const buildIntervalLabel = (sets) => {
+  return sets.map(s => {
+    const minutes = Math.round((s.workSeconds / 60) * 2) / 2; // nearest 0.5 min
+    const minStr = Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1);
+    return `${s.reps}x${minStr} @ ${s.avgWatts}W`;
+  }).join(' + ');
+};
+
+// Detect interval structure from a downsampled power/HR stream. Returns
+// { segments, sets, category, label } or null if no work intervals were found
+// (e.g. a steady endurance ride — this is a normal, expected outcome).
+const detectIntervals = (stream, ftp, laps = null) => {
+  if (!stream || !stream.power || !ftp) return null;
+  const { power, hr, binSeconds } = stream;
+  const n = power.length;
+  if (n === 0) return null;
+
+  // 1. Smooth power with a 3-bin (30s @ 10s bins) centered rolling average, skipping nulls.
+  const smoothed = power.map((_, i) => {
+    const lo = Math.max(0, i - 1);
+    const hi = Math.min(n - 1, i + 1);
+    const vals = power.slice(lo, hi + 1).filter(v => v != null);
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  });
+
+  // 2/3. Find contiguous "work" runs (smoothed power >= threshold), merging small gaps.
+  const isWork = smoothed.map(v => v != null && v >= WORK_THRESHOLD * ftp);
+  const rawRuns = [];
+  let runStart = null;
+  for (let i = 0; i < n; i++) {
+    if (isWork[i]) {
+      if (runStart == null) runStart = i;
+    } else if (runStart != null) {
+      rawRuns.push([runStart, i - 1]);
+      runStart = null;
+    }
+  }
+  if (runStart != null) rawRuns.push([runStart, n - 1]);
+
+  const mergedRuns = [];
+  rawRuns.forEach(([s, e]) => {
+    const prev = mergedRuns[mergedRuns.length - 1];
+    if (prev && s - prev[1] - 1 <= GAP_MERGE_BINS) {
+      prev[1] = e;
+    } else {
+      mergedRuns.push([s, e]);
+    }
+  });
+
+  const minBins = Math.ceil(MIN_WORK_SECONDS / binSeconds);
+  const runs = mergedRuns.filter(([s, e]) => (e - s + 1) >= minBins);
+  if (runs.length === 0) return null;
+
+  const avgOf = (arr, s, e) => {
+    const vals = arr.slice(s, e + 1).filter(v => v != null);
+    if (vals.length === 0) return null;
+    return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  };
+
+  let segments = runs.map(([s, e]) => ({
+    startSec: s * binSeconds,
+    endSec: (e + 1) * binSeconds,
+    avgWatts: avgOf(power, s, e),
+    avgHR: avgOf(hr, s, e),
+  }));
+
+  // 5. Lap hint: if there are enough laps with power data, and lap-based segmentation
+  // yields more (all qualifying) segments than step detection, prefer it.
+  if (laps && laps.length >= 3) {
+    const lapWork = laps.filter(l => l.avg_power != null && l.avg_power >= WORK_THRESHOLD * ftp
+      && (l.total_timer_time || 0) >= MIN_WORK_SECONDS);
+    if (lapWork.length > segments.length) {
+      let cursor = 0;
+      const lapSegments = [];
+      laps.forEach(l => {
+        const dur = l.total_timer_time || 0;
+        const isLapWork = l.avg_power != null && l.avg_power >= WORK_THRESHOLD * ftp && dur >= MIN_WORK_SECONDS;
+        if (isLapWork) {
+          lapSegments.push({
+            startSec: Math.round(cursor),
+            endSec: Math.round(cursor + dur),
+            avgWatts: Math.round(l.avg_power),
+            avgHR: l.avg_heart_rate != null ? Math.round(l.avg_heart_rate) : null,
+          });
+        }
+        cursor += dur;
+      });
+      if (lapSegments.length > 0) segments = lapSegments;
+    }
+  }
+
+  // 6. Group segments into sets: same set if duration within ±15% and avgWatts within ±5%.
+  const sets = [];
+  segments.forEach((seg, idx) => {
+    const duration = seg.endSec - seg.startSec;
+    const prevGap = idx > 0 ? seg.startSec - segments[idx - 1].endSec : null;
+    let set = sets.find(s =>
+      Math.abs(s._avgDuration - duration) <= s._avgDuration * 0.15 &&
+      Math.abs(s.avgWatts - seg.avgWatts) <= s.avgWatts * 0.05
+    );
+    if (!set) {
+      set = { reps: 0, _durations: [], _watts: [], _hrs: [], _gaps: [], _avgDuration: duration, avgWatts: seg.avgWatts };
+      sets.push(set);
+    }
+    set.reps++;
+    set._durations.push(duration);
+    set._watts.push(seg.avgWatts);
+    if (seg.avgHR != null) set._hrs.push(seg.avgHR);
+    if (prevGap != null) set._gaps.push(prevGap);
+    set._avgDuration = set._durations.reduce((a, b) => a + b, 0) / set._durations.length;
+    set.avgWatts = Math.round(set._watts.reduce((a, b) => a + b, 0) / set._watts.length);
+  });
+
+  const median = (arr) => {
+    if (arr.length === 0) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+  const roundTo = (val, nearest) => val == null ? null : Math.round(val / nearest) * nearest;
+
+  const finalSets = sets.map(s => ({
+    reps: s.reps,
+    workSeconds: roundTo(median(s._durations), 30),
+    avgWatts: s.avgWatts,
+    avgHR: s._hrs.length ? Math.round(s._hrs.reduce((a, b) => a + b, 0) / s._hrs.length) : null,
+    restSeconds: s.reps > 1 ? roundTo(median(s._gaps), 15) : null,
+  }));
+
+  // 7. Category from the dominant set (most total work time).
+  const dominant = finalSets.reduce((best, s) =>
+    (s.reps * s.workSeconds) > (best.reps * best.workSeconds) ? s : best, finalSets[0]);
+  const category = categoryForRatio(dominant.avgWatts / ftp);
+
+  return {
+    segments,
+    sets: finalSets,
+    category,
+    label: buildIntervalLabel(finalSets),
+  };
 };
 
 // Apply decay to progression levels based on days since last worked per zone.
@@ -301,6 +504,13 @@ export default function ProgressionTracker() {
   // State for editing rides
   const [editingRide, setEditingRide] = useState(null);
 
+  // Interval tracking state (see INTERVAL_TRACKING_PLAN.md)
+  const [pendingFitDetail, setPendingFitDetail] = useState(null); // { stream, detection } from FIT import, awaiting save
+  const [showWorkoutDetail, setShowWorkoutDetail] = useState(null); // ride id or null
+  const [showProgressionModal, setShowProgressionModal] = useState(false);
+  const [progressionCategory, setProgressionCategory] = useState('sweetspot');
+  const [progressionMetric, setProgressionMetric] = useState('minutes'); // 'minutes' | 'watts'
+
   // Effective levels = base levels with decay applied (for display and new workout calculations)
   const effectiveLevels = useMemo(() => applyDecay(levels, lastWorkedDates), [levels, lastWorkedDates]);
 
@@ -381,19 +591,24 @@ export default function ProgressionTracker() {
       isInitialMount.current = false;
       return;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      levels,
-      history,
-      ftp: currentFTP,
-      intervalsFTP,
-      event,
-      userProfile,
-      vo2maxEstimates,
-      powerCurveData,
-      exportedAt,
-      lastSyncedAt,
-      lastWorkedDates,
-    }));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        levels,
+        history,
+        ftp: currentFTP,
+        intervalsFTP,
+        event,
+        userProfile,
+        vo2maxEstimates,
+        powerCurveData,
+        exportedAt,
+        lastSyncedAt,
+        lastWorkedDates,
+      }));
+    } catch (e) {
+      console.error('Failed to save data to localStorage:', e);
+      alert('⚠️ Could not save your data — browser storage may be full. Please export a backup (Export Data) soon so nothing is lost.');
+    }
   }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
 
   // Load intervals.icu config from localStorage
@@ -1023,317 +1238,6 @@ export default function ProgressionTracker() {
     }
   };
 
-  const generateInsights = (loads, history, levels) => {
-    const insights = [];
-    const { ctl, atl, tsb, weeklyTSS, twoWeekTSS } = loads;
-    const prevWeeklyTSS = twoWeekTSS - weeklyTSS;
-
-    if (tsb < -25) {
-      insights.push({
-        type: 'warning',
-        message: 'High fatigue accumulation. Consider extra recovery or reducing intensity.',
-      });
-    } else if (tsb < -15) {
-      insights.push({
-        type: 'caution',
-        message: 'Significant fatigue building up. Monitor for signs of overreaching.',
-      });
-    } else if (tsb > 25) {
-      insights.push({
-        type: 'info',
-        message: 'Very well rested, but fitness may be declining. Consider adding training stimulus.',
-      });
-    } else if (tsb >= 5 && tsb <= 20) {
-      insights.push({
-        type: 'positive',
-        message: 'Good balance of freshness and fitness. Ready for hard efforts or events.',
-      });
-    }
-
-    if (atl > ctl + 20) {
-      insights.push({
-        type: 'warning',
-        message: 'Recent training load spiking well above your baseline. Risk of burnout if sustained.',
-      });
-    } else if (atl > ctl + 10) {
-      insights.push({
-        type: 'caution',
-        message: 'Building training load aggressively. Ensure adequate recovery.',
-      });
-    }
-
-    // Calculate week 3 TSS (days 15-21) to check for 2 consecutive low weeks
-    const week3Workouts = history.filter(w => {
-      const threeWeeksAgo = new Date();
-      threeWeeksAgo.setHours(0, 0, 0, 0);
-      threeWeeksAgo.setDate(threeWeeksAgo.getDate() - 21);
-      const twoWeeksAgo = new Date();
-      twoWeeksAgo.setHours(0, 0, 0, 0);
-      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-      const rideDate = parseDateLocal(w.date);
-      return rideDate >= threeWeeksAgo && rideDate < twoWeeksAgo;
-    });
-    const week3TSS = week3Workouts.reduce((sum, w) => sum + (w.tss || 0), 0);
-
-    if (prevWeeklyTSS > 0 && week3TSS > 0) {
-      const thisWeekChange = ((weeklyTSS - prevWeeklyTSS) / prevWeeklyTSS) * 100;
-      const lastWeekChange = ((prevWeeklyTSS - week3TSS) / week3TSS) * 100;
-
-      // Only warn if BOTH weeks are down significantly (2 consecutive low weeks)
-      if (thisWeekChange < -40 && lastWeekChange < -40) {
-        insights.push({
-          type: 'caution',
-          message: `Training load down for 2 weeks running. Intentional recovery or time to get back on track?`,
-        });
-      }
-    }
-
-    if (prevWeeklyTSS > 0) {
-      const weekChange = ((weeklyTSS - prevWeeklyTSS) / prevWeeklyTSS) * 100;
-      if (weekChange > 30) {
-        insights.push({
-          type: 'caution',
-          message: `Training load up ${Math.round(weekChange)}% from last week. Large jump—monitor fatigue.`,
-        });
-      }
-    }
-
-    if (ctl < 30) {
-      insights.push({
-        type: 'info',
-        message: 'Early base building phase. Focus on consistency.',
-      });
-    } else if (ctl >= 70 && ctl < 85) {
-      insights.push({
-        type: 'positive',
-        message: 'Solid fitness base established. On track for your goals.',
-      });
-    } else if (ctl >= 85) {
-      insights.push({
-        type: 'positive',
-        message: 'Strong fitness level. Maintain and consider taper timing for key events.',
-      });
-    }
-
-    const last14Days = history.filter(w => {
-      const twoWeeksAgo = new Date();
-      twoWeeksAgo.setHours(0, 0, 0, 0);
-      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-      return parseDateLocal(w.date) >= twoWeeksAgo;
-    });
-    if (last14Days.length < 4) {
-      insights.push({
-        type: 'caution',
-        message: `Only ${last14Days.length} workouts in last 14 days. Consistency is key for adaptation.`,
-      });
-    }
-
-    const zoneWorkouts = {};
-    const last28Days = history.filter(w => {
-      const fourWeeksAgo = new Date();
-      fourWeeksAgo.setHours(0, 0, 0, 0);
-      fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-      return parseDateLocal(w.date) >= fourWeeksAgo;
-    });
-    last28Days.forEach(w => {
-      zoneWorkouts[w.zone] = (zoneWorkouts[w.zone] || 0) + 1;
-    });
-
-    if (last28Days.length >= 8) {
-      if (!zoneWorkouts['endurance'] || zoneWorkouts['endurance'] < 2) {
-        insights.push({
-          type: 'caution',
-          message: 'Low endurance work in last 28 days. Z2 base supports all other adaptations.',
-        });
-      }
-      if ((zoneWorkouts['vo2max'] || 0) + (zoneWorkouts['anaerobic'] || 0) > last28Days.length * 0.5) {
-        insights.push({
-          type: 'caution',
-          message: 'High-intensity work exceeds 50% of sessions. Risk of burnout without adequate base.',
-        });
-      }
-    }
-
-    const levelValues = Object.values(levels);
-    const avgLevel = levelValues.reduce((a, b) => a + b, 0) / levelValues.length;
-    if (levels.threshold < avgLevel - 1.5) {
-      insights.push({
-        type: 'info',
-        message: 'Threshold level lagging behind other zones. Consider adding FTP-focused work.',
-      });
-    }
-    if (levels.endurance < 2 && ctl > 40) {
-      insights.push({
-        type: 'info',
-        message: 'Endurance level low relative to fitness. Longer Z2 rides would help.',
-      });
-    }
-
-    // Longest ride analysis
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const recentOutdoorRides = history.filter(w =>
-      parseDateLocal(w.date) >= thirtyDaysAgo &&
-      w.rideType === 'Outdoor' &&
-      w.distance > 0
-    );
-    if (recentOutdoorRides.length > 0) {
-      const longestRide = recentOutdoorRides.reduce((max, w) => w.distance > max.distance ? w : max, recentOutdoorRides[0]);
-      if (longestRide.distance >= 50) {
-        insights.push({
-          type: 'positive',
-          message: `Longest ride in last 30 days: ${longestRide.distance}mi. Strong endurance building.`,
-        });
-      } else if (longestRide.distance < 30 && ctl > 50) {
-        insights.push({
-          type: 'info',
-          message: `Longest ride: ${longestRide.distance}mi. Consider adding longer rides for endurance.`,
-        });
-      }
-    }
-
-    // Weekly hours analysis
-    const last7DaysWorkouts = history.filter(w => {
-      const weekAgo = new Date();
-      weekAgo.setHours(0, 0, 0, 0);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      return parseDateLocal(w.date) >= weekAgo;
-    });
-    const prev7DaysWorkouts = history.filter(w => {
-      const twoWeeksAgo = new Date();
-      twoWeeksAgo.setHours(0, 0, 0, 0);
-      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-      const weekAgo = new Date();
-      weekAgo.setHours(0, 0, 0, 0);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const rideDate = parseDateLocal(w.date);
-      return rideDate >= twoWeeksAgo && rideDate < weekAgo;
-    });
-
-    const thisWeekHours = last7DaysWorkouts.reduce((sum, w) => sum + w.duration, 0) / 60;
-    const prevWeekHours = prev7DaysWorkouts.reduce((sum, w) => sum + w.duration, 0) / 60;
-
-    if (thisWeekHours >= 8) {
-      insights.push({
-        type: 'positive',
-        message: `${thisWeekHours.toFixed(1)} hours this week. Solid training volume.`,
-      });
-    } else if (thisWeekHours < 5 && ctl > 40) {
-      insights.push({
-        type: 'caution',
-        message: `${thisWeekHours.toFixed(1)} hours this week. Volume low for current fitness level.`,
-      });
-    }
-
-    // Ride frequency comparison
-    if (prev7DaysWorkouts.length > 0) {
-      const rideCountChange = last7DaysWorkouts.length - prev7DaysWorkouts.length;
-      if (rideCountChange >= 2) {
-        insights.push({
-          type: 'positive',
-          message: `${last7DaysWorkouts.length} rides this week (up from ${prev7DaysWorkouts.length}). Great consistency increase.`,
-        });
-      } else if (rideCountChange <= -2 && last7DaysWorkouts.length < 3) {
-        insights.push({
-          type: 'caution',
-          message: `${last7DaysWorkouts.length} rides this week (down from ${prev7DaysWorkouts.length}). Consistency matters.`,
-        });
-      }
-    }
-
-    // Consecutive days pattern
-    if (history.length >= 7) {
-      const sortedRecent = [...history].sort((a, b) => parseDateLocal(b.date) - parseDateLocal(a.date)).slice(0, 7);
-      let consecutiveDays = 1;
-      let maxConsecutive = 1;
-
-      for (let i = 0; i < sortedRecent.length - 1; i++) {
-        const current = parseDateLocal(sortedRecent[i].date);
-        const next = parseDateLocal(sortedRecent[i + 1].date);
-        const daysDiff = Math.round((current - next) / (1000 * 60 * 60 * 24));
-
-        if (daysDiff === 1) {
-          consecutiveDays++;
-          maxConsecutive = Math.max(maxConsecutive, consecutiveDays);
-        } else {
-          consecutiveDays = 1;
-        }
-      }
-
-      if (maxConsecutive >= 4) {
-        insights.push({
-          type: 'caution',
-          message: `${maxConsecutive} consecutive training days detected. Recovery days prevent overtraining.`,
-        });
-      }
-    }
-
-    // Elevation gain analysis
-    const last7DaysElevation = last7DaysWorkouts.reduce((sum, w) => sum + (w.elevation || 0), 0);
-    const prev7DaysElevation = prev7DaysWorkouts.reduce((sum, w) => sum + (w.elevation || 0), 0);
-
-    // Big climbs detection
-    const bigClimbs = last14Days.filter(w => w.elevation > 2999);
-    if (bigClimbs.length > 0) {
-      insights.push({
-        type: 'positive',
-        message: `${bigClimbs.length} big climb${bigClimbs.length > 1 ? 's' : ''} (>3000ft) in last 14 days. Building climbing strength.`,
-      });
-    }
-
-    // Long rides detection
-    const longRides = last14Days.filter(w => w.duration > 180);
-    if (longRides.length > 0) {
-      insights.push({
-        type: 'positive',
-        message: `${longRides.length} long ride${longRides.length > 1 ? 's' : ''} (>3hrs) in last 14 days. Building endurance capacity.`,
-      });
-    }
-
-    // Weekly elevation comparison
-    if (last7DaysElevation > 0 && prev7DaysElevation > 0) {
-      const elevationChange = ((last7DaysElevation - prev7DaysElevation) / prev7DaysElevation) * 100;
-      if (elevationChange > 50) {
-        insights.push({
-          type: 'info',
-          message: `Elevation gain up ${Math.round(elevationChange)}% this week (${last7DaysElevation.toLocaleString()}ft vs ${prev7DaysElevation.toLocaleString()}ft). Big climbing week.`,
-        });
-      } else if (elevationChange < -50) {
-        insights.push({
-          type: 'info',
-          message: `Elevation gain down ${Math.abs(Math.round(elevationChange))}% this week (${last7DaysElevation.toLocaleString()}ft vs ${prev7DaysElevation.toLocaleString()}ft). Flatter week.`,
-        });
-      }
-    } else if (last7DaysElevation >= 5000) {
-      insights.push({
-        type: 'positive',
-        message: `${last7DaysElevation.toLocaleString()}ft of climbing this week. Strong vertical work.`,
-      });
-    }
-
-    // Climbing intensity analysis
-    if (recentOutdoorRides.length >= 3) {
-      const avgElevationPerMile = recentOutdoorRides.reduce((sum, w) => {
-        return sum + (w.distance > 0 ? (w.elevation || 0) / w.distance : 0);
-      }, 0) / recentOutdoorRides.length;
-
-      if (avgElevationPerMile >= 100) {
-        insights.push({
-          type: 'positive',
-          message: `Averaging ${Math.round(avgElevationPerMile)}ft/mi in recent rides. Hilly/mountainous terrain building strength.`,
-        });
-      } else if (avgElevationPerMile < 30 && ctl > 50) {
-        insights.push({
-          type: 'info',
-          message: `Averaging ${Math.round(avgElevationPerMile)}ft/mi recently. Consider adding climbing to build strength.`,
-        });
-      }
-    }
-
-    return insights;
-  };
-
   const calculateNewLevel = (currentLevel, workoutLevel, rpe, completed) => {
     if (!completed) {
       if (workoutLevel <= currentLevel) {
@@ -1956,11 +1860,19 @@ export default function ProgressionTracker() {
         tss,
         intensityFactor,
         source: 'manual', // Editing always marks as manually classified
+        ...(pendingFitDetail ? {
+          stream: pendingFitDetail.stream,
+          intervalData: pendingFitDetail.detection
+            ? { ...pendingFitDetail.detection, source: 'auto',
+                category: (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
+            : null,
+        } : {}),
       };
 
       // Update history with edited entry
       setHistory(history.map(w => w.id === editingRide ? entry : w));
       markDataChanged();
+      setPendingFitDetail(null);
 
       // Update progression levels if zone was assigned/changed
       if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
@@ -2018,6 +1930,13 @@ export default function ProgressionTracker() {
         intensityFactor,
         source: 'manual',
         trickleEffects, // Stored for post-log summary display
+        ...(pendingFitDetail ? {
+          stream: pendingFitDetail.stream,
+          intervalData: pendingFitDetail.detection
+            ? { ...pendingFitDetail.detection, source: 'auto',
+                category: (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
+            : null,
+        } : {}),
       };
 
       // Apply all level updates (primary + trickle) in a single setLevels call
@@ -2052,6 +1971,7 @@ export default function ProgressionTracker() {
       setHistory([entry, ...history]);
       setLevels(updatedLevels);
       markDataChanged();
+      setPendingFitDetail(null);
 
       // Close modal and show summary
       setShowLogRideModal(false);
@@ -2165,6 +2085,14 @@ export default function ProgressionTracker() {
     setEditingRide(null);
     setFormData(getDefaultFormData(history));
     setShowLogRideModal(false);
+    setPendingFitDetail(null);
+  };
+
+  // Closes the Log Ride modal (new-workout path) and discards any pending FIT
+  // stream/detection so it can't leak into a later, unrelated manual save.
+  const closeLogRideModal = () => {
+    setShowLogRideModal(false);
+    setPendingFitDetail(null);
   };
 
   const exportData = () => {
@@ -2267,6 +2195,9 @@ export default function ProgressionTracker() {
 
   // Pre-fills Log Ride form fields from a .FIT file. Does not touch Zone, Ride
   // Name, or RPE — the user still classifies and confirms those before saving.
+  // Also detects interval structure (power/HR streams + set/rep detection) and, if the
+  // FIT file's date matches an already-logged ride, offers to backfill that ride instead
+  // of creating a duplicate.
   const handleFitFileImport = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -2274,7 +2205,37 @@ export default function ProgressionTracker() {
     reader.onload = async (e) => {
       try {
         const parsed = await parseFitFile(e.target.result);
-        setFormData(prev => ({ ...prev, ...parsed }));
+        const existing = history.find(w => w.date === parsed.date);
+
+        if (existing) {
+          const existingName = existing.name || existing.notes || 'Workout';
+          const attach = window.confirm(
+            `A ride on ${parsed.date} already exists (${existingName}, ${existing.duration}min). ` +
+            `Attach interval data to it instead of creating a new ride?`
+          );
+          if (attach) {
+            const detection = currentFTP ? detectIntervals(parsed.stream, currentFTP, parsed.laps) : null;
+            setHistory(prev => prev.map(w => w.id === existing.id ? {
+              ...w,
+              stream: parsed.stream,
+              intervalData: detection ? { ...detection, source: 'auto' } : null,
+            } : w));
+            markDataChanged();
+            setShowLogRideModal(false);
+            setPendingFitDetail(null);
+            setShowWorkoutDetail(existing.id);
+            alert(detection
+              ? `✓ Interval data attached: ${detection.label}`
+              : `✓ Power/HR data attached (no structured intervals detected).`);
+            event.target.value = '';
+            return;
+          }
+          // Cancel → fall through to normal new-ride flow below
+        }
+
+        const detection = currentFTP ? detectIntervals(parsed.stream, currentFTP, parsed.laps) : null;
+        setFormData(prev => ({ ...prev, ...parsed, ...(detection ? { zone: detection.category } : {}) }));
+        setPendingFitDetail({ stream: parsed.stream, detection });
       } catch (err) {
         alert(err.message || 'Could not read this FIT file.');
       }
@@ -2417,6 +2378,27 @@ export default function ProgressionTracker() {
     const weeklyHoursData = calculateWeeklyHours(history);
     const last4Weeks = weeklyHoursData.slice(-4);
 
+    // Interval progressions: last 3 sessions per category, oldest -> newest
+    const shortDate = (dateStr) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    };
+    const intervalCategories = ZONES.filter(z => z.id !== 'recovery');
+    const intervalLines = intervalCategories
+      .map(z => {
+        const sessions = history
+          .filter(w => w.intervalData?.category === z.id)
+          .slice()
+          .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date))
+          .slice(-3);
+        if (sessions.length === 0) return null;
+        return `- ${z.name}: ${sessions.map(w => `${w.intervalData.label} (${shortDate(w.date)})`).join(' → ')}`;
+      })
+      .filter(Boolean);
+    const intervalProgressionsSection = intervalLines.length > 0
+      ? `\n\n## Interval Progressions\n${intervalLines.join('\n')}`
+      : '';
+
     const analysisText = `## Training Status - ${formatDateWithDay(toLocalDateStr(new Date()))}
 
 **Athlete Profile:**
@@ -2434,7 +2416,7 @@ export default function ProgressionTracker() {
 ${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
 
 **Recent Workouts:**
-${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}`;
+${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, NP ${w.normalizedPower}W, TSS ${w.tss}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}${intervalProgressionsSection}`;
 
     const copyToClipboard = (text) => {
       if (navigator.clipboard && window.isSecureContext) {
@@ -2507,20 +2489,6 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
     return { label: 'High Risk', color: '#EF4444', description: 'Significant overreach — monitor fatigue' };
   };
 
-  const getInsightStyle = (type) => {
-    switch (type) {
-      case 'warning':
-        return { bg: 'bg-red-900/50', border: 'border-red-500', icon: '⚠️' };
-      case 'caution':
-        return { bg: 'bg-yellow-900/50', border: 'border-yellow-500', icon: '⚡' };
-      case 'positive':
-        return { bg: 'bg-green-900/50', border: 'border-green-500', icon: '✓' };
-      case 'info':
-      default:
-        return { bg: 'bg-blue-900/50', border: 'border-blue-500', icon: 'ℹ' };
-    }
-  };
-
   const getChangeDescription = (change, rpe, workoutLevel, currentLevel) => {
     if (change >= 0.7) return 'Breakthrough!';
     if (change >= 0.4) return 'Strong progress';
@@ -2533,7 +2501,6 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
   const loads = calculateTrainingLoads();
   const tsbStatus = getTSBStatus(loads.tsb);
   const trainingStatus = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
-  const insights = generateInsights(loads, history, levels);
   const currentIF = formData.normalizedPower / currentFTP;
   const currentTSS = calculateTSS(formData.normalizedPower, parseDuration(formData.duration));
 
@@ -4030,44 +3997,18 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                       TSB% {loads.ctl > 0 ? ((loads.tsb / loads.ctl) * 100).toFixed(0) : 0}%
                     </span>
                   )}
-                  <p className="text-xs text-gray-500 text-center mt-2">{trainingStatus.description}</p>
+                  <button
+                    onClick={copyForAnalysis}
+                    className={`mt-3 text-xs px-3 py-1 rounded transition ${
+                      copySuccess
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {copySuccess ? 'Copied!' : 'Copy for Claude'}
+                  </button>
                 </div>
               </div>
-            </div>
-
-            {/* Instant Analysis */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-medium">Instant Analysis</h3>
-                <button
-                  onClick={copyForAnalysis}
-                  className={`text-xs px-3 py-1 rounded transition ${
-                    copySuccess
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  {copySuccess ? 'Copied!' : 'Copy for Claude'}
-                </button>
-              </div>
-              {insights.length === 0 ? (
-                <p className="text-gray-400 text-sm">Log more workouts to generate insights.</p>
-              ) : (
-                <div className="space-y-2">
-                  {insights.map((insight, idx) => {
-                    const style = getInsightStyle(insight.type);
-                    return (
-                      <div
-                        key={idx}
-                        className={`${style.bg} border-l-2 ${style.border} px-3 py-2 text-sm rounded-r`}
-                      >
-                        <span className="mr-2">{style.icon}</span>
-                        {insight.message}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
             {/* Monthly Activity Calendar */}
@@ -4192,16 +4133,26 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                 Ride History
               </button>
             </div>
+
+            {/* Workout Progression Button */}
+            <div className="pt-2">
+              <button
+                onClick={() => setShowProgressionModal(true)}
+                className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-4 py-2 rounded text-sm transition border border-gray-600 hover:border-gray-500"
+              >
+                📈 Workout Progression
+              </button>
+            </div>
         </div>
 
         {/* Log Ride Modal */}
         {showLogRideModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => editingRide ? handleCancelEdit() : setShowLogRideModal(false)}>
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => editingRide ? handleCancelEdit() : closeLogRideModal()}>
             <div className="bg-gray-800 rounded-lg p-4 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold">{editingRide ? 'Edit Workout' : 'Log Workout'}</h2>
                 <button
-                  onClick={() => editingRide ? handleCancelEdit() : setShowLogRideModal(false)}
+                  onClick={() => editingRide ? handleCancelEdit() : closeLogRideModal()}
                   className="text-gray-400 hover:text-white text-xl"
                 >
                   ×
@@ -4214,6 +4165,32 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                 📁 Import FIT File
                 <input type="file" accept=".fit,.FIT" onChange={handleFitFileImport} className="hidden" />
               </label>
+              {pendingFitDetail && (
+                <div className="mt-2 bg-gray-700 rounded p-2 flex items-start justify-between gap-2">
+                  <div className="text-sm">
+                    {pendingFitDetail.detection ? (
+                      <>
+                        <div className="text-yellow-400 font-mono">⚡ Detected: {pendingFitDetail.detection.label}</div>
+                        <div className="text-gray-400 text-xs mt-0.5">
+                          {getZoneName(pendingFitDetail.detection.category)} interval — will be saved with this ride.
+                          Adjust the Zone above if the category looks wrong.
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-gray-400 text-xs">
+                        No structured intervals detected — power/HR chart will still be saved.
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setPendingFitDetail(null)}
+                    className="text-gray-400 hover:text-white text-sm flex-shrink-0"
+                    title="Discard interval data"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Row 1: Ride Name | Date */}
@@ -4428,6 +4405,15 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                 {history.map((entry) => (
                   <div key={entry.id} className="bg-gray-700 rounded p-3 text-sm relative">
                     <div className="absolute top-2 right-2 flex gap-1">
+                      {(entry.stream || entry.intervalData) && (
+                        <button
+                          onClick={() => { setShowHistoryModal(false); setShowWorkoutDetail(entry.id); }}
+                          className="text-gray-400 hover:text-yellow-400 transition text-xs px-2 py-1 rounded hover:bg-gray-600"
+                          title="View workout detail"
+                        >
+                          📊
+                        </button>
+                      )}
                       <button
                         onClick={() => handleEditRide(entry.id)}
                         className="text-gray-400 hover:text-blue-400 transition text-xs px-2 py-1 rounded hover:bg-gray-600"
@@ -4449,6 +4435,9 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                       <div className="flex-1">
                         <div className="font-medium">
                           {entry.name || entry.notes || 'Workout'} - {entry.rideType || 'Indoor'}{entry.rideType !== 'Outdoor' && entry.zone ? ` - ${getZoneName(entry.zone)}` : entry.rideType !== 'Outdoor' && !entry.zone ? ' - Unclassified' : ''}
+                          {entry.intervalData?.label && (
+                            <span className="text-yellow-400 text-xs ml-2 font-mono">{entry.intervalData.label}</span>
+                          )}
                           {entry.intervalsId && (
                             <span className="text-gray-500 text-xs font-mono ml-2">
                               • {entry.intervalsId}
@@ -4516,6 +4505,335 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
             </div>
           </div>
         )}
+
+        {/* Workout Detail Modal */}
+        {showWorkoutDetail !== null && (() => {
+          const detailRide = history.find(w => w.id === showWorkoutDetail);
+          if (!detailRide) return null;
+          const chartData = detailRide.stream
+            ? detailRide.stream.power.map((p, i) => ({
+                min: Math.round((i * detailRide.stream.binSeconds) / 60 * 10) / 10,
+                power: p,
+                hr: detailRide.stream.hr[i],
+              }))
+            : [];
+          const hasHR = detailRide.stream && detailRide.stream.hr.some(v => v != null);
+
+          const DetailTooltip = ({ active, payload, label }) => {
+            if (active && payload && payload.length) {
+              const powerEntry = payload.find(p => p.dataKey === 'power');
+              const hrEntry = payload.find(p => p.dataKey === 'hr');
+              return (
+                <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                  <p className="text-gray-300 mb-1">{label} min</p>
+                  {powerEntry?.value != null && <p className="text-blue-400 font-bold">{powerEntry.value}W</p>}
+                  {hrEntry?.value != null && <p className="text-red-400 font-bold">{hrEntry.value} bpm</p>}
+                </div>
+              );
+            }
+            return null;
+          };
+
+          return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowWorkoutDetail(null)}>
+              <div className="bg-gray-800 rounded-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <h2 className="font-bold">{detailRide.name || detailRide.notes || 'Workout'}</h2>
+                    <div className="text-gray-400 text-xs">{formatDateWithDay(detailRide.date)}</div>
+                  </div>
+                  <button
+                    onClick={() => setShowWorkoutDetail(null)}
+                    className="text-gray-400 hover:text-white text-xl"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Summary row */}
+                <div className="grid grid-cols-5 gap-2 text-xs mb-4 bg-gray-700 rounded p-3">
+                  <div>
+                    <span className="text-gray-400">Duration</span>
+                    <div className="font-mono">{detailRide.duration}min</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">NP</span>
+                    <div className="font-mono">{detailRide.normalizedPower}W</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">TSS</span>
+                    <div className="font-mono">{detailRide.tss}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">IF</span>
+                    <div className="font-mono">{detailRide.intensityFactor?.toFixed(2) ?? '—'}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Intervals</span>
+                    <div className="font-mono text-yellow-400">{detailRide.intervalData?.label || '—'}</div>
+                  </div>
+                </div>
+
+                {/* Power/HR chart */}
+                {detailRide.stream ? (
+                  <div className="mb-4">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                        <XAxis
+                          dataKey="min"
+                          type="number"
+                          domain={['dataMin', 'dataMax']}
+                          stroke="#9CA3AF"
+                          style={{ fontSize: '12px' }}
+                          tickFormatter={(v) => `${Math.round(v)}`}
+                          label={{ value: 'min', position: 'insideBottomRight', offset: -5, fill: '#9CA3AF', fontSize: 11 }}
+                        />
+                        <YAxis
+                          yAxisId="power"
+                          stroke="#3B82F6"
+                          style={{ fontSize: '12px' }}
+                          tickFormatter={(v) => `${v}W`}
+                          width={50}
+                        />
+                        {hasHR && (
+                          <YAxis
+                            yAxisId="hr"
+                            orientation="right"
+                            stroke="#EF4444"
+                            style={{ fontSize: '12px' }}
+                            tickFormatter={(v) => `${v}`}
+                            width={40}
+                          />
+                        )}
+                        <Tooltip content={<DetailTooltip />} />
+                        {detailRide.intervalData?.segments?.map((seg, i) => (
+                          <ReferenceArea
+                            key={i}
+                            yAxisId="power"
+                            x1={seg.startSec / 60}
+                            x2={seg.endSec / 60}
+                            fill="#EAB308"
+                            fillOpacity={0.12}
+                            strokeOpacity={0}
+                          />
+                        ))}
+                        <Area
+                          yAxisId="power"
+                          type="stepAfter"
+                          dataKey="power"
+                          name="Power"
+                          stroke="#3B82F6"
+                          fill="#3B82F6"
+                          fillOpacity={0.25}
+                          dot={false}
+                          connectNulls
+                        />
+                        {hasHR && (
+                          <Line
+                            yAxisId="hr"
+                            type="monotone"
+                            dataKey="hr"
+                            name="Heart Rate"
+                            stroke="#EF4444"
+                            dot={false}
+                            strokeWidth={1.5}
+                            connectNulls
+                          />
+                        )}
+                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-gray-400 text-sm mb-4">No power/HR stream saved for this ride.</p>
+                )}
+
+                {/* Interval table */}
+                {detailRide.intervalData?.segments?.length > 0 && (
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-medium text-gray-300 mb-2">Detected Intervals</h3>
+                    {detailRide.intervalData.segments.map((seg, i) => (
+                      <div key={i} className="bg-gray-700 rounded px-3 py-2 flex justify-between text-xs font-mono">
+                        <span className="text-gray-400">#{i + 1}</span>
+                        <span>{Math.floor((seg.endSec - seg.startSec) / 60)}:{String((seg.endSec - seg.startSec) % 60).padStart(2, '0')}</span>
+                        <span className="text-blue-400">{seg.avgWatts}W</span>
+                        <span className="text-red-400">{seg.avgHR != null ? `${seg.avgHR} bpm` : '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Interval Progression Modal */}
+        {showProgressionModal && (() => {
+          const progressionZones = ZONES.filter(z => z.id !== 'recovery');
+          const activeZone = ZONES.find(z => z.id === progressionCategory);
+
+          const sessionsAsc = history
+            .filter(w => w.intervalData?.category === progressionCategory)
+            .slice()
+            .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date));
+          const sessionsDesc = sessionsAsc.slice().reverse();
+
+          const dominantSet = (sets) => sets.reduce((best, s) =>
+            (s.reps * s.workSeconds) > (best.reps * best.workSeconds) ? s : best, sets[0]);
+
+          const workMinutes = (w) => w.intervalData.sets.reduce((s, x) => s + x.reps * x.workSeconds, 0) / 60;
+          const avgWatts = (w) => {
+            const sets = w.intervalData.sets;
+            const totalSec = sets.reduce((s, x) => s + x.reps * x.workSeconds, 0);
+            if (totalSec === 0) return 0;
+            return Math.round(sets.reduce((s, x) => s + x.avgWatts * x.reps * x.workSeconds, 0) / totalSec);
+          };
+
+          const trendData = sessionsAsc.map(w => {
+            const [, m, d] = w.date.split('-').map(Number);
+            return {
+              dateLabel: `${m}/${d}`,
+              minutes: Math.round(workMinutes(w) * 10) / 10,
+              watts: avgWatts(w),
+              label: w.intervalData.label,
+            };
+          });
+
+          const TrendTooltip = ({ active, payload }) => {
+            if (active && payload && payload.length) {
+              const data = payload[0].payload;
+              return (
+                <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                  <p className="text-gray-300 mb-1">{data.dateLabel}</p>
+                  <p className="font-bold" style={{ color: activeZone?.color }}>
+                    {progressionMetric === 'minutes' ? `${data.minutes} min` : `${data.watts}W`}
+                  </p>
+                  <p className="text-gray-500 text-xs font-mono">{data.label}</p>
+                </div>
+              );
+            }
+            return null;
+          };
+
+          return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowProgressionModal(false)}>
+              <div className="bg-gray-800 rounded-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-bold">Workout Progression</h2>
+                  <button
+                    onClick={() => setShowProgressionModal(false)}
+                    className="text-gray-400 hover:text-white text-xl"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Category tabs */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {progressionZones.map(z => {
+                    const count = history.filter(w => w.intervalData?.category === z.id).length;
+                    const active = progressionCategory === z.id;
+                    return (
+                      <button
+                        key={z.id}
+                        onClick={() => setProgressionCategory(z.id)}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                          active ? 'text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                        style={active ? { backgroundColor: z.color } : {}}
+                      >
+                        {z.name} {count > 0 && <span className="opacity-75">({count})</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {sessionsAsc.length === 0 ? (
+                  <p className="text-gray-400 text-sm">
+                    No tracked {activeZone?.name} workouts yet. Import a FIT file from the Log Ride screen to start tracking interval progressions.
+                  </p>
+                ) : (
+                  <>
+                    {sessionsAsc.length >= 2 && (
+                      <div className="mb-4">
+                        <div className="flex gap-2 mb-2">
+                          <button
+                            onClick={() => setProgressionMetric('minutes')}
+                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                              progressionMetric === 'minutes' ? 'bg-gray-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                            }`}
+                          >
+                            Work Minutes
+                          </button>
+                          <button
+                            onClick={() => setProgressionMetric('watts')}
+                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                              progressionMetric === 'watts' ? 'bg-gray-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                            }`}
+                          >
+                            Avg Watts
+                          </button>
+                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="colorProgression" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={activeZone?.color} stopOpacity={0.8}/>
+                                <stop offset="95%" stopColor={activeZone?.color} stopOpacity={0.1}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                            <XAxis dataKey="dateLabel" stroke="#9CA3AF" style={{ fontSize: '12px' }} />
+                            <YAxis
+                              stroke="#9CA3AF"
+                              style={{ fontSize: '12px' }}
+                              tickFormatter={(v) => progressionMetric === 'minutes' ? `${v}m` : `${v}W`}
+                              width={45}
+                            />
+                            <Tooltip content={<TrendTooltip />} />
+                            <Area
+                              type="monotone"
+                              dataKey={progressionMetric}
+                              stroke={activeZone?.color}
+                              strokeWidth={2}
+                              fillOpacity={1}
+                              fill="url(#colorProgression)"
+                              dot={{ fill: activeZone?.color, strokeWidth: 2, r: 4 }}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* Session list, newest first */}
+                    <div className="space-y-2">
+                      {sessionsDesc.map(w => {
+                        const dom = dominantSet(w.intervalData.sets);
+                        return (
+                          <div
+                            key={w.id}
+                            onClick={() => { setShowProgressionModal(false); setShowWorkoutDetail(w.id); }}
+                            className="bg-gray-700 hover:bg-gray-600 rounded p-3 text-sm cursor-pointer transition"
+                          >
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-400 text-xs">{formatDateWithDay(w.date)}</span>
+                              <span className="text-gray-400 text-xs">{Math.round(workMinutes(w))} min work</span>
+                            </div>
+                            <div className="flex justify-between items-center mt-1">
+                              <span className="font-mono text-yellow-400">{w.intervalData.label}</span>
+                              <span className="text-red-400 text-xs">{dom.avgHR != null ? `${dom.avgHR} bpm` : '—'}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Import/Export/Reset */}
         <div className="flex justify-between text-sm mt-6">
