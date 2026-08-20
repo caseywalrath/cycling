@@ -1,5 +1,22 @@
 # Changelog
 
+## Session 17 - Remove Instant Analysis Card, Relocate Copy for Claude (2026-08-20)
+
+### Removed: Instant Analysis Card
+- Removed the "Instant Analysis" card (auto-generated insights list) from the dashboard.
+- Removed its supporting code: `generateInsights()` (~300-line rule-based insight generator) and `getInsightStyle()` (insight icon/color mapping). Both were only used by this card.
+
+### Relocated: Copy for Claude Button
+- The "Copy for Claude" button (calls `copyForAnalysis()`, unchanged) now lives inside the **Training Status** card, directly below the status pill/TSB%, instead of its own card. `copyForAnalysis()` already built its clipboard text independently of the insights list, so no logic changes were needed — only the button's JSX location and styling (small gray/green pill button, `mt-3` spacing to sit under the TSB% line).
+- Removed the plain-text status description (e.g. "Productive overload, fitness improving") that used to sit below the TSB% line in the Training Status card, replaced by the relocated button in that spot. The status label pill and TSB% are unchanged.
+
+### Files Changed
+- `src/App.jsx` — removed Instant Analysis card JSX, `generateInsights()`, `getInsightStyle()`, `insights` variable; moved Copy for Claude button into Training Status card; removed status description paragraph
+- `ARCHITECTURE.md` — UI layout renumbered, Training Summary + Training Status description updated
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 16 - FIT File Import in Log Ride Modal (2026-07-01)
 
 ### Feature: Import FIT File

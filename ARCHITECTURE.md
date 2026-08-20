@@ -160,12 +160,11 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
 4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import. **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.
 5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
-6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB% and description). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
-7. **Instant Analysis card**: Auto-generated insights + "Copy for Claude" button
-8. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
-9. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`
-10. **Ride History button**: Full-width, opens History modal
-11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
+6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB%) and, below it, the **Copy for Claude** button (moved here in Session 17). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
+7. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
+8. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`
+9. **Ride History button**: Full-width, opens History modal
+10. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (outside the modal) closes it (via `onClick` on backdrop + `stopPropagation` on inner content). Key modals:
@@ -180,7 +179,7 @@ All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (ou
 `copyForAnalysis()` uses `navigator.clipboard.writeText()` with a `document.execCommand('copy')` fallback for HTTP/LAN contexts. The fallback creates a hidden textarea, selects it, and copies.
 
 ### Training loads
-`calculateTrainingLoads()` returns `{ ctl, atl, tsb, weeklyTSS, twoWeekTSS, ctl14dAgo }`. The field `twoWeekTSS` is cumulative (includes the 7-day window). Insights derive previous-week TSS as `twoWeekTSS - weeklyTSS` for week-over-week comparison. The `ctl14dAgo` field captures CTL from 14 days ago for Training Status transition detection.
+`calculateTrainingLoads()` returns `{ ctl, atl, tsb, weeklyTSS, twoWeekTSS, ctl14dAgo }`. The field `twoWeekTSS` is cumulative (includes the 7-day window): previous-week TSS is derived as `twoWeekTSS - weeklyTSS` for week-over-week comparison. The `ctl14dAgo` field captures CTL from 14 days ago for Training Status transition detection.
 
 ## Deployment
 
