@@ -1,5 +1,45 @@
 # Changelog
 
+## Session 19 - Interval Detection Fixes (Sub-Threshold Work & Auto-Laps) (2026-08-21)
+
+### Bug: intervals below 85% FTP were never detected
+- **Symptom**: a 2x30 @ 182W tempo session imported from a FIT file produced no intervals at all — no label in Ride History, nothing in Workout Progression.
+- **Root cause**: `detectIntervals()` called a bin "work" only at ≥85% FTP (`WORK_THRESHOLD`). At a 235W FTP that bar is 200W, so a 182W tempo interval never crossed it. The lap fallback used the same 85% bar, so it couldn't rescue the ride either. Every tempo, endurance and low sweet spot session was invisible by construction — only threshold/VO2max work was ever detected.
+- **Fix — adaptive work threshold**: new `adaptiveWorkThreshold()` runs a 1-D 2-means split (Lloyd's algorithm, seeded at the 10th/90th percentiles) over the ride's own smoothed power trace, finding its recovery level and its work level, and puts the threshold at the midpoint. Indoor ERG power is a near-square wave, so this converges cleanly. The 182W/125W ride splits at ~153W and both 30-minute blocks are found.
+- The adaptive value can only ever **lower** the bar: `min(0.85 × FTP, adaptive)`. Nothing that was detected before this change stops being detected.
+- **Guards against phantom intervals**, since the threshold is now relative:
+  - `MIN_WORK_RATIO` (0.60) — a segment must average ≥60% FTP to count as work at all, so a warmup/cooldown split can't be reported as "2x20 @ 120W".
+  - `WORK_REST_SEPARATION` (1.15) — the work level must sit ≥15% above the easy level, otherwise the ride is steady and the adaptive threshold is rejected.
+  - `MIN_SOLO_WORK_RATIO` (0.76) — a *single* work block below 76% FTP is steady riding, not an interval (stops a 90-minute endurance ride becoming "1x70 @ 162W").
+  - Adaptive detection runs for **indoor rides only** (`{ indoor }`, from `rideType`). Outdoor power from rolling terrain is too noisy and would invent intervals; outdoor rides keep the fixed 85%-FTP behavior unchanged.
+
+### Bug: long intervals chopped into auto-laps were mis-counted
+- **Symptom**: the same 2x30 file records twelve laps — each 30-minute interval is split into 8/8/8/6-minute auto-laps. Once the threshold fix let the lap path see them, it would have reported "6x8 @ 181W + 2x6 @ 179W" instead of "2x30 @ 181W".
+- **Fix**: new `mergeLapBlocks()` collapses consecutive laps whose average power is within ±7% into a single block before anything is classified.
+- Lap segmentation is now preferred when it finds **more** intervals than step detection, or when it finds the **same number and agrees on total work time within 25%** — in the tie case lap boundaries are the more accurate of the two (they give exactly 30:00, where step detection includes the ramp-up).
+
+### Fix: interval zone categories now match the app's own zone table
+- `ZONE_POWER_RATIO_RANGES` disagreed with the watt ranges in `ZONES`: a 205W block (Sweet Spot per the zone table at a 235W FTP) was filed under Tempo, because the tempo band ran all the way to 88% FTP.
+- Boundaries realigned to the `ZONES` watt ranges: endurance <0.70, tempo <0.81, sweetspot <0.94, threshold <1.02, vo2max <1.20, anaerobic above.
+- Only affects newly detected/re-detected rides — `intervalData.category` already stored on a ride is untouched.
+
+### Feature: re-detect without re-importing
+- Rides imported before this fix already have their power stream saved, so detection can simply be re-run on it — no need to find and re-import the original `.fit` files.
+- **🔍 Re-detect** button in the Workout Detail modal header — re-runs detection for that one ride.
+- **🔍 Re-scan intervals** button in the Workout Progression modal header — re-runs detection across every ride with a saved stream, after a confirmation showing how many rides will be scanned, then reports how many had intervals found and how many changed.
+- Both skip rides whose `intervalData.source` is `'manual'`, and both keep a user-chosen `zone` as the category rather than overwriting it with the detected one (same rule the FIT import path already used). If a re-detect comes back empty on a ride that already has interval data, the existing data is kept.
+- Lap data isn't stored per ride, so re-detection uses step detection only — usually identical, occasionally a little less precise on interval boundaries than a fresh FIT import.
+
+### Verified against
+The attached `Tempo_2x30` FIT file (75 min, 4500 power records, 12 laps) now returns `2x30 @ 181W [tempo]` with segments at 10:00–40:00 and 42:00–72:00, both with and without lap data. Synthetic checks confirmed 4x4 VO2max, 3x15 sweet spot, 2x20 threshold, 3x20 endurance and mixed-set workouts all still detect correctly, and that steady endurance rides, steady tempo rides, recovery spins and outdoor rolling terrain still return no intervals.
+
+### Files Changed
+- `src/App.jsx` — `adaptiveWorkThreshold()`, `mergeLapBlocks()`, `meanOf()`, detection constants, `detectIntervals()` (adaptive threshold, work floor, lap merging/preference, solo-segment guard), `ZONE_POWER_RATIO_RANGES`, `handleFitFileImport()` (passes `indoor`), `redetectForRide()`/`handleRedetectRide()`/`handleRedetectAll()`, Workout Detail + Workout Progression modal headers
+- `ARCHITECTURE.md` — detection functions, threshold constants table, indoor/outdoor rule, modal headers
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 18 - Indoor Interval Tracking & Progression (2026-08-20)
 
 ### Feature: Interval detection from FIT files
