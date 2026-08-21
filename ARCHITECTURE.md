@@ -82,7 +82,9 @@ getDefaultFormData(hist) // Default form values with latest eFTP from history
 applyDecay(levels, lastWorkedDates) // Returns levels with decay applied (14-day grace,
                          //   -0.1/week, VO2max/Anaerobic 1.5x, floor max(1.0, level*0.5))
 downsampleRecords(records, binSeconds=10) // FIT records -> { binSeconds, power[], hr[] }, null if no power data
-detectIntervals(stream, ftp, laps)  // Step-detection on smoothed power -> { segments, sets, category, label } or null
+detectIntervals(stream, ftp, laps, { indoor }) // Step-detection on smoothed power -> { segments, sets, category, label } or null
+adaptiveWorkThreshold(values, ftp)  // 1-D 2-means split of a power trace -> work/rest threshold, or null
+mergeLapBlocks(laps)                // Collapse consecutive same-power laps into blocks
 buildIntervalLabel(sets)            // Sets -> display string, e.g. "4x6 @ 280W"
 ```
 
@@ -157,8 +159,23 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `getCalendarDays()` | Generate month grid day objects (Monday-start, 35 or 42 cells) |
 | `copyForAnalysis()` | Clipboard export: FTP, W/kg, eFTP, training status, loads (7/14/28d TSS), weekly hours (4wk), recent workouts with day-of-week and ride type, interval progressions (last 3 sessions/category, if any) |
 | `downsampleRecords(records, binSeconds)` | FIT records → 10s-binned `{ binSeconds, power[], hr[] }` for the Workout Detail chart |
-| `detectIntervals(stream, ftp, laps)` | Step-detection (85% FTP threshold, 90s min work, small-gap merging) with a lap-based fallback; groups segments into sets and categorizes by dominant set's %FTP |
+| `detectIntervals(stream, ftp, laps, {indoor})` | Step-detection on smoothed power with an **adaptive** work threshold (Session 19); 90s min work, small-gap merging, lap-block preference; groups segments into sets and categorizes by dominant set's %FTP |
+| `adaptiveWorkThreshold(values, ftp)` | 1-D 2-means (Lloyd's) split of a power trace into easy/work levels → midpoint threshold, or `null` when the ride has no two-level structure |
+| `mergeLapBlocks(laps)` | Collapses consecutive laps within ±7% avg power into single blocks (undoes auto-lap chopping of long intervals) |
+| `redetectForRide(ride)` / `handleRedetectRide(id)` / `handleRedetectAll()` | Re-run detection against a ride's already-saved `stream` — no FIT re-import needed |
 | `buildIntervalLabel(sets)` | Sets → display string, e.g. `"4x6 @ 280W"` |
+
+### Interval detection thresholds (Session 19)
+| Constant | Value | Role |
+|----------|-------|------|
+| `WORK_THRESHOLD` | 0.85 | Fixed %FTP work threshold. Now an **upper bound** — the adaptive threshold may only lower it, never raise it, so nothing that used to be detected stops being detected. Used as-is for outdoor rides. |
+| `MIN_WORK_RATIO` | 0.60 | A segment must average at least this %FTP to count as work at all (floor for the adaptive threshold). |
+| `WORK_REST_SEPARATION` | 1.15 | The ride's work level must sit this far above its easy level, otherwise the ride is treated as steady and the adaptive threshold is rejected. |
+| `MIN_SOLO_WORK_RATIO` | 0.76 | A *single* work block below this %FTP is steady riding, not an interval. |
+| `MAX_SINGLE_SEGMENT_COVERAGE` | 0.85 | A single block covering more than this share of the ride = steady ride → `null`. |
+| `LAP_MERGE_TOLERANCE` | 0.07 | Consecutive laps within ±7% watts merge into one block before classification. |
+
+**Indoor vs outdoor**: the adaptive threshold only runs for indoor rides (`{ indoor: true }`, derived from `rideType`). Indoor ERG power is a near-square wave, so the ride's own two power levels are trustworthy; outdoor power from rolling terrain is not, and would generate phantom intervals — outdoor rides keep the conservative fixed 85%-FTP threshold.
 
 ## Charts (Tabbed: Hours, TSS, Elevation, eFTP)
 
@@ -208,8 +225,8 @@ All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (ou
 - **CSV Import** (`showCSVImport`): Paste textarea for intervals.icu CSV
 - **Profile** (`showProfileModal`): Weight, HR, age settings
 - **Event** (`showEventModal`): Goal event configuration
-- **Workout Detail** (`showWorkoutDetail`, Session 18): Power/HR timeline chart (Recharts `ComposedChart`) with detected intervals shaded via `ReferenceArea`, plus an interval table. Opened from Ride History's 📊 button, the Progression modal's session list, or automatically after a FIT backfill.
-- **Workout Progression** (`showProgressionModal`, Session 18): Opens with no zone tab selected — that default view lists the 5 most recent indoor workouts with their zones. Selecting a category tab (`progressionCategory`) switches to that zone's interval session history: a work-minutes/avg-watts trend chart and a newest-first session list — the planning view for deciding the next block's duration/wattage.
+- **Workout Detail** (`showWorkoutDetail`, Session 18): Power/HR timeline chart (Recharts `ComposedChart`) with detected intervals shaded via `ReferenceArea`, plus an interval table. Opened from Ride History's 📊 button, the Progression modal's session list, or automatically after a FIT backfill. Header carries a **🔍 Re-detect** button (Session 19) that re-runs detection on the ride's saved stream.
+- **Workout Progression** (`showProgressionModal`, Session 18): Header carries a **🔍 Re-scan intervals** button (Session 19) that re-runs detection across every ride with a saved stream (skipping `intervalData.source === 'manual'`). Opens with no zone tab selected — that default view lists the 5 most recent indoor workouts with their zones. Selecting a category tab (`progressionCategory`) switches to that zone's interval session history: a work-minutes/avg-watts trend chart and a newest-first session list — the planning view for deciding the next block's duration/wattage.
 
 ### Clipboard
 `copyForAnalysis()` uses `navigator.clipboard.writeText()` with a `document.execCommand('copy')` fallback for HTTP/LAN contexts. The fallback creates a hidden textarea, selects it, and copies.
