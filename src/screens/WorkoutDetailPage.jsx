@@ -1,17 +1,22 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Area, Line, ReferenceArea, Legend } from 'recharts';
 import { formatDateWithDay } from '../lib/dates.js';
+import { getZoneColor, getZoneName } from '../lib/zones.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
-import { Page, Button, EmptyState, useToast } from '../components/ui/index.js';
+import { goBack } from '../state/useHashRoute.js';
+import { Page, Button, StatTile, EmptyState, useToast, useConfirm } from '../components/ui/index.js';
 
-// Ride page at #/ride/<id>. The old Workout Detail modal as a full-screen Page (V2 Phase 3):
-// summary row, power/HR chart with shaded intervals, interval table — unchanged. Header
-// right action: Re-detect (rides with a stream). Phase 4 rebuilds this page.
+// Ride page at #/ride/<id> (V2 Phase 4 rebuild — replaces the old Workout Detail modal look).
+// Header (name/date/type-zone pill/interval label), a 3x2 stats grid, the power/HR chart with
+// shaded intervals, the interval table, notes, and the action row (Edit / Re-detect / Attach
+// ride file / Delete).
 export default function WorkoutDetailPage({ rideId }) {
-  const { history, redetectRide } = useAppData();
+  const { history, redetectRide, importRideFile, attachRideFile, deleteRide } = useAppData();
   const { openEditRide } = useShell();
   const toast = useToast();
+  const confirm = useConfirm();
+  const attachInputRef = useRef(null);
   const detailRide = history.find(w => String(w.id) === String(rideId));
 
   if (!detailRide) {
@@ -21,6 +26,14 @@ export default function WorkoutDetailPage({ rideId }) {
       </Page>
     );
   }
+
+  const isOutdoor = detailRide.rideType === 'Outdoor';
+  const avgHr = detailRide.stream?.hr?.length
+    ? (() => {
+        const vals = detailRide.stream.hr.filter(v => v != null);
+        return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : null;
+      })()
+    : null;
 
   const chartData = detailRide.stream
     ? detailRide.stream.power.map((p, i) => ({
@@ -46,48 +59,77 @@ export default function WorkoutDetailPage({ rideId }) {
     return null;
   };
 
+  const handleRedetect = () => {
+    const res = redetectRide(detailRide.id);
+    toast(res.message, { tone: res.ok ? 'success' : 'info' });
+  };
+
+  const handleAttachFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const result = await importRideFile(file);
+      const { detection } = attachRideFile(detailRide, result);
+      toast(detection ? `✓ Interval data attached: ${detection.label}` : '✓ Power/HR data attached (no structured intervals detected).', { tone: 'success' });
+    } catch (err) {
+      toast(err.message || 'Could not read this ride file.', { tone: 'error' });
+    }
+  };
+
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: 'Delete this ride?',
+      message: `${detailRide.name || detailRide.notes || 'Workout'}\nDate: ${detailRide.date}\nDuration: ${detailRide.duration} min\n\nThis action cannot be undone.`,
+      confirmLabel: 'Delete ride',
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteRide(detailRide.id);
+    toast('Ride deleted');
+    goBack('#/rides');
+  };
+
   return (
     <Page
-      title={detailRide.name || detailRide.notes || 'Workout'}
+      title="Ride"
       backTo="#/rides"
       right={detailRide.stream ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            const res = redetectRide(detailRide.id);
-            toast(res.message, { tone: res.ok ? 'success' : 'info' });
-          }}
-          aria-label="Re-detect intervals"
-        >
+        <Button variant="ghost" size="sm" onClick={handleRedetect} aria-label="Re-detect intervals">
           Re-detect
         </Button>
       ) : null}
     >
-      <div className="text-gray-400 text-sm mb-3">{formatDateWithDay(detailRide.date)}</div>
+      {/* Header */}
+      <div className="mb-4">
+        <h2 className="text-xl font-bold truncate">{detailRide.name || detailRide.notes || 'Workout'}</h2>
+        <div className="flex items-center gap-2 flex-wrap mt-1">
+          <span className="text-sm text-gray-400">{formatDateWithDay(detailRide.date)}</span>
+          {isOutdoor ? (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-700 text-gray-200">Outdoor</span>
+          ) : detailRide.zone ? (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{ backgroundColor: getZoneColor(detailRide.zone) + '33', color: getZoneColor(detailRide.zone) }}>
+              {getZoneName(detailRide.zone)}
+            </span>
+          ) : (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-yellow-900/40 text-yellow-400">Needs zone</span>
+          )}
+          {detailRide.intervalData?.label && (
+            <span className="text-sm text-yellow-400 font-mono">{detailRide.intervalData.label}</span>
+          )}
+        </div>
+      </div>
 
-      {/* Summary row */}
-      <div className="grid grid-cols-5 gap-2 text-xs mb-4 bg-gray-800 rounded-2xl p-3 tabular-nums">
-        <div>
-          <span className="text-gray-400">Duration</span>
-          <div className="font-mono">{detailRide.duration}min</div>
-        </div>
-        <div>
-          <span className="text-gray-400">NP</span>
-          <div className="font-mono">{detailRide.normalizedPower}W</div>
-        </div>
-        <div>
-          <span className="text-gray-400">TSS</span>
-          <div className="font-mono">{detailRide.tss}</div>
-        </div>
-        <div>
-          <span className="text-gray-400">IF</span>
-          <div className="font-mono">{detailRide.intensityFactor?.toFixed(2) ?? '—'}</div>
-        </div>
-        <div>
-          <span className="text-gray-400">Intervals</span>
-          <div className="font-mono text-yellow-400">{detailRide.intervalData?.label || '—'}</div>
-        </div>
+      {/* Stats grid: 3 columns x 2 rows, plus Avg HR when known */}
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <StatTile label="Duration" value={detailRide.duration} unit="min" />
+        <StatTile label="Distance" value={detailRide.distance > 0 ? detailRide.distance : '—'} unit={detailRide.distance > 0 ? 'mi' : undefined} />
+        <StatTile label="Elevation" value={detailRide.elevation > 0 ? detailRide.elevation : '—'} unit={detailRide.elevation > 0 ? 'ft' : undefined} />
+        <StatTile label="NP" value={detailRide.normalizedPower ?? '—'} unit={detailRide.normalizedPower ? 'W' : undefined} />
+        <StatTile label="TSS" value={detailRide.tss ?? '—'} />
+        <StatTile label="IF" value={detailRide.intensityFactor != null ? detailRide.intensityFactor.toFixed(2) : '—'} />
+        {avgHr != null && <StatTile label="Avg HR" value={avgHr} unit="bpm" />}
       </div>
 
       {/* Power/HR chart */}
@@ -167,7 +209,7 @@ export default function WorkoutDetailPage({ rideId }) {
 
       {/* Interval table */}
       {detailRide.intervalData?.segments?.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1 mb-4">
           <h3 className="text-sm font-medium text-gray-300 mb-2">Detected Intervals</h3>
           {detailRide.intervalData.segments.map((seg, i) => (
             <div key={i} className="bg-gray-800 rounded-xl px-3 py-2 flex justify-between text-sm font-mono tabular-nums">
@@ -180,8 +222,24 @@ export default function WorkoutDetailPage({ rideId }) {
         </div>
       )}
 
-      <div className="mt-6">
+      {/* Phase 5: best efforts table, time-in-zones bar, heart-rate drift, efficiency factor go here. */}
+
+      {/* Notes */}
+      {detailRide.notes && (
+        <div className="mb-4">
+          <h3 className="text-sm font-medium text-gray-300 mb-1">Notes</h3>
+          <p className="text-base text-gray-300 whitespace-pre-line bg-gray-800 rounded-xl p-3">{detailRide.notes}</p>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="space-y-2 mt-6">
         <Button variant="secondary" block onClick={() => openEditRide(detailRide.id)}>Edit ride</Button>
+        <label className="inline-flex w-full items-center justify-center min-h-[44px] rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-100 text-base font-medium px-4 cursor-pointer transition-colors">
+          Attach ride file (.fit or .tcx)
+          <input ref={attachInputRef} type="file" accept=".fit,.FIT,.tcx,.TCX" onChange={handleAttachFile} className="hidden" />
+        </label>
+        <Button variant="ghost-destructive" block onClick={handleDelete}>Delete ride</Button>
       </div>
     </Page>
   );
