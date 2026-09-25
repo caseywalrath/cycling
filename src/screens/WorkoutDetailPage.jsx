@@ -1,18 +1,24 @@
 import React, { useRef } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Area, Line, ReferenceArea, Legend } from 'recharts';
 import { formatDateWithDay } from '../lib/dates.js';
-import { getZoneColor, getZoneName } from '../lib/zones.js';
+import { ZONES, getZoneColor, getZoneName } from '../lib/zones.js';
+import { bestsForRide, timeInZones, aerobicDecoupling, decouplingBand, efficiencyFactor } from '../lib/analysis.js';
+import { newBestsForRide } from '../lib/records.js';
+import { formatMinutes } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
 import { goBack } from '../state/useHashRoute.js';
-import { Page, Button, StatTile, EmptyState, useToast, useConfirm } from '../components/ui/index.js';
+import { Page, Button, Card, StatTile, EmptyState, useToast, useConfirm } from '../components/ui/index.js';
+
+// Best-effort durations shown on the Ride page, with their display labels (V2_PLAN.md §5.6).
+const BEST_EFFORT_ROWS = [['5', '5s'], ['60', '1m'], ['300', '5m'], ['1200', '20m'], ['3600', '60m']];
 
 // Ride page at #/ride/<id> (V2 Phase 4 rebuild — replaces the old Workout Detail modal look).
 // Header (name/date/type-zone pill/interval label), a 3x2 stats grid, the power/HR chart with
 // shaded intervals, the interval table, notes, and the action row (Edit / Re-detect / Attach
 // ride file / Delete).
 export default function WorkoutDetailPage({ rideId }) {
-  const { history, redetectRide, importRideFile, attachRideFile, deleteRide } = useAppData();
+  const { history, currentFTP, redetectRide, importRideFile, attachRideFile, deleteRide } = useAppData();
   const { openEditRide } = useShell();
   const toast = useToast();
   const confirm = useConfirm();
@@ -35,14 +41,26 @@ export default function WorkoutDetailPage({ rideId }) {
       })()
     : null;
 
+  // V2 Phase 5: a ride can have HR with no power (stream.power === null) — chart HR only.
+  const streamLength = detailRide.stream ? (detailRide.stream.power?.length ?? detailRide.stream.hr.length) : 0;
   const chartData = detailRide.stream
-    ? detailRide.stream.power.map((p, i) => ({
+    ? Array.from({ length: streamLength }, (_, i) => ({
         min: Math.round((i * detailRide.stream.binSeconds) / 60 * 10) / 10,
-        power: p,
+        power: detailRide.stream.power ? detailRide.stream.power[i] : null,
         hr: detailRide.stream.hr[i],
       }))
     : [];
   const hasHR = detailRide.stream && detailRide.stream.hr.some(v => v != null);
+  const hasPower = detailRide.stream && detailRide.stream.power != null;
+
+  // V2 Phase 5 §5.6: best efforts, time in zones, HR drift and efficiency.
+  const { bests, source: bestsSource } = bestsForRide(detailRide);
+  const newBests = newBestsForRide(history, detailRide);
+  const zoneTotals = currentFTP ? timeInZones(detailRide, currentFTP) : null;
+  const totalZoneSeconds = zoneTotals ? Object.values(zoneTotals).reduce((a, b) => a + b, 0) : 0;
+  const decoupling = aerobicDecoupling(detailRide);
+  const decBand = decouplingBand(decoupling);
+  const ef = efficiencyFactor(detailRide);
 
   const DetailTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -147,25 +165,27 @@ export default function WorkoutDetailPage({ rideId }) {
                 tickFormatter={(v) => `${Math.round(v)}`}
                 label={{ value: 'min', position: 'insideBottomRight', offset: -5, fill: '#9CA3AF', fontSize: 11 }}
               />
-              <YAxis
-                yAxisId="power"
-                stroke="#3B82F6"
-                style={{ fontSize: '12px' }}
-                tickFormatter={(v) => `${v}W`}
-                width={50}
-              />
+              {hasPower && (
+                <YAxis
+                  yAxisId="power"
+                  stroke="#3B82F6"
+                  style={{ fontSize: '12px' }}
+                  tickFormatter={(v) => `${v}W`}
+                  width={50}
+                />
+              )}
               {hasHR && (
                 <YAxis
                   yAxisId="hr"
-                  orientation="right"
+                  orientation={hasPower ? 'right' : 'left'}
                   stroke="#EF4444"
                   style={{ fontSize: '12px' }}
                   tickFormatter={(v) => `${v}`}
-                  width={40}
+                  width={hasPower ? 40 : 50}
                 />
               )}
               <Tooltip content={<DetailTooltip />} />
-              {detailRide.intervalData?.segments?.map((seg, i) => (
+              {hasPower && detailRide.intervalData?.segments?.map((seg, i) => (
                 <ReferenceArea
                   key={i}
                   yAxisId="power"
@@ -176,17 +196,19 @@ export default function WorkoutDetailPage({ rideId }) {
                   strokeOpacity={0}
                 />
               ))}
-              <Area
-                yAxisId="power"
-                type="stepAfter"
-                dataKey="power"
-                name="Power"
-                stroke="#3B82F6"
-                fill="#3B82F6"
-                fillOpacity={0.25}
-                dot={false}
-                connectNulls
-              />
+              {hasPower && (
+                <Area
+                  yAxisId="power"
+                  type="stepAfter"
+                  dataKey="power"
+                  name="Power"
+                  stroke="#3B82F6"
+                  fill="#3B82F6"
+                  fillOpacity={0.25}
+                  dot={false}
+                  connectNulls
+                />
+              )}
               {hasHR && (
                 <Line
                   yAxisId="hr"
@@ -222,7 +244,68 @@ export default function WorkoutDetailPage({ rideId }) {
         </div>
       )}
 
-      {/* Phase 5: best efforts table, time-in-zones bar, heart-rate drift, efficiency factor go here. */}
+      {/* V2 Phase 5: best efforts, time in zones, heart-rate drift, efficiency factor. */}
+      {Object.keys(bests).length > 0 && (
+        <Card className="mb-4">
+          <h3 className="text-sm font-medium text-gray-300 mb-2">Best efforts</h3>
+          <div className="grid grid-cols-5 gap-2 text-center">
+            {BEST_EFFORT_ROWS.filter(([d]) => bests[d] != null).map(([d, label]) => (
+              <div key={d}>
+                <div className="text-xs text-gray-400">{label}</div>
+                <div className="text-base font-bold tabular-nums">{bests[d]}W</div>
+                {newBests.includes(d) && <div className="text-[10px] text-yellow-400 mt-0.5">★ New best</div>}
+              </div>
+            ))}
+          </div>
+          {bestsSource === '10s' && (
+            <p className="text-xs text-gray-500 mt-2">Re-attach the ride file for sprint-length bests.</p>
+          )}
+        </Card>
+      )}
+
+      {zoneTotals && totalZoneSeconds > 0 && (
+        <Card className="mb-4">
+          <h3 className="text-sm font-medium text-gray-300 mb-2">Time in zones</h3>
+          <div className="flex w-full h-3 rounded-full overflow-hidden">
+            {ZONES.map(z => {
+              const secs = zoneTotals[z.id] || 0;
+              if (secs === 0) return null;
+              return <div key={z.id} style={{ width: `${(secs / totalZoneSeconds) * 100}%`, backgroundColor: z.color }} />;
+            })}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
+            {ZONES.map(z => {
+              const secs = zoneTotals[z.id] || 0;
+              if (secs === 0) return null;
+              return (
+                <div key={z.id} className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: z.color }} />
+                  <span className="text-gray-400">{z.name}</span>
+                  <span className="tabular-nums">{formatMinutes(secs / 60)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {decoupling != null && (
+        <Card className="mb-4">
+          <h3 className="text-sm font-medium text-gray-300 mb-1">Heart-rate drift</h3>
+          <div className="flex items-baseline gap-2">
+            <span className="text-xl font-bold tabular-nums">{decoupling}%</span>
+            {decBand && <span className="text-sm" style={{ color: decBand.color }}>{decBand.label}</span>}
+          </div>
+        </Card>
+      )}
+
+      {ef != null && (
+        <Card className="mb-4">
+          <h3 className="text-sm font-medium text-gray-300 mb-1">Efficiency</h3>
+          <div className="text-xl font-bold tabular-nums">{ef}</div>
+          <p className="text-xs text-gray-500 mt-0.5">Higher over time = fitter</p>
+        </Card>
+      )}
 
       {/* Notes */}
       {detailRide.notes && (
