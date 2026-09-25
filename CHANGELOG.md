@@ -85,6 +85,10 @@ changed in the baseline: a new `numbers.todayAlerts` field lists the alerts the 
 produces — no existing number (Fitness/Fatigue/Form, the imported test ride's numbers, etc.)
 changed at all.
 
+### Fix found during the orchestrator's review
+- The Power Curve chart's left-hand labels were cut off at iPhone width ("280W" showed as "80W"). The axis is wider now.
+- The regression check now waits 3.5 seconds (was 1.8) before each tab screenshot, so charts have finished drawing. Screenshots taken mid-animation had made some lines look cut off.
+
 ## Session 24 - V2 Phase 5: Metrics Engine (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 5. It doesn't change how any screen looks or

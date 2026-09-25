@@ -75,7 +75,7 @@ export default function PowerCurveChart() {
             stroke="#9CA3AF"
             style={{ fontSize: '12px' }}
           />
-          <YAxis stroke="#9CA3AF" style={{ fontSize: '12px' }} tickFormatter={(v) => `${v}W`} width={45} />
+          <YAxis stroke="#9CA3AF" style={{ fontSize: '12px' }} tickFormatter={(v) => `${v}W`} width={55} />
           <Tooltip content={<CurveTooltip />} />
           <Line type="monotone" dataKey="allTime" stroke="#A855F7" strokeOpacity={0.4} strokeWidth={2} dot={{ r: 3, fill: '#A855F7', fillOpacity: 0.4 }} connectNulls />
           <Line type="monotone" dataKey="last90" stroke="#A855F7" strokeWidth={2} dot={{ r: 4, fill: '#A855F7' }} activeDot={{ r: 6 }} connectNulls />

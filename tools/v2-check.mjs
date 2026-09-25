@@ -172,7 +172,7 @@ const shootTab = async (name) => {
   await page.waitForTimeout(300);
   const h = await page.evaluate(() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
   await page.setViewportSize({ width: 390, height: Math.min(h, 8000) });
-  await page.waitForTimeout(1800); // let Recharts finish its draw-in animation
+  await page.waitForTimeout(3500); // let Recharts finish its draw-in animation
   await page.screenshot({ path: path.join(OUT, `${name}.png`) });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(200);
@@ -227,7 +227,7 @@ await page.waitForFunction(() => window.__progressReadyMs != null);
 const progressTabSwitchMs = Math.round(await page.evaluate(() => window.__progressReadyMs));
 extras.progressTabSwitchMs = progressTabSwitchMs;
 console.log(`\nProgress tab switch: ${progressTabSwitchMs}ms (must be < 300ms)`);
-await page.waitForTimeout(1800); // let every chart finish its draw-in before tapping
+await page.waitForTimeout(3500); // let every chart finish its draw-in before tapping
 
 // ---------- V2 Phase 6 §6.4: tap-test every new chart's tooltip (tap, then screenshot) ----------
 const tapChart = async (chartName, filename) => {
