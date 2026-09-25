@@ -1,5 +1,76 @@
 # Changelog
 
+## Session 24 - V2 Phase 5: Metrics Engine (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 5. It doesn't change how any screen looks or
+works — it adds a "metrics engine" underneath: better numbers computed from your ride files, and
+a few new sections on the Ride page that show them. It also adds the project's first automated
+tests, so future changes are less likely to quietly break something.
+
+### What you'll see on your iPhone
+
+- **Ride pages** (tap any ride that has a power file attached) now show, when there's enough
+  data for them:
+  - A **Best efforts** table — your best 5-second, 1-minute, 5-minute, 20-minute and 60-minute
+    power for that ride, with a gold **★ New best** badge next to any that beat your all-time or
+    last-90-days record.
+  - A **Time in zones** bar — a coloured strip showing how many minutes of the ride were spent
+    in each training zone.
+  - **Heart-rate drift** — how much your heart rate crept up relative to your power over a long,
+    steady ride (only shown for rides that qualify — a genuinely steady effort of an hour or
+    more), with a plain-language note: "Solid aerobic base", "Some drift", or "Drifting: base
+    needs work".
+  - **Efficiency** — your power-to-heart-rate ratio for an easy, longer ride, with "Higher over
+    time = fitter" underneath. This is the kind of number that's only useful to watch trend over
+    months, not any single ride.
+  - These are re-computed from the ride file itself, so **older rides need their file
+    re-attached** (Ride page → "Attach ride file") to get the new Best efforts/Time in zones —
+    everything else on the page works with what's already saved.
+- **Rides with a heart-rate monitor but no power meter** (for example, an outdoor ride recorded
+  with just a chest strap) now work properly for the first time:
+  - Importing one now shows an estimated **Training Stress Score based on your heart rate**
+    instead of showing nothing or a wrong number — the Log Ride summary says something like
+    "TSS 64 (from heart rate)".
+  - Its Ride page now draws a heart-rate chart (there's just no power line, since there's no
+    power to show).
+  - This heart-rate-based TSS estimate needs your **Resting HR** and either your **Max HR** or
+    your **Threshold HR (LTHR)** filled in under Settings → Profile — if either is missing, the
+    ride still saves, just without an estimated TSS.
+- Everything else — your Fitness/Fatigue/Form numbers, your FTP, your progression levels — is
+  unchanged. This phase is purely additive.
+
+### Under the hood (for the curious)
+
+- Every imported ride file is now also processed at full, one-second resolution to compute
+  precise best-power numbers (`bests`), heart-rate stats (`hrStats`) and true average power
+  (`avgPower`) — previously the app only had 10-second-averaged data, which understates short,
+  sharp efforts like a 5-second sprint.
+- Added the project's first automated tests (`npm test`, using a small new tool called
+  **vitest** — the only new dependency this whole project plan allows). 69 tests check the new
+  math (and some of the existing math it builds on) behaves correctly, including tricky edge
+  cases like a heart-rate-only file or a gap in the recording.
+- New files: `src/lib/analysis.js` (per-ride numbers) and `src/lib/records.js` (best-ever and
+  year-to-date numbers across all your rides). These aren't used anywhere else yet — Phase 6
+  wires them into the Progress tab's charts and a few new "New best!" style alerts on Today.
+
+### Baseline change (the automated regression check)
+
+The check that compares the app's behavior against a fixed baseline (`tools/v2-check.mjs`) now
+also records the imported test ride's best 5-minute power and heart-rate stats. Since these are
+brand-new fields that didn't exist before, the baseline file (`tools/v2-baseline.json`) was
+re-written once to include them — nothing about your Fitness/Fatigue/Form numbers changed; only
+two new pieces of data were added to what the check watches for.
+
+### Anything skipped?
+
+- The Ride page's new sections don't show up for rides saved before this update, because the
+  detailed numbers they need weren't computed at the time — you'd need to use "Attach ride file"
+  on an older ride to get them (see above). This is expected, not a bug: old data is never
+  guessed at or invented.
+- These new numbers aren't shown anywhere except the Ride page yet. Phase 6 (next) adds them to
+  the Progress tab's charts (a power curve, a "time in zones" chart, an efficiency trend) and to
+  Today's alerts (e.g. "New best!", "Your heart rate hit a new high — update your profile?").
+
 ## Session 24 - V2 Phase 4: Rides, Ride Page, Log Ride, Settings and Auto-Sync (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 4. It redesigns the three tabs Phase 3 moved but
