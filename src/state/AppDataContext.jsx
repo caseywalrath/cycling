@@ -5,7 +5,7 @@ import { toLocalDateStr, parseDuration } from '../lib/dates.js';
 import { parseFitFile, parseTcxFile, findMatchingRideForImport } from '../lib/rideFiles.js';
 import { EFTP_PROMPT_KEY, buildEftpTimeline } from '../lib/eftp.js';
 import { detectIntervals } from '../lib/intervals.js';
-import { applyDecay, calculateNewLevel } from '../lib/progression.js';
+import { applyDecay, calculateNewLevelLegacy as calculateNewLevel } from '../lib/progression.js';
 import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss, dailyLoadSeries, rampRate as computeRampRate } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
 import { MAXHR_PROMPT_KEY, readDismissals, writeDismissal } from '../lib/alerts.js';
