@@ -116,7 +116,15 @@ export default function ProgressionTracker() {
         const loadedLevels = parsed.levels || DEFAULT_LEVELS;
         setLevels(loadedLevels);
         setDisplayLevels(loadedLevels);
-        setHistory(parsed.history || []);
+        // v2 Phase 2 migration: outdoor rides were sometimes saved with a detected zone
+        // category leaking into intervalData (e.g. filed as VO2max). Outdoor rides don't
+        // belong to a training zone (D5), so clear it once, here, on load.
+        const loadedHistory = (parsed.history || []).map(w =>
+          (w.rideType === 'Outdoor' && w.intervalData && w.intervalData.category != null)
+            ? { ...w, intervalData: { ...w.intervalData, category: null } }
+            : w
+        );
+        setHistory(loadedHistory);
 
         // Load FTP
         if (parsed.ftp) {
@@ -645,7 +653,7 @@ export default function ProgressionTracker() {
           stream: pendingFitDetail.stream,
           intervalData: pendingFitDetail.detection
             ? { ...pendingFitDetail.detection, source: 'auto',
-                category: (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
+                category: isOutdoor ? null : (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
             : null,
         } : {}),
       };
@@ -714,7 +722,7 @@ export default function ProgressionTracker() {
           stream: pendingFitDetail.stream,
           intervalData: pendingFitDetail.detection
             ? { ...pendingFitDetail.detection, source: 'auto',
-                category: (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
+                category: isOutdoor ? null : (zone && zone !== 'recovery') ? zone : pendingFitDetail.detection.category }
             : null,
         } : {}),
       };
@@ -965,7 +973,9 @@ export default function ProgressionTracker() {
             setHistory(prev => prev.map(w => w.id === existing.id ? {
               ...w,
               stream: parsed.stream,
-              intervalData: detection ? { ...detection, source: 'auto' } : null,
+              intervalData: detection
+                ? { ...detection, source: 'auto', category: existing.rideType === 'Outdoor' ? null : detection.category }
+                : null,
             } : w));
             markDataChanged();
             setShowLogRideModal(false);
@@ -983,7 +993,12 @@ export default function ProgressionTracker() {
         const detection = currentFTP
           ? detectIntervals(parsed.stream, currentFTP, parsed.laps, { indoor: parsed.rideType !== 'Outdoor' })
           : null;
-        setFormData(prev => ({ ...prev, ...parsed, ...(detection ? { zone: detection.category } : {}) }));
+        setFormData(prev => ({
+          ...prev,
+          ...parsed,
+          // Only pre-select a zone for indoor rides; outdoor rides are never filed under one (D5).
+          ...(detection && parsed.rideType !== 'Outdoor' ? { zone: detection.category } : {}),
+        }));
         setPendingFitDetail({ stream: parsed.stream, detection });
       } catch (err) {
         alert(err.message || 'Could not read this ride file.');
@@ -1006,7 +1021,8 @@ export default function ProgressionTracker() {
       ...detection,
       source: 'auto',
       // Same rule as the FIT import path: a zone the user picked wins over the detected one.
-      category: (ride.zone && ride.zone !== 'recovery') ? ride.zone : detection.category,
+      // Outdoor rides are never filed under a zone (D5).
+      category: ride.rideType === 'Outdoor' ? null : (ride.zone && ride.zone !== 'recovery') ? ride.zone : detection.category,
     };
   };
 
