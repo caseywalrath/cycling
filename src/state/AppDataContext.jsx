@@ -6,8 +6,10 @@ import { parseFitFile, parseTcxFile, findMatchingRideForImport } from '../lib/ri
 import { EFTP_PROMPT_KEY, buildEftpTimeline } from '../lib/eftp.js';
 import { detectIntervals } from '../lib/intervals.js';
 import { applyDecay, calculateNewLevel } from '../lib/progression.js';
-import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss } from '../lib/load.js';
+import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss, dailyLoadSeries, rampRate as computeRampRate } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
+import { MAXHR_PROMPT_KEY, readDismissals, writeDismissal } from '../lib/alerts.js';
+import { personalBests, records as computeRecords, observedMaxHr } from '../lib/records.js';
 
 // All persisted app data and every action that changes it (V2 Phase 3).
 //
@@ -146,6 +148,16 @@ export function AppDataProvider({ children }) {
     () => getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo),
     [loads]
   );
+
+  // V2 Phase 6: shared inputs for the Progress tab's charts and alerts, memoised so the
+  // tab switch stays fast (§6.4 — under 300ms with 158 seeded rides) even though several of
+  // these walk the whole history. Keyed on history and currentFTP per the plan, even where a
+  // given value (e.g. dailyLoadSeries) doesn't itself depend on FTP.
+  const fitnessSeries = useMemo(() => dailyLoadSeries(history, new Date()), [history, currentFTP, todayKey]);
+  const rampRate = useMemo(() => computeRampRate(fitnessSeries), [fitnessSeries]);
+  const bestCurves = useMemo(() => personalBests(history, new Date()), [history, currentFTP, todayKey]);
+  const rideRecords = useMemo(() => computeRecords(history, new Date()), [history, currentFTP, todayKey]);
+  const maxHrObserved = useMemo(() => observedMaxHr(history), [history, currentFTP]);
 
   // ---------------- load / save ----------------
   useEffect(() => {
@@ -305,6 +317,23 @@ export function AppDataProvider({ children }) {
   const resolveEftpAlert = (value) => {
     setEftpPromptedValue(value);
     try { localStorage.setItem(EFTP_PROMPT_KEY, String(value)); } catch { /* ignore */ }
+  };
+
+  // V2 Phase 6 §6.2: the highest observed max HR the user has already answered — same
+  // device-local pattern as eFTP above.
+  const [maxhrPromptedValue, setMaxhrPromptedValue] = useState(() => {
+    try { return parseInt(localStorage.getItem(MAXHR_PROMPT_KEY), 10) || 0; } catch { return 0; }
+  });
+  const resolveMaxHrAlert = (value) => {
+    setMaxhrPromptedValue(value);
+    try { localStorage.setItem(MAXHR_PROMPT_KEY, String(value)); } catch { /* ignore */ }
+  };
+
+  // V2 Phase 6 §6.2: one device-local JSON map for the newer alerts' dismiss state (new
+  // best per ride id, ramp rate's 7-day snooze, feels-harder's "until a new ride" marker).
+  const [alertDismissals, setAlertDismissals] = useState(() => readDismissals());
+  const dismissAlert = (key, value = true) => {
+    setAlertDismissals(writeDismissal(key, value));
   };
 
   // Mark data as changed (updates exportedAt timestamp for sync conflict resolution)
@@ -942,11 +971,12 @@ export function AppDataProvider({ children }) {
     levels, displayLevels, animatingZone, history, recentChanges, lastWorkedDates,
     currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData,
     exportedAt, lastSyncedAt, isDriveSyncing, driveSyncStatus, eftpPromptedValue,
-    lastLoggedWorkout, hasUnsyncedChanges,
+    lastLoggedWorkout, hasUnsyncedChanges, maxhrPromptedValue, alertDismissals,
     // Log Ride form
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     // derived
     effectiveLevels, eftpTimeline, currentEftp, loads, trainingStatus,
+    fitnessSeries, rampRate, bestCurves, rideRecords, maxHrObserved,
     calculateTSS, calculateIF,
     // actions
     saveRide: handleLogWorkout,
@@ -961,7 +991,7 @@ export function AppDataProvider({ children }) {
     oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
     exportData, readBackupFile, restoreBackup,
     syncWithDrive: handleDriveSync,
-    resolveEftpAlert,
+    resolveEftpAlert, resolveMaxHrAlert, dismissAlert,
     buildCopyText,
     markDataChanged,
   };

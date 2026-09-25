@@ -72,15 +72,20 @@ function AlertRow({ alert, onAction }) {
 export default function TodayScreen() {
   const {
     history, currentFTP, userProfile, currentEftp, loads, trainingStatus, event,
-    eftpPromptedValue, resolveEftpAlert, buildCopyText,
+    eftpPromptedValue, resolveEftpAlert, maxhrPromptedValue, resolveMaxHrAlert,
+    alertDismissals, dismissAlert, buildCopyText,
   } = useAppData();
   const { openLogRide, openEditRide } = useShell();
   const toast = useToast();
   const [copySuccess, setCopySuccess] = useState(false);
 
   const alerts = useMemo(
-    () => buildAlerts({ history, currentFTP, event, eftpPromptedValue }, { currentEftp }, new Date()),
-    [history, currentFTP, event, eftpPromptedValue, currentEftp]
+    () => buildAlerts(
+      { history, currentFTP, event, eftpPromptedValue, userProfile, dismissals: alertDismissals, maxhrPromptedValue },
+      { currentEftp },
+      new Date()
+    ),
+    [history, currentFTP, event, eftpPromptedValue, currentEftp, userProfile, alertDismissals, maxhrPromptedValue]
   );
   const week = useMemo(() => weekComparison(history), [history]);
   const latest = useMemo(() => latestRide(history), [history]);
@@ -91,6 +96,17 @@ export default function TodayScreen() {
       // Either answer counts as "asked" for this value (same rule as the old confirm).
       resolveEftpAlert(alert.value);
       if (actionId === 'update-ftp') navigate(`#/settings/profile?ftp=${alert.value}`);
+    } else if (alert.id === 'max-hr') {
+      resolveMaxHrAlert(alert.value);
+      if (actionId === 'update-maxhr') navigate(`#/settings/profile?maxhr=${alert.value}`);
+    } else if (alert.id === 'new-best') {
+      dismissAlert(`new-best-${alert.rideId}`, true);
+      if (actionId === 'view') navigate(`#/ride/${alert.rideId}`);
+    } else if (alert.id === 'ramp-rate') {
+      dismissAlert('ramp-rate', new Date().toISOString().slice(0, 10));
+    } else if (alert.id === 'feels-harder') {
+      const latest = latestRide(history);
+      dismissAlert('feels-harder', latest ? latest.id : true);
     }
   };
 

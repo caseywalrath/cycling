@@ -43,6 +43,14 @@ export default function SettingsScreen({ route }) {
     }
   }, [route.query.ftp]);
 
+  // Pre-fill from the Today tab's max-HR alert ("Update profile"), same pattern as eFTP.
+  useEffect(() => {
+    if (route.query.maxhr) {
+      setProfileDraft((prev) => ({ ...prev, maxHR: parseInt(route.query.maxhr, 10) }));
+      navigate('#/settings/profile', { replace: true });
+    }
+  }, [route.query.maxhr]);
+
   // ---- Event form ----
   const [eventFormData, setEventFormData] = useState(event);
   useEffect(() => { setEventFormData(event); }, [event]);
