@@ -225,6 +225,9 @@ try {
     duration: r.duration, normalizedPower: r.normalizedPower, tss: r.tss, rideType: r.rideType, zone: r.zone,
     streamBins: r.stream?.power?.length ?? null, hrBins: r.stream?.hr?.filter(v => v != null).length ?? null,
     intervalLabel: r.intervalData?.label ?? null, intervalCategory: r.intervalData?.category ?? null,
+    // V2 Phase 5: full-resolution bests/HR stats saved at import (§5.1). best 5-minute power
+    // should be ~250 (the synthetic file's 3x8 @ 250W work intervals).
+    best300: r.bests?.['300'] ?? null, hrStats: r.hrStats ?? null,
   } : 'NOT SAVED';
 } catch (e) {
   imported = `IMPORT FLOW FAILED: ${e.message.split('\n')[0]}`;

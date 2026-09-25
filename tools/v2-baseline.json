@@ -16,7 +16,12 @@
     "streamBins": 324,
     "hrBins": 324,
     "intervalLabel": "3x8 @ 250W",
-    "intervalCategory": "vo2max"
+    "intervalCategory": "vo2max",
+    "best300": 250,
+    "hrStats": {
+      "avg": 144,
+      "max": 176
+    }
   },
   "pageErrors": [],
   "dialogs": []
