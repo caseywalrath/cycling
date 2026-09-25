@@ -66,6 +66,9 @@ It also turns on automatic Google Drive backups.
 - A Google sign-in that's expired is now treated as signed-out (it used to be reused forever and
   quietly fail on the next sync); the Sync button will ask you to sign in again when that happens.
 
+### Fix found during the orchestrator's review
+- The "Unsynced changes" badge showed on the Settings tab every time the app opened, even with no edits, because loading saved data counted as a change. Now "unsynced" means your data was changed after the last successful sync (`exportedAt` later than `lastSyncedAt`), and any successful sync, including a pull or an "already up to date", records the sync time. Checked: a fresh open shows no badge; edits made while signed out still show it after a reload; with a (stubbed) valid sign-in a burst of edits syncs once.
+
 ### Checks
 
 - Build passes.

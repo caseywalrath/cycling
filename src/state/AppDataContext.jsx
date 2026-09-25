@@ -262,20 +262,24 @@ export function AppDataProvider({ children }) {
   // sign-in is still valid, push silently — this never opens a sign-in popup on its own.
   // Without a valid token, mark the change as unsynced; the Settings tab shows a badge and
   // its Sync button (a user tap) can start a new sign-in.
-  const isAutoSyncInitialMount = useRef(true);
+  // "Unsynced" is derived from the data, not from effect runs: every data action calls
+  // markDataChanged() (bumps exportedAt), and every successful sync records lastSyncedAt. So
+  // simply opening the app (which loads state) never looks like an unsynced change, while
+  // edits made last time without a valid sign-in still show the badge after a reload.
   useEffect(() => {
-    if (isAutoSyncInitialMount.current) {
-      isAutoSyncInitialMount.current = false;
+    clearTimeout(autoSyncTimer.current);
+    const dirty = !!exportedAt && (!lastSyncedAt || exportedAt > lastSyncedAt);
+    if (!dirty) {
+      setHasUnsyncedChanges(false);
       return undefined;
     }
-    clearTimeout(autoSyncTimer.current);
     autoSyncTimer.current = setTimeout(() => {
       if (GoogleDriveSync.hasValidToken()) {
         // handleDriveSync() itself calls GoogleDriveSync.sync(), which calls authenticate()
         // internally — but since we've just confirmed a valid token is present, that call
         // resolves immediately from the cached token and never opens a popup.
         handleDriveSync().then((result) => {
-          if (result?.status !== 'error') setHasUnsyncedChanges(false);
+          if (result?.status === 'error') setHasUnsyncedChanges(true);
         });
       } else {
         setHasUnsyncedChanges(true);
@@ -283,7 +287,7 @@ export function AppDataProvider({ children }) {
     }, 3000);
     return () => clearTimeout(autoSyncTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, lastWorkedDates]);
+  }, [exportedAt, lastSyncedAt]);
 
   // ---------------- eFTP alert (replaces the old window.confirm prompt) ----------------
   // The highest eFTP value the user has already answered (device-local). The Today tab shows
@@ -871,12 +875,13 @@ export function AppDataProvider({ children }) {
 
       setDriveSyncStatus(result);
 
-      // If we pushed data, update sync timestamps
-      if (result.action === 'push') {
+      // Any successful sync (push, pull or already up to date) means this device now matches
+      // Drive, so record it — the "Unsynced changes" state compares exportedAt against this.
+      if (result.status !== 'error') {
         const now = new Date().toISOString();
         setLastSyncedAt(now);
         // If exportedAt was null (first-ever sync), set it so future syncs compare correctly
-        if (!exportedAt) {
+        if (result.action === 'push' && !exportedAt) {
           setExportedAt(now);
         }
       }
