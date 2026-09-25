@@ -1,5 +1,84 @@
 # Changelog
 
+## Session 23 - V2 Phase 3: New Four-Tab Layout and Today Tab (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 3. The app gets a new layout: four tabs along the bottom of the screen, and a new **Today** tab that sums up where your training is. Everything else that was on the old long page is still there, moved into a tab. It mostly looks the same as before; Phases 4 and 6 redesign those parts.
+
+### What you'll see on your iPhone
+- **A tab bar at the bottom: Today · Rides · Progress · Settings.** It sits above the iPhone's home bar, and the top of the app now leaves room for the clock and battery at the top of the screen. (Before this, the app couldn't tell where those were. See "iPhone fixes" below.)
+- **Today tab** (opens first):
+  - "Casey Rides" with **FTP 231W · 3.0 W/kg · eFTP 197W** under it. Tap **eFTP** to see what it means.
+  - **One training status**, e.g. "Transition — Extended rest or detraining", with three tiles: **Fitness (CTL)**, **Fatigue (ATL)** and **Form (TSB)**. Each tile shows how much it has changed in the last 14 days (▲/▼). The old page had four separate cards here, and two of them could disagree ("Fresh" next to "Transition"). That can't happen now.
+  - **Alerts**, shown only when something needs you. Tap one to go to the right place:
+    - "**Your estimated FTP is …W**", with **Update FTP** and **Dismiss** buttons. This replaces the pop-up that used to ask the same question. Update FTP opens Settings with the new number already typed in. You still tap Save. Dismiss hides it for that number, even after you close and reopen the app.
+    - "**16 rides need a zone**": opens Rides showing just those rides, so you can give each one a zone.
+    - "**Gran Fondo Utah is complete**": opens Settings → Event, where you can set your next event.
+  - **This week**: hours, TSS and number of rides from Monday to today, compared with last week up to the same day. Underneath is a row of 7 dots, one per day, coloured by the zone you rode (grey for outdoor rides).
+  - **Latest ride**: tap it to open that ride's chart. A ride without a chart opens its edit form instead.
+  - **Event**: "36 days to go" (or "Event complete"), plus the fitness-toward-target bar that used to be in the Fitness Progress card.
+  - **Copy for Claude**: works exactly as before.
+- **＋ Log Ride** is a green button that floats above the tab bar on Today and Rides. The form now slides up from the bottom. It has the same fields as before, and its **Save Workout** button always stays visible at the bottom.
+- **Rides tab**: the monthly calendar on top, and your whole ride history below it. The history used to be a pop-up. The small 📊 ✏️ 🗑️ icons are now bigger buttons labelled **Chart**, **Edit** and **Delete**. Delete asks you to confirm in a panel that slides up from the bottom.
+- **Progress tab**: your zone level bars (tap a zone to see its workouts), the Hours / TSS / Elevation / eFTP charts, Power Skills, and a **Workout progression** row. To see a Power Skills bar's number, tap the bar. That used to need a mouse.
+- **Settings tab**: your Profile, your Event, **Sync & backup** (Sync with Google Drive, Export backup, Import backup) and **Reset progression levels**. Each section has its own Save button. These used to be the header buttons and the small links at the bottom of the page.
+- **Ride pages**: a ride's chart now opens as a full screen, with **‹ Back** at the top left and **Re-detect** at the top right. Because the home-screen app has no browser back button, Back is built into the app.
+- **No more pop-up boxes.** Messages like "✓ Detected: 3x8 @ 250W" now show as a short banner at the top of the screen. Questions ("Delete this ride?", "Reset progression levels?", "Attach this file to the ride you already logged?", "Restore this backup?") show as a panel that slides up from the bottom, with clearly labelled buttons.
+- **Text boxes no longer make the iPhone zoom in** when you tap them. All inputs now use 16px text, and iOS only zooms on smaller text. Every button is at least 44 points tall, big enough to tap easily.
+- The app remembers how far down each tab you've scrolled while you switch between tabs.
+
+### Small behaviour changes (on purpose)
+- **Restoring a backup now asks first.** It tells you how many rides are on the phone now and how many are in the backup. Before, it replaced everything without asking.
+- **Profile changes are saved when you tap Save profile.** Before, Max HR, weight and similar fields changed as you typed, and Cancel didn't undo them.
+- **After editing a ride you stay where you were.** Before, the app always jumped back to Ride History.
+- **Saved data now includes `schemaVersion: 2`.** This is a small version label written into your saved data, backup files and the Google Drive copy. Older backups without it still load exactly as before.
+
+### Behind the scenes (for the technically curious)
+- `src/App.jsx` went from ~3,460 lines to 18. All saved data, and everything that changes it, moved into `src/state/AppDataContext.jsx`. The logic for saving a ride was moved **word for word**, so progression, the trickle to neighbouring zones and the "last worked" dates behave exactly as before (checked, see below).
+- Screens live in `src/screens/`, shared pieces in `src/components/`, and a small set of building blocks (buttons, cards, sheets, tiles, tab bar) in `src/components/ui/`. Every later phase builds from these blocks. `ARCHITECTURE.md` has a new "Design system" section with the rules.
+- Moving between tabs and pages uses the part of the web address after `#` (e.g. `#/rides`, `#/ride/1234`). No new libraries were added.
+- **iPhone fixes:** `index.html` now has `viewport-fit=cover`. Without it, iOS reports the notch and home-bar areas as zero, so the old bottom padding never did anything. That padding was removed. The new screens, sheets and tab bar handle those areas themselves. The home-screen icon link was checked, and it works under `/cycling/`.
+
+### Checks
+- Build passes.
+- **Regression check** (`tools/v2-check.mjs`): no page errors, no pop-up dialogs. CTL 45, ATL 33, TSB +12 and "Transition" are unchanged, and so is the imported test ride (54 min, NP 208, TSS 73, "3x8 @ 250W"). **One expected difference**: the header line changed format only, from `FTP: 231W • 3.0 W/kg • eFTP: 197W` to `FTP 231W · 3.0 W/kg · eFTP 197W`. The numbers are the same. The baseline was re-written for this in the same commit as the script update.
+- The check script was updated for the new layout. It now opens Log Ride with the ＋ button and reads CTL/ATL/TSB and the training status from the Today tiles (same key names). It takes screenshots of every tab, the Log Ride sheet, the post-log summary and one Ride page. It also lists any button smaller than 44px (none) and checks each tab for sideways scrolling (none).
+- **By-hand checks** (each confirmed in the saved data):
+  - Logged an indoor Sweet Spot ride on the old version and the new one, from the same starting data. The results were identical:
+    - Sweet Spot went 5.4 → 5.9.
+    - The trickle gave Tempo 3.1 → 3.2 and Threshold 3.8 → 3.9.
+    - Sweet Spot's "last worked" date went 2026-09-18 → 2026-09-25.
+    - TSS was 75.
+    - Giving a zone to an old imported ride also matched: Threshold 3.8 → 4.8.
+  - Deleted a ride with the confirm panel: Cancel kept it, Delete removed it.
+  - Imported a TCX file on a day that already had a ride of similar length. The app offered to attach it; attaching added the chart and intervals to that ride without creating a duplicate or changing its TSS or zone, then opened its Ride page.
+  - Exported a backup. The file has `schemaVersion: 2` and all the old intervals.icu fields. Restored it after deleting a ride, and got all 158 rides back. Also restored an old-style backup without `schemaVersion`, and it worked.
+  - The eFTP alert appears, and stays through a reload until you answer it. After Dismiss it stayed gone after a reload. Update FTP opened Settings with 197 typed in, and saving it asked about resetting levels.
+  - Back from a Ride page returns to Rides at the same scroll position. Opening a Ride page directly and tapping Back goes to Rides.
+
+### `window.alert` / `window.confirm` still in the code
+- **One `alert`**: the "Could not save your data — browser storage may be full" warning in the save code (`src/state/AppDataContext.jsx`). The plan says it must stay an `alert`, because it appears when the app itself may be broken.
+- **No `window.confirm` left.** The other 19 pop-ups are now banners or confirm panels.
+
+### Deferred to later phases (not changed here, on purpose)
+- The Rides, Ride page, Log Ride and Settings designs, filters and search, and Google Drive auto-sync: Phase 4. The re-homed sections look much as they did.
+- Some old small print is only visible with a mouse: the date on a zone's "+0.3" badge, and the "idle" badge explanation. They're minor and go away when Phase 6 restyles the level bars.
+- The level-bar animation after logging a ride plays on the Progress tab, but Log Ride is usually opened from Today, so you rarely see it. Phase 6 can decide whether to keep it.
+- Existing quirk, kept as-is: giving a zone to an old imported ride sets that zone's "last worked" date to the ride's own (old) date, which can move it backwards. The ride-saving logic was moved word for word, so this was not changed. It is worth fixing in Phase 7.
+- Power Skills percentiles show decimals ("44.9th percentile"). This is unchanged from Phase 2, and Phase 6 replaces this card's data.
+
+### Files Changed
+- `src/App.jsx`: now only the providers + `Shell`
+- `src/Shell.jsx`, `src/state/AppDataContext.jsx`, `src/state/useHashRoute.js`, `src/state/ShellContext.js`: new
+- `src/components/ui/*`: new UI kit (Screen, TabBar, Page, Sheet, Card, SectionHeader, StatTile, SegmentedControl, Button, Chip, Toast, ConfirmSheet, EmptyState)
+- `src/components/*.jsx`, `src/screens/*.jsx`: new (re-homed sections, Today tab, sheets and pages)
+- `src/lib/load.js`, `chartData.js`, `summary.js`, `alerts.js`, `format.js`: new; `progression.js`, `rideFiles.js`, `zones.js`: helpers moved in
+- `index.html`: `viewport-fit=cover`; `src/index.css`: old iOS body padding removed, sheet animations, window scrolling
+- `tools/v2-check.mjs`, `tools/v2-baseline.json`: new selectors, screenshots, tap-target check; `ftpLine` format
+- `ARCHITECTURE.md`: rewritten for the new structure (file layout, data layer, routing, UI kit, design system, screens)
+- `CHANGELOG.md`: this entry
+
+---
+
 ## Session 23 - V2 Phase 2: Bug Fixes and One Zone Table (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 2. It's a bug-fix pass — nothing about how the app looks or works day-to-day changes, except the zone ranges shown on the progression bars and a few small wording/validation fixes.
