@@ -1234,7 +1234,7 @@ export default function ProgressionTracker() {
     const analysisText = `## Training Status - ${formatDateWithDay(toLocalDateStr(new Date()))}
 
 **Athlete Profile:**
-- FTP: ${currentFTP}W${currentEftp ? ` | eFTP: ${currentEftp.value}W (est. best 20-min, 90d)` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
+- FTP: ${currentFTP}W${currentEftp ? ` | eFTP: ${currentEftp.value}W (est. best 20-min, 90d)` : ''}${daysToEvent !== null ? (daysToEvent < 0 ? ' | Event complete' : ` | Days to Event: ${daysToEvent}`) : ''}
 
 **Training Loads:**
 - CTL (Fitness): ${loads.ctl}
@@ -2444,7 +2444,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                 return (
                   <>
                     <div className="text-xs text-gray-400 mb-2">
-                      {daysToEvent !== null ? `Days to Event: ${daysToEvent} | ` : ''}
+                      {daysToEvent !== null ? (daysToEvent < 0 ? 'Event complete | ' : `Days to Event: ${daysToEvent} | `) : ''}
                       Target CTL: {target}
                     </div>
                     <div className="w-full">
