@@ -1,5 +1,20 @@
 # Changelog
 
+## Session 22 - V2 Review and Implementation Plan (2026-09-25)
+
+### Planning only — no app code changed
+- Reviewed every screen at iPhone width (390px) with a 158-ride synthetic history, and read all of `src/App.jsx`. Findings and the agreed direction (four-tab layout, intervals.icu removal, new metrics, progression rebuild) are in **`V2_PLAN.md`**, split into 7 phases with a recommended model per phase.
+- **Security finding:** the intervals.icu API key is hard-coded in `src/App.jsx` (intervals.icu state block) and published in the GitHub Pages bundle. Phase 1 removes it from the code; the user must also revoke it in intervals.icu, since it stays in git history.
+- Added **`tools/v2-check.mjs`**, a regression check every V2 phase runs: seeds a fixed synthetic history, freezes the clock at 2026-09-25, imports a synthetic `3x8 @ 250W` TCX through Log Ride, records key numbers (header, CTL/ATL/TSB, training status, the imported ride's duration/NP/TSS/interval label) and screenshots at 390px. Baseline in `tools/v2-baseline.json`; output in `tools/.out/` (gitignored). Verified deterministic (two runs, no differences, no page errors).
+
+### Files Changed
+- `V2_PLAN.md` — new
+- `tools/v2-check.mjs`, `tools/v2-baseline.json` — new
+- `.gitignore` — ignore `tools/.out`
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 21 - TCX File Import (2026-09-25)
 
 ### Feature: Log Ride accepts .TCX files alongside .FIT

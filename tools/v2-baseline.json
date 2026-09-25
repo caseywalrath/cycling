@@ -1,0 +1,23 @@
+{
+  "numbers": {
+    "ftpLine": "FTP: 231W • 3.0 W/kg • eFTP: 197W",
+    "ctl": "45",
+    "atl": "33",
+    "tsb": "+12",
+    "trainingStatus": "Transition",
+    "rideCount": 158
+  },
+  "importedTcx": {
+    "duration": 54,
+    "normalizedPower": 208,
+    "tss": 73,
+    "rideType": "Indoor",
+    "zone": "vo2max",
+    "streamBins": 324,
+    "hrBins": 324,
+    "intervalLabel": "3x8 @ 250W",
+    "intervalCategory": "vo2max"
+  },
+  "pageErrors": [],
+  "dialogs": []
+}

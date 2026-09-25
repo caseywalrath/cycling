@@ -33,3 +33,6 @@ dist-ssr
 dev-dist
 sw.js
 workbox-*.js
+
+# V2 regression check output
+tools/.out
