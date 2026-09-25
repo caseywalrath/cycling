@@ -27,6 +27,13 @@ export default function PostLogSummarySheet({ workout, onClose }) {
 
         {lastLoggedWorkout.previousLevel != null && lastLoggedWorkout.newLevel != null ? (
           <>
+            {/* V2 Phase 7: the workout level this ride earned credit for */}
+            {lastLoggedWorkout.workoutLevelSource && lastLoggedWorkout.workoutLevel != null && (
+              <p className="text-sm text-gray-400 mb-3 tabular-nums">
+                This workout: level {Number(lastLoggedWorkout.workoutLevel).toFixed(1)}
+                {lastLoggedWorkout.workoutLevelSource === 'structure' ? ' (from your intervals)' : ' (set by you)'}
+              </p>
+            )}
             <div className="flex items-center justify-center gap-4 mb-4">
               <div className="text-right">
                 <div className="text-2xl font-mono text-gray-400 tabular-nums">{lastLoggedWorkout.previousLevel.toFixed(1)}</div>

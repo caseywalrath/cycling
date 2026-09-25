@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import GoogleDriveSync from '../google-drive-sync.js';
-import { ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY } from '../lib/zones.js';
+import { ZONES, DEFAULT_LEVELS } from '../lib/zones.js';
 import { toLocalDateStr, parseDuration } from '../lib/dates.js';
 import { parseFitFile, parseTcxFile, findMatchingRideForImport } from '../lib/rideFiles.js';
 import { EFTP_PROMPT_KEY, buildEftpTimeline } from '../lib/eftp.js';
 import { detectIntervals } from '../lib/intervals.js';
-import { applyDecay, advanceLastWorked, calculateNewLevelLegacy as calculateNewLevel } from '../lib/progression.js';
+import {
+  applyDecay, advanceLastWorked, calculateNewLevel, workoutLevelFromStructure, trickleFor,
+  recalculateLevelsFromHistory, LEVEL_AT_REFERENCE,
+} from '../lib/progression.js';
 import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss, dailyLoadSeries, rampRate as computeRampRate } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
 import { MAXHR_PROMPT_KEY, readDismissals, writeDismissal } from '../lib/alerts.js';
@@ -23,6 +26,19 @@ export const STORAGE_KEY = 'cycling-progression-data-v2';
 // V2 Phase 3: written to localStorage, Export files and the Drive backup. Files without it
 // (every backup made before Phase 3) load exactly as before.
 export const SCHEMA_VERSION = 2;
+// V2 Phase 7 §7.4: device-local snapshot of { levels, lastWorkedDates } taken just before
+// "Recalculate levels from my rides" is applied, for its Undo link. Removed when the next ride
+// is logged (Undo is no longer offered), on Undo, on reset and on restore.
+export const RECALC_UNDO_KEY = 'levels-before-recalc';
+const readRecalcSnapshot = () => {
+  try {
+    const raw = localStorage.getItem(RECALC_UNDO_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+const clearRecalcSnapshot = () => {
+  try { localStorage.removeItem(RECALC_UNDO_KEY); } catch { /* storage unavailable */ }
+};
 const FTP = 235;
 
 // V2 Phase 4: no invented defaults for a fresh manual entry — duration, NP and zone start
@@ -34,7 +50,11 @@ export const getDefaultFormData = () => {
     name: '',
     date: toLocalDateStr(new Date()),
     zone: null,
+    // V2 Phase 7: the Log Ride "Workout level" (1–10). null = not set (the stepper shows
+    // LEVEL_AT_REFERENCE). workoutLevelSource 'manual' means the user set or overrode it; null
+    // lets a file import's calculated level apply.
     workoutLevel: null,
+    workoutLevelSource: null,
     rpe: 5,
     completed: true,
     duration: '',
@@ -132,6 +152,8 @@ export function AppDataProvider({ children }) {
   const [editingRide, setEditingRide] = useState(null);
   // Interval tracking state (see INTERVAL_TRACKING_PLAN.md)
   const [pendingFitDetail, setPendingFitDetail] = useState(null); // { stream, detection } from FIT import, awaiting save
+  // V2 Phase 7: whether Settings offers "Undo recalculation" (a snapshot is stored on this device)
+  const [recalcUndoAvailable, setRecalcUndoAvailable] = useState(() => !!readRecalcSnapshot());
 
   // ---------------- derived ----------------
   const todayKey = useTodayKey();
@@ -394,6 +416,42 @@ export function AppDataProvider({ children }) {
 
   // ---------------- rides ----------------
 
+  // V2 Phase 7: the level the model calculates for the ride in the Log Ride form, or null.
+  // Only for a ride with a file behind it (a fresh import, or an edited ride that has interval
+  // data or a stream); manual entries use the Workout level stepper instead.
+  const formStructureLevel = (form = formData) => {
+    const zone = form.zone;
+    if (form.rideType === 'Outdoor' || !zone || zone === 'recovery' || !currentFTP) return null;
+    const oldRide = editingRide ? history.find(w => w.id === editingRide) : null;
+    const hasFile = !!pendingFitDetail || !!(oldRide && (oldRide.stream || oldRide.intervalData));
+    if (!hasFile) return null;
+    const np = Number(form.normalizedPower) || 0;
+    return workoutLevelFromStructure({
+      rideType: form.rideType,
+      zone,
+      duration: parseDuration(form.duration),
+      normalizedPower: np,
+      intensityFactor: np > 0 ? np / currentFTP : null,
+      intervalData: pendingFitDetail ? pendingFitDetail.detection : oldRide?.intervalData,
+    }, currentFTP);
+  };
+
+  // { workoutLevel, workoutLevelSource } to use for the form's ride in `zone`: the user's own
+  // level if they set/overrode it, else the calculated one, else the stepper's value (default
+  // LEVEL_AT_REFERENCE) as a manual level.
+  const resolveWorkoutLevel = (zone) => {
+    const manual = Number(formData.workoutLevel);
+    if (formData.workoutLevelSource === 'manual' && Number.isFinite(manual) && formData.workoutLevel != null) {
+      return { workoutLevel: manual, workoutLevelSource: 'manual' };
+    }
+    const structure = formStructureLevel({ ...formData, zone });
+    if (structure != null) return { workoutLevel: structure, workoutLevelSource: 'structure' };
+    return {
+      workoutLevel: formData.workoutLevel != null && Number.isFinite(manual) ? manual : LEVEL_AT_REFERENCE,
+      workoutLevelSource: 'manual',
+    };
+  };
+
   // Save the Log Ride form as a new ride, or as the edit of `editingRide`.
   // Logic moved verbatim from handleLogWorkout(). Returns { kind: 'new' | 'edit', entry }.
   const handleLogWorkout = () => {
@@ -421,11 +479,17 @@ export function AppDataProvider({ children }) {
       let previousLevel = oldWorkout.previousLevel;
       let newLevel = oldWorkout.newLevel;
       let change = oldWorkout.change;
+      // V2 Phase 7: a ride's workout level is only (re)written when its progression is
+      // recalculated below; otherwise the stored values (or their absence = 'legacy') stay.
+      let workoutLevel = oldWorkout.workoutLevel;
+      let workoutLevelSource = oldWorkout.workoutLevelSource;
+      const recalculates = isNowClassified && (wasUnclassified || zone !== oldWorkout.zone) && !isOutdoor;
 
-      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+      if (recalculates) {
         // Recalculate progression for the newly assigned zone using effective (decayed) level
+        ({ workoutLevel, workoutLevelSource } = resolveWorkoutLevel(zone));
         previousLevel = effectiveLevels[zone];
-        newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, completed);
+        newLevel = calculateNewLevel(previousLevel, workoutLevel, formData.rpe, completed, zone);
         change = newLevel - previousLevel;
       }
 
@@ -443,6 +507,8 @@ export function AppDataProvider({ children }) {
         previousLevel,
         newLevel,
         change,
+        workoutLevel,
+        workoutLevelSource,
         tss,
         tssSource,
         intensityFactor,
@@ -462,7 +528,7 @@ export function AppDataProvider({ children }) {
       setPendingFitDetail(null);
 
       // Update progression levels if zone was assigned/changed
-      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+      if (recalculates) {
         setLevels(prev => ({ ...prev, [zone]: newLevel }));
         setDisplayLevels(prev => ({ ...prev, [zone]: newLevel }));
         setRecentChanges(prev => ({
@@ -482,23 +548,21 @@ export function AppDataProvider({ children }) {
       // Creating new workout
       // Recovery zone and outdoor rides do not affect progression levels
       const affectsProgression = zone !== null && zone !== 'recovery';
+      // V2 Phase 7: the workout level comes from the ride's structure (file import) or the
+      // Log Ride stepper (manual entry / override).
+      const { workoutLevel, workoutLevelSource } = affectsProgression
+        ? resolveWorkoutLevel(zone)
+        : { workoutLevel: null, workoutLevelSource: undefined };
       // Use effectiveLevels (decay-adjusted) as the starting point for progression
       const currentLevel = affectsProgression ? effectiveLevels[zone] : null;
       const newLevel = affectsProgression
-        ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, completed)
+        ? calculateNewLevel(currentLevel, workoutLevel, formData.rpe, completed, zone)
         : null;
       const primaryChange = affectsProgression ? newLevel - currentLevel : 0;
 
-      // Compute trickle effects for adjacent zones (only when primary change is positive)
-      const trickleEffects = [];
-      if (affectsProgression && primaryChange > 0 && ZONE_ADJACENCY[zone]) {
-        ZONE_ADJACENCY[zone].forEach(({ zone: adjZone, factor }) => {
-          // Don't trickle if adjacent zone is already at or above the primary zone's new level
-          if (effectiveLevels[adjZone] >= newLevel) return;
-          const trickleAmount = primaryChange * factor;
-          trickleEffects.push({ zone: adjZone, amount: trickleAmount });
-        });
-      }
+      // Trickle to adjacent zones (only when the primary change is positive, and not to a
+      // neighbour already at or above the primary zone's new level)
+      const trickleEffects = affectsProgression ? trickleFor(zone, primaryChange, newLevel, effectiveLevels) : [];
 
       const entry = {
         ...formData,
@@ -513,6 +577,8 @@ export function AppDataProvider({ children }) {
         previousLevel: currentLevel,
         newLevel: newLevel,
         change: primaryChange,
+        workoutLevel,
+        workoutLevelSource,
         tss,
         tssSource,
         intensityFactor,
@@ -555,6 +621,12 @@ export function AppDataProvider({ children }) {
       // Set last logged workout for summary sheet
       setLastLoggedWorkout(entry);
 
+      // A new ride ends the "Undo recalculation" window (V2 Phase 7 §7.4)
+      if (recalcUndoAvailable) {
+        clearRecalcSnapshot();
+        setRecalcUndoAvailable(false);
+      }
+
       // Update history and levels
       setHistory([entry, ...history]);
       setLevels(updatedLevels);
@@ -593,7 +665,9 @@ export function AppDataProvider({ children }) {
       name: workout.name || workout.notes || '',
       date: workout.date,
       zone: editZone,
-      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[editZone],
+      // V2 Phase 7: legacy rides stored an RPE-like constant here; only a real level pre-fills.
+      workoutLevel: workout.workoutLevelSource ? workout.workoutLevel : null,
+      workoutLevelSource: workout.workoutLevelSource === 'manual' ? 'manual' : null,
       rpe: workout.rpe != null ? workout.rpe : 5,
       completed: workout.completed !== false,
       duration: workout.duration,
@@ -657,6 +731,8 @@ export function AppDataProvider({ children }) {
     setFormData(prev => ({
       ...prev,
       ...parsed,
+      workoutLevel: null,
+      workoutLevelSource: null,
       // Only pre-select a zone for indoor rides; outdoor rides are never filed under one (D5).
       ...(detection && parsed.rideType !== 'Outdoor' ? { zone: detection.category } : {}),
     }));
@@ -792,7 +868,48 @@ export function AppDataProvider({ children }) {
     setLevels(resetLevelsObj);
     setDisplayLevels(resetLevelsObj);
     setLastWorkedDates({});
+    clearRecalcSnapshot();
+    setRecalcUndoAvailable(false);
     markDataChanged();
+  };
+
+  // V2 Phase 7 §7.4: Settings → "Recalculate levels from my rides". previewRecalculation()
+  // changes nothing; it returns { before, after } per zone (both with decay applied as of
+  // today, as the level bars show them) plus the raw result to pass to applyRecalculation().
+  const previewRecalculation = () => {
+    const result = recalculateLevelsFromHistory(history, currentFTP);
+    return {
+      ...result,
+      before: effectiveLevels,
+      after: applyDecay(result.levels, result.lastWorkedDates),
+    };
+  };
+
+  // Apply a preview: snapshot the current levels/lastWorkedDates on this device for Undo,
+  // then replace them. Rides are never rewritten.
+  const applyRecalculation = (preview) => {
+    try {
+      localStorage.setItem(RECALC_UNDO_KEY, JSON.stringify({ levels, lastWorkedDates, savedAt: new Date().toISOString() }));
+      setRecalcUndoAvailable(true);
+    } catch { setRecalcUndoAvailable(false); /* storage unavailable: apply without Undo */ }
+    const next = { ...levels, ...preview.levels };
+    setLevels(next);
+    setDisplayLevels(next);
+    setLastWorkedDates(preview.lastWorkedDates);
+    markDataChanged();
+  };
+
+  // Restore the snapshot taken by applyRecalculation(). Returns true if it was restored.
+  const undoRecalculation = () => {
+    const snap = readRecalcSnapshot();
+    clearRecalcSnapshot();
+    setRecalcUndoAvailable(false);
+    if (!snap || !snap.levels) return false;
+    setLevels(snap.levels);
+    setDisplayLevels(snap.levels);
+    setLastWorkedDates(snap.lastWorkedDates || {});
+    markDataChanged();
+    return true;
   };
 
   // Settings → "Old imported rides" (V2 Phase 4). Old CSV/API imports that were never given a
@@ -884,6 +1001,8 @@ export function AppDataProvider({ children }) {
     if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
     if (parsed.powerCurveData) setPowerCurveData(parsed.powerCurveData);
     if (parsed.lastWorkedDates) setLastWorkedDates(parsed.lastWorkedDates);
+    clearRecalcSnapshot();
+    setRecalcUndoAvailable(false);
     markDataChanged();
     return parsed.history?.length || 0;
   };
@@ -972,7 +1091,7 @@ export function AppDataProvider({ children }) {
     levels, displayLevels, animatingZone, history, recentChanges, lastWorkedDates,
     currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData,
     exportedAt, lastSyncedAt, isDriveSyncing, driveSyncStatus, eftpPromptedValue,
-    lastLoggedWorkout, hasUnsyncedChanges, maxhrPromptedValue, alertDismissals,
+    lastLoggedWorkout, hasUnsyncedChanges, maxhrPromptedValue, alertDismissals, recalcUndoAvailable,
     // Log Ride form
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     // derived
@@ -989,6 +1108,7 @@ export function AppDataProvider({ children }) {
     redetectRide: handleRedetectRide, redetectCandidates, redetectAll: handleRedetectAll,
     saveEvent: handleSaveEvent, deleteEvent: handleDeleteEvent,
     saveProfile, resetLevels,
+    previewRecalculation, applyRecalculation, undoRecalculation, formStructureLevel,
     oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
     exportData, readBackupFile, restoreBackup,
     syncWithDrive: handleDriveSync,

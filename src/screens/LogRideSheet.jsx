@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ZONES, ZONE_EXPECTED_RPE, getZoneColor, getZoneName } from '../lib/zones.js';
 import { parseDuration } from '../lib/dates.js';
+import { LEVEL_AT_REFERENCE } from '../lib/progression.js';
 import { shortDayDate } from '../lib/format.js';
 import { estimateLthr, hrTss } from '../lib/load.js';
 import { useAppData } from '../state/AppDataContext.jsx';
@@ -20,7 +21,7 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const {
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     saveRide, importRideFile, applyRideImport, attachRideFile, calculateTSS, currentFTP,
-    userProfile,
+    userProfile, formStructureLevel,
   } = useAppData();
   const toast = useToast();
 
@@ -61,7 +62,7 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
     setMode('manual');
     setPendingImport(null);
     setPendingFitDetail(null);
-    setFormData(prev => ({ ...prev, duration: '', normalizedPower: '', zone: null, workoutLevel: null }));
+    setFormData(prev => ({ ...prev, duration: '', normalizedPower: '', zone: null, workoutLevel: null, workoutLevelSource: null }));
   };
 
   const handleFileInput = async (e) => {
@@ -99,7 +100,21 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
     onSaved(result);
   };
 
-  const setZone = (zoneId) => setFormData({ ...formData, zone: zoneId, workoutLevel: ZONE_EXPECTED_RPE[zoneId] });
+  const setZone = (zoneId) => setFormData({ ...formData, zone: zoneId });
+
+  // V2 Phase 7 §7.2.3: Workout level. A ride with a file shows the level calculated from its
+  // structure (read-only, with "Change"); a manual entry, an override, or a file the model
+  // can't score gets a 1–10 stepper in 0.5 steps, pre-filled with a typical session's level.
+  const showWorkoutLevel = isIndoor && !!formData.zone && formData.zone !== 'recovery';
+  const structureLevel = showWorkoutLevel ? formStructureLevel() : null;
+  const overriding = formData.workoutLevelSource === 'manual';
+  const stepperValue = formData.workoutLevel != null && Number.isFinite(Number(formData.workoutLevel))
+    ? Number(formData.workoutLevel) : LEVEL_AT_REFERENCE;
+  const setLevel = (v) => setFormData({
+    ...formData,
+    workoutLevel: Math.min(10, Math.max(1, Math.round(v * 2) / 2)),
+    workoutLevelSource: 'manual',
+  });
 
   const importedSummary = !isEdit && mode === 'import' && pendingFitDetail && !pendingImport;
   const showManualFields = isEdit || mode === 'manual' || (importedSummary && showNumbers);
@@ -276,6 +291,50 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
               </div>
               {pendingFitDetail?.detection && formData.zone !== pendingFitDetail.detection.category && (
                 <p className="text-xs text-gray-500 mt-1">Detected as {getZoneName(pendingFitDetail.detection.category)}.</p>
+              )}
+            </div>
+          )}
+
+          {showWorkoutLevel && (
+            <div data-workout-level>
+              {structureLevel != null && !overriding ? (
+                <div className="flex items-center justify-between bg-gray-700 rounded-xl px-3 py-2">
+                  <span className="text-base">
+                    <span className="text-gray-400">This workout: </span>
+                    <span className="font-semibold" style={{ color: getZoneColor(formData.zone) }}>
+                      {getZoneName(formData.zone)} <span className="tabular-nums" data-workout-level-value>{structureLevel.toFixed(1)}</span>
+                    </span>
+                  </span>
+                  <button type="button" onClick={() => setLevel(structureLevel)}
+                    className="min-h-[44px] min-w-[44px] px-2 text-base text-blue-400 hover:text-blue-300">
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label className={labelClass} id="workout-level-label">
+                    Workout level <span className="text-gray-500">(1 easy – 10 very hard; 5 is a typical session)</span>
+                  </label>
+                  <div className="flex items-center gap-3" role="group" aria-labelledby="workout-level-label">
+                    <button type="button" aria-label="Lower workout level" disabled={stepperValue <= 1}
+                      onClick={() => setLevel(stepperValue - 0.5)}
+                      className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-700 hover:bg-gray-600 text-xl font-semibold disabled:opacity-40">−</button>
+                    <span className="flex-1 text-center text-2xl font-mono font-bold tabular-nums" data-workout-level-value
+                      style={{ color: getZoneColor(formData.zone) }}>
+                      {stepperValue.toFixed(1)}
+                    </span>
+                    <button type="button" aria-label="Raise workout level" disabled={stepperValue >= 10}
+                      onClick={() => setLevel(stepperValue + 0.5)}
+                      className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-700 hover:bg-gray-600 text-xl font-semibold disabled:opacity-40">+</button>
+                  </div>
+                  {structureLevel != null && overriding && (
+                    <button type="button"
+                      onClick={() => setFormData({ ...formData, workoutLevel: null, workoutLevelSource: null })}
+                      className="min-h-[44px] mt-1 text-base text-blue-400 hover:text-blue-300">
+                      Use calculated level ({structureLevel.toFixed(1)})
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
