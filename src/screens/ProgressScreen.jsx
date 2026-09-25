@@ -2,23 +2,43 @@ import React from 'react';
 import { navigate } from '../state/useHashRoute.js';
 import { Screen, Card, SectionHeader } from '../components/ui/index.js';
 import ProgressionLevels from '../components/ProgressionLevels.jsx';
+import FitnessChart from '../components/FitnessChart.jsx';
 import TrainingCharts from '../components/TrainingCharts.jsx';
+import PowerCurveChart from '../components/PowerCurveChart.jsx';
 import PowerSkillsCard from '../components/PowerSkillsCard.jsx';
+import EftpChart from '../components/EftpChart.jsx';
+import AerobicFitnessCard from '../components/AerobicFitnessCard.jsx';
+import RecordsCard from '../components/RecordsCard.jsx';
 
-// Progress tab (V2 Phase 3): progression level bars, the Hours/TSS/Elevation/eFTP charts,
-// Power Skills and a row into Workout Progression — re-homed as they were. Phase 6
-// redesigns this tab.
+// Progress tab (V2 Phase 6 §6.1 redesign). Top to bottom: progression levels, the Fitness
+// chart, training volume (Hours/TSS/Elevation/Zones), the power curve + Power Skills, eFTP,
+// aerobic fitness, records, and a row into Workout Progression. Every heavy computation here
+// (dailyLoadSeries, personalBests, records(), observedMaxHr) is memoised in AppDataContext,
+// keyed on history/currentFTP, so switching to this tab stays under 300ms even with 150+
+// rides (V2_PLAN.md §6.4) — data-progress-screen marks the tab for the regression check's
+// timing measurement.
 export default function ProgressScreen() {
   return (
     <Screen title="Progress">
+      <div data-progress-screen />
       <Card>
         <SectionHeader title="Progression levels" subtitle="Tap a zone to see its workouts" />
         <ProgressionLevels />
       </Card>
 
+      <FitnessChart />
+
       <TrainingCharts />
 
+      <PowerCurveChart />
+
       <PowerSkillsCard />
+
+      <EftpChart />
+
+      <AerobicFitnessCard />
+
+      <RecordsCard />
 
       <Card as="button" onClick={() => navigate('#/progress/workouts')} className="flex items-center justify-between gap-3 min-h-[56px]">
         <span>

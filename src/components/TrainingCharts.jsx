@@ -1,40 +1,43 @@
-import React, { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { parseDateLocal } from '../lib/dates.js';
-import { calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation, calculateEFTPHistory } from '../lib/chartData.js';
+import React, { useMemo, useState } from 'react';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation, weeklyTimeInZones } from '../lib/chartData.js';
+import { ZONES } from '../lib/zones.js';
+import { formatMinutes } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { Card, SegmentedControl } from './ui/index.js';
 
-// Hours / TSS / Elevation / eFTP charts. Re-homed from the old main page in V2 Phase 3:
-// the four ad-hoc tab buttons became a SegmentedControl; the charts themselves are the
-// original code, unchanged.
+// Training volume: Hours / TSS / Elevation / Zones. V2 Phase 3 re-homed Hours/TSS/Elevation
+// unchanged from the old main page; V2 Phase 6 §6.1.3 adds "Zones" here and moves eFTP out to
+// its own standalone card (EftpChart.jsx) since it's no longer part of this control (§6.1).
 const CHART_TABS = [
   { value: 'hours', label: 'Hours', color: '#F97316' },
   { value: 'tss', label: 'TSS', color: '#3B82F6' },
   { value: 'elevation', label: 'Elevation', color: '#22C55E' },
-  { value: 'eftp', label: 'eFTP', color: '#A855F7' },
+  { value: 'zones', label: 'Zones', color: '#8B5CF6' },
 ];
 
+const ZONE_ORDER = ZONES.filter(z => z.id !== 'recovery');
+
 export default function TrainingCharts() {
-  const { history, eftpTimeline, currentEftp } = useAppData();
-  const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours', 'tss', 'elevation' or 'eftp'
+  const { history, currentFTP } = useAppData();
+  const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours' | 'tss' | 'elevation' | 'zones'
 
   const weeklyTSSData = calculateWeeklyTSS(history);
   const weeklyHoursData = calculateWeeklyHours(history);
   const monthlyElevationData = calculateMonthlyElevation(history);
-  const eftpHistoryData = calculateEFTPHistory(history, eftpTimeline);
+  // Memoised: timeInZones() walks every ride's power stream, so this is worth keying on
+  // history/currentFTP rather than recomputing on every render (V2_PLAN.md §6.4).
+  const zonesData = useMemo(() => weeklyTimeInZones(history, currentFTP, 12), [history, currentFTP]);
+  const hasZoneMinutes = zonesData.some(w => ZONE_ORDER.some(z => w[z.id] > 0));
 
   const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
   const currentWeekHours = weeklyHoursData.length > 0 ? weeklyHoursData[weeklyHoursData.length - 1].hours : 0;
   const currentMonthElevation = monthlyElevationData.length > 0
     ? monthlyElevationData[monthlyElevationData.length - 1].elevation
     : 0;
-  // "Latest" mirrors the page header's currentEftp so there's one current number,
-  // not the last chart month's peak.
-  const latestEFTP = currentEftp ? currentEftp.value : null;
 
   // Check if any data exists
-  const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || monthlyElevationData.length > 0 || eftpHistoryData.length > 0;
+  const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || monthlyElevationData.length > 0;
 
   if (!hasData) return null;
 
@@ -83,18 +86,19 @@ export default function TrainingCharts() {
     return null;
   };
 
-  const EFTPTooltip = ({ active, payload }) => {
+  const ZonesTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
+      const total = ZONE_ORDER.reduce((s, z) => s + (data[z.id] || 0), 0);
       return (
         <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
           <p className="text-gray-300 mb-1">{data.label}</p>
-          <p className="text-purple-400 font-bold">{data.eFTP}W</p>
-          <p className="text-gray-500 text-xs">
-            {data.source === 'estimated'
-              ? `Best 20-min effort: ${data.rideName} (${parseDateLocal(data.peakDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
-              : 'Imported from intervals.icu'}
-          </p>
+          {ZONE_ORDER.filter(z => data[z.id] > 0).map(z => (
+            <p key={z.id} className="text-xs tabular-nums" style={{ color: z.color }}>
+              {z.name}: {formatMinutes(data[z.id])}
+            </p>
+          ))}
+          <p className="text-gray-500 text-xs mt-1">{total > 0 ? `${formatMinutes(total)} total` : 'No power data this week'}</p>
         </div>
       );
     }
@@ -251,70 +255,35 @@ export default function TrainingCharts() {
         </>
       )}
 
-      {/* eFTP Chart */}
-      {weeklyChartView === 'eftp' && eftpHistoryData.length > 0 && (
-        <>
-          <div className="flex flex-wrap justify-between items-baseline gap-x-3 mb-3">
-            <h3 className="font-medium">eFTP Progress (1 Year)</h3>
-            <span className="text-sm text-gray-400 tabular-nums">
-              Latest: <span className="text-purple-400 font-bold">{latestEFTP != null ? `${latestEFTP}W` : '—'}</span>
-            </span>
+      {/* Zones Chart (V2 Phase 6) */}
+      {weeklyChartView === 'zones' && (
+        hasZoneMinutes ? (
+          <>
+            <h3 className="font-medium mb-3">Time in Zones (12 Weeks)</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={zonesData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="label" stroke="#9CA3AF" style={{ fontSize: '12px' }} interval="preserveStartEnd" />
+                <YAxis
+                  stroke="#9CA3AF"
+                  style={{ fontSize: '12px' }}
+                  tickFormatter={(v) => `${Math.round(v)}m`}
+                  width={45}
+                />
+                <Tooltip content={<ZonesTooltip />} />
+                {ZONE_ORDER.map(z => (
+                  <Bar key={z.id} dataKey={z.id} stackId="zones" fill={z.color} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="text-xs text-gray-500 mt-2">Rides with power data only.</p>
+          </>
+        ) : (
+          <div className="text-center text-gray-400 py-8">
+            <p>No time-in-zone data available.</p>
+            <p className="text-sm mt-2">Import a FIT or TCX file with power data to see this chart.</p>
           </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={eftpHistoryData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorEFTP" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#A855F7" stopOpacity={0.8}/>
-                  <stop offset="95%" stopColor="#A855F7" stopOpacity={0.1}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis
-                dataKey="month"
-                stroke="#9CA3AF"
-                style={{ fontSize: '12px' }}
-              />
-              <YAxis
-                stroke="#9CA3AF"
-                style={{ fontSize: '12px' }}
-                tickFormatter={(value) => `${value}W`}
-                domain={['dataMin - 10', 'dataMax + 10']}
-                width={55}
-              />
-              <Tooltip content={<EFTPTooltip />} />
-              <Area
-                type="monotone"
-                dataKey="eFTP"
-                stroke="#A855F7"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorEFTP)"
-                dot={(props) => {
-                  const isImported = props.payload?.source === 'imported';
-                  return (
-                    <circle
-                      key={props.index}
-                      cx={props.cx}
-                      cy={props.cy}
-                      r={4}
-                      fill={isImported ? '#1F2937' : '#A855F7'}
-                      stroke="#A855F7"
-                      strokeWidth={2}
-                    />
-                  );
-                }}
-                activeDot={{ r: 6, fill: '#A855F7', stroke: '#fff', strokeWidth: 2 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </>
-      )}
-
-      {weeklyChartView === 'eftp' && eftpHistoryData.length === 0 && (
-        <div className="text-center text-gray-400 py-8">
-          <p>No eFTP data available.</p>
-          <p className="text-sm mt-2">Import a FIT or TCX file that includes a 20-minute or longer effort.</p>
-        </div>
+        )
       )}
     </Card>
   );
