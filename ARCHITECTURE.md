@@ -128,6 +128,7 @@ power streams (`ride.stream`). See `EFTP_ESTIMATE_PLAN.md` for the original desi
 1. **intervals.icu API** - Direct sync via athlete ID + API key
 2. **CSV paste** - Manual paste from intervals.icu export
 3. **FIT file upload (Session 16)** - "Import FIT File" button inside the Log Ride modal only. Parses `.fit` files client-side via the `fit-file-parser` npm package (`parseFitFile()`). Pre-fills Date, Duration, Normalized Power, Distance, Elevation, and Ride Type (Indoor/Outdoor, detected from GPS presence) into `formData`. Unlike the two bulk import sources below, this is not a separate unclassified ride source — it never sets Zone, Ride Name, or RPE, so the ride is saved through the normal `handleLogWorkout` path as `source: 'manual'` once the user fills in the rest and hits Save.
+   **TCX (Session 21)**: the same button (now "Import FIT/TCX File") also accepts `.tcx`. `parseTcxFile(text)` reads the XML with the browser's built-in `DOMParser` (no dependency), maps each `<Trackpoint>` to FIT record field names (`timestamp`, `power`, `heart_rate`, `altitude`, `position_lat/long`, `distance`) and laps to `{ total_timer_time, avg_power, avg_heart_rate }`, then goes through the same `buildRideFromRecords()` as FIT — so stream, interval detection, backfill, eFTP and charts are identical. A trackpoint with no `<Watts>` counts as **0W** (TrainerDay omits power while coasting rather than writing 0). TCX has no NP field, so NP is always calculated from the power samples.
 
 **Important (Session 5)**: CSV/API imports do NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts. FIT file upload (above) is exempt from this because it never attempts zone classification at all.
 
@@ -187,6 +188,8 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory(history, eftpTimeline)` | eFTP monthly peaks (11-month rolling window). Per month, prefers the highest calculated (`eftpTimeline`) estimate; falls back to legacy `ride.eFTP` only for months before `firstStreamDate` (Session 20) |
 | `parseFitFile(arrayBuffer)` | Parses a `.fit` file into Log Ride form field values (date, duration, NP, distance, elevation, ride type) |
+| `parseTcxFile(text)` | Parses a `.tcx` file into the same shape as `parseFitFile()`; missing `<Watts>` = 0W (Session 21) |
+| `buildRideFromRecords({...})` | Shared FIT/TCX step: records + ride totals → form values, `stream`, `laps` (elevation from ascent or summed altitude gains, NP fallback chain, GPS → Outdoor) |
 | `calculateNormalizedPower(powerSamples)` | NP from a per-second power stream — 30s rolling average, 4th-power mean, 4th root |
 | `calculateMonthlyElevation()` | Monthly elevation totals (11-month rolling window, rides with elevation > 0) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |

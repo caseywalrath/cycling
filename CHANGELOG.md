@@ -1,5 +1,24 @@
 # Changelog
 
+## Session 21 - TCX File Import (2026-09-25)
+
+### Feature: Log Ride accepts .TCX files alongside .FIT
+- **Why**: the user's hardest efforts are outdoor rides, and TrainerDay/Garmin sometimes export those as TCX rather than FIT. eFTP (Session 20) only sees rides with saved power data, so those rides were invisible to it.
+- The Log Ride "Import FIT File" button is now **"Import FIT/TCX File"** and accepts `.tcx`. New `parseTcxFile()` reads the XML with the browser's built-in `DOMParser` (no new dependency) and converts trackpoints and laps into the same record shape the FIT reader produces. The FIT-specific result-building in `parseFitFile()` was moved into a shared `buildRideFromRecords()`, so both formats go through identical code for form pre-fill, power stream, interval detection, same-date backfill, eFTP and charts. FIT behavior is unchanged.
+- **Missing power = 0W**: TrainerDay leaves `<Watts>` out of a trackpoint while coasting instead of writing 0 (the sample file had ~45% of points without power and not a single 0W reading). These points are counted as 0W, which keeps NP and TSS honest; skipping them would have overstated both. This can't inflate eFTP.
+- TCX has no Normalized Power or total-ascent field, so NP is always calculated from the power samples and elevation from altitude readings (0 ft if the file has none, as with the sample).
+
+### Verified against
+- `Draper_Road_Cycling-260917.tcx` (TrainerDay, 92 min, 5,519 trackpoints): pre-filled 2026-09-17, 92 min, Outdoor, 12.1 mi, NP 192W; saved with a 552-bin power stream (no gaps) and per-second HR; TSS 106; header eFTP 215W. No console errors.
+- `West_Valley_City_Road_Cycling-260920.fit` re-imported after the refactor: same results as before (94 min, Outdoor, 23.2 mi, NP 210W, eFTP estimate 196W).
+
+### Files Changed
+- `src/App.jsx` — `parseTcxFile()`, `buildRideFromRecords()` (extracted from `parseFitFile()`), `handleFitFileImport()` (reads `.tcx` as text), Log Ride import button label/accept list, three "Import a FIT file" hints now say "FIT or TCX"
+- `ARCHITECTURE.md` — import sources, function table
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 20 - Calculate eFTP From FIT Power Streams (2026-09-25)
 
 ### Feature: eFTP no longer depends on intervals.icu

@@ -125,42 +125,130 @@ const parseFitFile = (arrayBuffer) => {
         reject(new Error('No ride data found in this FIT file.'));
         return;
       }
-      const records = data.records || [];
-      const powerSamples = records.map(r => r.power).filter(p => p != null);
-
-      const hasGPS = records.some(r => r.position_lat != null || r.position_long != null);
-
-      let elevation = 0;
-      if (session.total_ascent != null) {
-        elevation = Math.round(session.total_ascent * 3.28084); // meters to feet
-      } else {
-        const altitudes = records
-          .map(r => r.altitude != null ? r.altitude : r.enhanced_altitude)
-          .filter(a => a != null);
-        let ascentMeters = 0;
-        for (let i = 1; i < altitudes.length; i++) {
-          const delta = altitudes[i] - altitudes[i - 1];
-          if (delta > 0) ascentMeters += delta;
-        }
-        elevation = Math.round(ascentMeters * 3.28084); // meters to feet
-      }
-
-      const normalizedPower = session.normalized_power
-        || calculateNormalizedPower(powerSamples)
-        || session.avg_power
-        || 0;
-
-      resolve({
-        date: toLocalDateStr(session.start_time),
-        duration: Math.round(session.total_timer_time / 60),
-        distance: Math.round((session.total_distance || 0) / 1000 * 0.621371 * 10) / 10, // meters to miles
-        elevation,
-        rideType: hasGPS ? 'Outdoor' : 'Indoor',
-        normalizedPower: Math.round(normalizedPower),
-        stream: downsampleRecords(records),
+      resolve(buildRideFromRecords({
+        records: data.records || [],
+        startTime: session.start_time,
+        timerSeconds: session.total_timer_time,
+        distanceMeters: session.total_distance,
+        ascentMeters: session.total_ascent,
+        normalizedPower: session.normalized_power,
+        avgPower: session.avg_power,
         laps: data.laps || [],
-      });
+      }));
     });
+  });
+};
+
+// Shared by the FIT and TCX readers: turns per-second records (FIT field names) plus
+// ride-level totals into Log Ride form values, power stream, and laps.
+const buildRideFromRecords = ({ records, startTime, timerSeconds, distanceMeters, ascentMeters, normalizedPower, avgPower, laps }) => {
+  const powerSamples = records.map(r => r.power).filter(p => p != null);
+  const hasGPS = records.some(r => r.position_lat != null || r.position_long != null);
+
+  let elevation = 0;
+  if (ascentMeters != null) {
+    elevation = Math.round(ascentMeters * 3.28084); // meters to feet
+  } else {
+    const altitudes = records
+      .map(r => r.altitude != null ? r.altitude : r.enhanced_altitude)
+      .filter(a => a != null);
+    let climbed = 0;
+    for (let i = 1; i < altitudes.length; i++) {
+      const delta = altitudes[i] - altitudes[i - 1];
+      if (delta > 0) climbed += delta;
+    }
+    elevation = Math.round(climbed * 3.28084); // meters to feet
+  }
+
+  const np = normalizedPower
+    || calculateNormalizedPower(powerSamples)
+    || avgPower
+    || 0;
+
+  return {
+    date: toLocalDateStr(startTime),
+    duration: Math.round((timerSeconds || 0) / 60),
+    distance: Math.round((distanceMeters || 0) / 1000 * 0.621371 * 10) / 10, // meters to miles
+    elevation,
+    rideType: hasGPS ? 'Outdoor' : 'Indoor',
+    normalizedPower: Math.round(np),
+    stream: downsampleRecords(records),
+    laps,
+  };
+};
+
+// Parse a .TCX file (XML text) into the same shape parseFitFile() returns. Trackpoints
+// are mapped to FIT record field names so everything downstream is shared.
+// A trackpoint with no <Watts> is treated as 0W: TrainerDay (and other exporters) omit
+// the power value while coasting rather than writing 0, so skipping those points would
+// overstate NP/TSS. Any power at all in the file is required, as with FIT.
+const parseTcxFile = (text) => {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length > 0 ||
+      doc.getElementsByTagNameNS('*', 'TrainingCenterDatabase').length === 0) {
+    throw new Error("This doesn't look like a valid TCX file. Please choose a .tcx file exported from your bike computer or training app.");
+  }
+
+  const child = (el, name) => el.getElementsByTagNameNS('*', name)[0] || null;
+  const num = (el, name) => {
+    const c = child(el, name);
+    if (!c) return null;
+    const v = parseFloat(c.textContent);
+    return Number.isFinite(v) ? v : null;
+  };
+  // <HeartRateBpm><Value>…</Value></HeartRateBpm>
+  const nestedValue = (el, name) => {
+    const c = child(el, name);
+    return c ? num(c, 'Value') : null;
+  };
+
+  const trackpoints = Array.from(doc.getElementsByTagNameNS('*', 'Trackpoint'));
+  const hasAnyPower = trackpoints.some(tp => child(tp, 'Watts'));
+  if (trackpoints.length === 0) throw new Error('No ride data found in this TCX file.');
+
+  const records = trackpoints
+    .map(tp => {
+      const time = child(tp, 'Time');
+      if (!time) return null;
+      const watts = num(tp, 'Watts');
+      return {
+        timestamp: new Date(time.textContent.trim()),
+        power: hasAnyPower ? (watts ?? 0) : null,
+        heart_rate: nestedValue(tp, 'HeartRateBpm'),
+        altitude: num(tp, 'AltitudeMeters'),
+        position_lat: num(tp, 'LatitudeDegrees'),
+        position_long: num(tp, 'LongitudeDegrees'),
+        distance: num(tp, 'DistanceMeters'),
+      };
+    })
+    .filter(r => r && !Number.isNaN(r.timestamp.getTime()));
+  if (records.length === 0) throw new Error('No ride data found in this TCX file.');
+
+  const lapEls = Array.from(doc.getElementsByTagNameNS('*', 'Lap'));
+  const laps = lapEls.map(lap => ({
+    total_timer_time: num(lap, 'TotalTimeSeconds') || 0,
+    avg_power: num(lap, 'AvgWatts'),
+    avg_heart_rate: nestedValue(lap, 'AverageHeartRateBpm'),
+  }));
+
+  const lapSeconds = laps.reduce((s, l) => s + l.total_timer_time, 0);
+  const lapDistance = lapEls.reduce((s, lap) => {
+    const direct = Array.from(lap.children).find(c => c.localName === 'DistanceMeters');
+    return s + (direct ? parseFloat(direct.textContent) || 0 : 0);
+  }, 0);
+  const lastDistance = [...records].reverse().find(r => r.distance != null)?.distance;
+  const first = records[0].timestamp;
+  const last = records[records.length - 1].timestamp;
+
+  return buildRideFromRecords({
+    records,
+    startTime: first,
+    timerSeconds: lapSeconds || (last - first) / 1000,
+    distanceMeters: lapDistance || lastDistance || 0,
+    ascentMeters: null,
+    normalizedPower: null,
+    avgPower: null,
+    laps,
   });
 };
 
@@ -2428,7 +2516,7 @@ export default function ProgressionTracker() {
     event.target.value = '';
   };
 
-  // Pre-fills Log Ride form fields from a .FIT file. Does not touch Zone, Ride
+  // Pre-fills Log Ride form fields from a .FIT or .TCX file. Does not touch Zone, Ride
   // Name, or RPE — the user still classifies and confirms those before saving.
   // Also detects interval structure (power/HR streams + set/rep detection) and, if the
   // FIT file's date matches an already-logged ride, offers to backfill that ride instead
@@ -2436,10 +2524,11 @@ export default function ProgressionTracker() {
   const handleFitFileImport = (event) => {
     const file = event.target.files[0];
     if (!file) return;
+    const isTcx = file.name.toLowerCase().endsWith('.tcx');
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const parsed = await parseFitFile(e.target.result);
+        const parsed = isTcx ? parseTcxFile(e.target.result) : await parseFitFile(e.target.result);
         const existing = history.find(w => w.date === parsed.date);
 
         if (existing) {
@@ -2476,10 +2565,10 @@ export default function ProgressionTracker() {
         setFormData(prev => ({ ...prev, ...parsed, ...(detection ? { zone: detection.category } : {}) }));
         setPendingFitDetail({ stream: parsed.stream, detection });
       } catch (err) {
-        alert(err.message || 'Could not read this FIT file.');
+        alert(err.message || 'Could not read this ride file.');
       }
     };
-    reader.readAsArrayBuffer(file);
+    if (isTcx) reader.readAsText(file); else reader.readAsArrayBuffer(file);
     // Reset file input so the same file can be re-imported
     event.target.value = '';
   };
@@ -2528,7 +2617,7 @@ export default function ProgressionTracker() {
     }
     const candidates = history.filter(w => w.stream && w.intervalData?.source !== 'manual');
     if (candidates.length === 0) {
-      alert('No rides with saved power data yet. Import a FIT file from the Log Ride screen first.');
+      alert('No rides with saved power data yet. Import a FIT or TCX file from the Log Ride screen first.');
       return;
     }
     if (!window.confirm(
@@ -3980,7 +4069,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                   {weeklyChartView === 'eftp' && eftpHistoryData.length === 0 && (
                     <div className="text-center text-gray-400 py-8">
                       <p>No eFTP data available.</p>
-                      <p className="text-sm mt-2">Import a FIT file that includes a 20-minute or longer effort.</p>
+                      <p className="text-sm mt-2">Import a FIT or TCX file that includes a 20-minute or longer effort.</p>
                     </div>
                   )}
                 </div>
@@ -4484,8 +4573,8 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
             {/* FIT file import — pre-fills Date/Duration/NP/Distance/Elevation/Ride Type below; Zone/Name/RPE stay manual */}
             <div className="mb-4">
               <label className="inline-block bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-3 py-2 rounded cursor-pointer transition">
-                📁 Import FIT File
-                <input type="file" accept=".fit,.FIT" onChange={handleFitFileImport} className="hidden" />
+                📁 Import FIT/TCX File
+                <input type="file" accept=".fit,.FIT,.tcx,.TCX" onChange={handleFitFileImport} className="hidden" />
               </label>
               {pendingFitDetail && (
                 <div className="mt-2 bg-gray-700 rounded p-2 flex items-start justify-between gap-2">
@@ -5126,7 +5215,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                   )
                 ) : sessionsAsc.length === 0 ? (
                   <p className="text-gray-400 text-sm">
-                    No tracked {activeZone?.name} workouts yet. Import a FIT file from the Log Ride screen to start tracking interval progressions.
+                    No tracked {activeZone?.name} workouts yet. Import a FIT or TCX file from the Log Ride screen to start tracking interval progressions.
                   </p>
                 ) : (
                   <>
