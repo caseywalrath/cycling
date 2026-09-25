@@ -17,13 +17,17 @@ import PostLogSummarySheet from './components/PostLogSummarySheet.jsx';
 // and the post-log summary).
 export default function Shell() {
   const route = useHashRoute();
-  const { startEditRide, closeRideForm, closePostLogSummary } = useAppData();
+  const { startEditRide, closeRideForm, closePostLogSummary, setFormData, hasUnsyncedChanges } = useAppData();
   const toast = useToast();
   const [logOpen, setLogOpen] = useState(false);
   const [postLogWorkout, setPostLogWorkout] = useState(null);
 
   const shell = {
-    openLogRide: () => setLogOpen(true),
+    // date: optional YYYY-MM-DD, from the Rides tab's "Log a ride on <date>".
+    openLogRide: (date) => {
+      if (date) setFormData(prev => ({ ...prev, date }));
+      setLogOpen(true);
+    },
     openEditRide: (id) => { if (startEditRide(id)) setLogOpen(true); },
   };
 
@@ -82,8 +86,9 @@ export default function Shell() {
             <div className="max-w-2xl mx-auto px-4 flex justify-end">
               <Button
                 variant="primary"
-                className="pointer-events-auto rounded-full min-h-[48px] px-5 shadow-lg shadow-black/50"
-                onClick={shell.openLogRide}
+                rounded="rounded-full"
+                className="pointer-events-auto min-h-[48px] px-5 shadow-lg shadow-black/50"
+                onClick={() => shell.openLogRide()}
                 data-log-ride
               >
                 ＋ Log Ride
@@ -92,7 +97,7 @@ export default function Shell() {
           </div>
         )}
 
-        {!route.page && <TabBar active={route.tab} onSelect={selectTab} />}
+        {!route.page && <TabBar active={route.tab} onSelect={selectTab} badges={{ settings: hasUnsyncedChanges ? 1 : 0 }} />}
 
         <LogRideSheet open={logOpen} onClose={closeLogSheet} onSaved={handleSaved} onAttached={handleAttached} />
         <PostLogSummarySheet workout={postLogWorkout} onClose={closePostLog} />

@@ -13,12 +13,18 @@ const VARIANTS = {
   'ghost-destructive': 'bg-transparent text-red-400 hover:bg-red-900/30 active:bg-red-900/40',
 };
 
-export default function Button({ variant = 'secondary', size = 'md', block = false, className = '', type = 'button', children, ...rest }) {
+// `rounded` overrides the corner radius (default `rounded-xl`). It's a separate prop, not
+// part of `className`, because a Tailwind class passed in `className` doesn't reliably win
+// over one already baked into the base string (both utilities have equal specificity — the
+// one whose rule comes later in the stylesheet wins, not the one later in the class list).
+// This is what made the floating ＋ Log Ride button render as a rounded rectangle instead of
+// a pill in Phase 3, even though its className included `rounded-full`.
+export default function Button({ variant = 'secondary', size = 'md', block = false, rounded = 'rounded-xl', className = '', type = 'button', children, ...rest }) {
   const sizing = size === 'sm' ? 'px-3 text-sm' : 'px-4 text-base';
   return (
     <button
       type={type}
-      className={`inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl font-medium transition-colors select-none disabled:opacity-50 disabled:cursor-not-allowed ${sizing} ${VARIANTS[variant] || VARIANTS.secondary} ${block ? 'w-full' : ''} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 min-h-[44px] ${rounded} font-medium transition-colors select-none disabled:opacity-50 disabled:cursor-not-allowed ${sizing} ${VARIANTS[variant] || VARIANTS.secondary} ${block ? 'w-full' : ''} ${className}`}
       {...rest}
     >
       {children}
