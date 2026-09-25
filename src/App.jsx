@@ -2254,7 +2254,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                     <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-lg">
                       <p style={{ color }} className="font-semibold text-sm">{d.label} — {d.skill}</p>
                       <p className="text-gray-300 text-sm">{d.watts}W</p>
-                      <p className="text-gray-400 text-xs">Top {d.percentile}%</p>
+                      <p className="text-gray-400 text-xs">{d.percentile}th percentile</p>
                     </div>
                   );
                 }
@@ -2375,7 +2375,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                               <div className="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 shadow-lg whitespace-nowrap">
                                 <p className="font-semibold text-xs" style={{ color }}>{d.label} — {d.skill}</p>
                                 <p className="text-gray-300 text-xs">{d.watts}W</p>
-                                <p className="text-gray-400 text-xs">Top {d.percentile}%</p>
+                                <p className="text-gray-400 text-xs">{d.percentile}th percentile</p>
                               </div>
                             </div>
                           </div>
