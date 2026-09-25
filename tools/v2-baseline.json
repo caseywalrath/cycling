@@ -27,7 +27,9 @@
     "hrStats": {
       "avg": 144,
       "max": 176
-    }
+    },
+    "workoutLevel": 6.7,
+    "workoutLevelSource": "structure"
   },
   "pageErrors": [],
   "dialogs": []

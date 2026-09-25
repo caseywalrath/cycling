@@ -278,6 +278,12 @@ try {
   await page.waitForTimeout(300);
   extras.tapTargetsUnder44.logRideSheetManualMode = await smallTapTargets();
   await page.screenshot({ path: path.join(OUT, 'log-ride-manual-mode.png') });
+  // V2 Phase 7: pick a zone so the manual Workout level stepper shows (pre-filled with 5).
+  await page.getByRole('button', { name: /^sweet spot$/i }).first().click();
+  await page.waitForTimeout(300);
+  extras.manualWorkoutLevel = await text('[data-workout-level] [data-workout-level-value]');
+  await page.locator('[data-workout-level]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'log-ride-manual-level.png') });
 
   await page.getByRole('tab', { name: /import file/i }).click();
   await page.waitForTimeout(300);
@@ -285,6 +291,10 @@ try {
   await page.waitForTimeout(1500);
   extras.tapTargetsUnder44.logRideSheet = await smallTapTargets();
   await page.screenshot({ path: path.join(OUT, 'log-ride-after-import.png') });
+  // V2 Phase 7: the calculated "This workout: <zone> <level>" line for the imported file.
+  extras.importWorkoutLevelText = await text('[data-workout-level]');
+  await page.locator('[data-workout-level]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'log-ride-import-level.png') });
   await page.getByRole('button', { name: /^(save|update)( workout| ride)?$/i }).first().click();
   await page.waitForTimeout(800);
   await page.screenshot({ path: path.join(OUT, 'post-log-summary.png') });
@@ -298,6 +308,8 @@ try {
     // V2 Phase 5: full-resolution bests/HR stats saved at import (§5.1). best 5-minute power
     // should be ~250 (the synthetic file's 3x8 @ 250W work intervals).
     best300: r.bests?.['300'] ?? null, hrStats: r.hrStats ?? null,
+    // V2 Phase 7: the workout level calculated from the file's 3x8 structure.
+    workoutLevel: r.workoutLevel ?? null, workoutLevelSource: r.workoutLevelSource ?? null,
   } : 'NOT SAVED';
 } catch (e) {
   imported = `IMPORT FLOW FAILED: ${e.message.split('\n')[0]}`;
@@ -312,6 +324,23 @@ if (importedId != null) {
   extras.tapTargetsUnder44.ridePage = await smallTapTargets();
   extras.horizontalScroll.ridePage = await hasHorizontalScroll();
   await shootTab('ride-page');
+}
+
+// ---------- V2 Phase 7: Settings → Progression → Recalculate preview (cancelled, so nothing changes) ----------
+try {
+  await goTab('settings');
+  await page.getByRole('button', { name: /recalculate levels from my rides/i }).click();
+  await page.waitForSelector('[data-recalc-preview]');
+  await page.waitForTimeout(500);
+  extras.recalcPreview = await page.evaluate(() => Object.fromEntries(
+    [...document.querySelectorAll('[data-recalc-zone]')].map(tr => [tr.getAttribute('data-recalc-zone'),
+      `${tr.querySelector('[data-before]').textContent} → ${tr.querySelector('[data-after]').textContent}`])));
+  extras.tapTargetsUnder44.recalcPreview = await smallTapTargets();
+  await page.screenshot({ path: path.join(OUT, 'settings-recalc-preview.png') });
+  await page.getByRole('button', { name: /^cancel$/i }).click();
+  await page.waitForTimeout(400);
+} catch (e) {
+  extras.recalcPreview = `FAILED: ${e.message.split('\n')[0]}`;
 }
 
 const result = {
