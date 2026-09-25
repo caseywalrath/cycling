@@ -32,7 +32,7 @@ export default function EftpChart() {
   };
 
   return (
-    <Card>
+    <Card data-chart="eftp">
       <div className="flex flex-wrap justify-between items-baseline gap-x-3 mb-3">
         <h3 className="font-medium">eFTP Progress (1 Year)</h3>
         <span className="text-sm text-gray-400 tabular-nums">

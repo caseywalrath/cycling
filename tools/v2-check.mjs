@@ -74,6 +74,21 @@ for (let d = new Date(2025, 9, 1); d <= new Date(2026, 8, 24); d.setDate(d.getDa
   }
 }
 history.sort((a, b) => b.date.localeCompare(a.date));
+
+// ---------- V2 Phase 6: seed data for the new Today alerts ----------
+// Modifying existing rides in place (not adding new ones) keeps `numbers.rideCount` and the
+// CTL/ATL/TSB numbers exactly as before — only `rpe` and `hrStats` change, and neither feeds
+// those calculations.
+// "Feels harder than usual": bump rpe on the 2 most recent rides (history is sorted
+// newest-first) so their reported effort is well above what their intensity factor would
+// predict — every seeded ride has both intensityFactor and rpe set, so these are exactly the
+// app's own "last 5 power rides".
+history[0].rpe = 9;
+history[1].rpe = 9;
+// "Max heart rate": give the most recent ride an observed max HR above the seeded profile's
+// Max HR (182).
+history[0].hrStats = { avg: 175, max: 195 };
+
 const payload = {
   levels: { recovery: 1, endurance: 4.2, tempo: 3.1, sweetspot: 5.4, threshold: 3.8, vo2max: 2.6, anaerobic: 1.2 },
   history, ftp: FTP, intervalsFTP: 224,
@@ -175,6 +190,9 @@ const goTab = async (tab) => {
 
 // ---------- numbers (read from the Today tab) ----------
 await goTab('today');
+const todayAlerts = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-alert]')].map(el => el.getAttribute('data-alert')).sort()
+);
 const numbers = {
   ftpLine: await text('[data-ftp-line]'),
   ctl: await text('[data-stat="ctl"] [data-value]'),
@@ -182,6 +200,10 @@ const numbers = {
   tsb: await text('[data-stat="tsb"] [data-value]'),
   trainingStatus: await text('[data-training-status]'),
   rideCount: history.length,
+  // V2 Phase 6 §6.4: the seeded high-RPE and high-HR rides above should produce at least the
+  // 'feels-harder' and 'max-hr' alerts (needs-zone and eftp are suppressed by the seed/prompt
+  // key; event-complete never fires, the event is in the future).
+  todayAlerts,
 };
 
 // ---------- each tab: screenshots, tap targets, horizontal scroll ----------
@@ -191,6 +213,54 @@ for (const tab of ['today', 'rides', 'progress', 'settings']) {
   extras.horizontalScroll[tab] = await hasHorizontalScroll();
   await shootTab(tab);
 }
+await goTab('today');
+
+// ---------- V2 Phase 6 §6.4: Progress tab switch timing (must be < 300ms) ----------
+// Real user action — tap the tab bar's Progress button. performance.now() is read via a mark
+// set right before the tap and a mark ProgressScreen records after its first paint, so the
+// number reflects the app's own render time rather than Playwright's click/actionability
+// overhead.
+await page.evaluate(() => { window.__navStart = performance.now(); window.__progressReadyMs = null; });
+await page.locator('nav[aria-label="Main"]').getByRole('button', { name: 'Progress' }).click();
+await page.waitForSelector('[data-progress-screen]', { state: 'attached' });
+await page.waitForFunction(() => window.__progressReadyMs != null);
+const progressTabSwitchMs = Math.round(await page.evaluate(() => window.__progressReadyMs));
+extras.progressTabSwitchMs = progressTabSwitchMs;
+console.log(`\nProgress tab switch: ${progressTabSwitchMs}ms (must be < 300ms)`);
+await page.waitForTimeout(1800); // let every chart finish its draw-in before tapping
+
+// ---------- V2 Phase 6 §6.4: tap-test every new chart's tooltip (tap, then screenshot) ----------
+const tapChart = async (chartName, filename) => {
+  const wrapper = page.locator(`[data-chart="${chartName}"] .recharts-wrapper`).first();
+  if (await wrapper.count() === 0) return false;
+  const box = await wrapper.boundingBox();
+  if (!box) return false;
+  await wrapper.click({ position: { x: box.width * 0.55, y: box.height * 0.4 } });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(OUT, filename) });
+  return true;
+};
+
+extras.chartTapResults = {};
+extras.chartTapResults.fitness = await tapChart('fitness', 'progress-tap-fitness.png');
+extras.chartTapResults.powerCurve = await tapChart('power-curve', 'progress-tap-power-curve.png');
+extras.chartTapResults.powerSkills = await tapChart('power-skills', 'progress-tap-power-skills.png');
+extras.chartTapResults.eftp = await tapChart('eftp', 'progress-tap-eftp.png');
+extras.chartTapResults.aerobic = await tapChart('aerobic', 'progress-tap-aerobic.png');
+
+// Training volume: tap-test each of the four SegmentedControl views (Hours/TSS/Elevation/Zones).
+for (const label of ['Hours', 'TSS', 'Elevation', 'Zones']) {
+  try {
+    await page.locator('[data-chart="volume"]').getByRole('tab', { name: label }).click();
+    await page.waitForTimeout(600);
+    extras.chartTapResults[`volume-${label.toLowerCase()}`] =
+      await tapChart('volume', `progress-tap-volume-${label.toLowerCase()}.png`);
+  } catch (e) {
+    extras.chartTapResults[`volume-${label.toLowerCase()}`] = `FAILED: ${e.message.split('\n')[0]}`;
+  }
+}
+
+await page.evaluate(() => window.scrollTo(0, 0));
 await goTab('today');
 
 // Open the Log Ride sheet (＋ Log Ride on Today) and screenshot both entry modes (V2 Phase 4:

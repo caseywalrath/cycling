@@ -14,13 +14,14 @@ const BEST_ROWS = [
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
-const Delta = ({ value }) => {
+const Delta = ({ value, decimals = 0 }) => {
   if (value == null || Number.isNaN(value)) return null;
   const up = value > 0;
   const flat = value === 0;
+  const rounded = decimals > 0 ? round1(Math.abs(value)) : Math.round(Math.abs(value));
   return (
     <span className={`text-xs tabular-nums ml-1 ${flat ? 'text-gray-500' : up ? 'text-green-400' : 'text-red-400'}`}>
-      {flat ? '–' : up ? '▲' : '▼'} {Math.abs(round1(value))}
+      {flat ? '–' : up ? '▲' : '▼'} {rounded.toLocaleString()}
     </span>
   );
 };
@@ -92,7 +93,7 @@ export default function RecordsCard() {
           <span className="text-gray-400">Distance</span>
           <span className="text-right">{Math.round(ytd.distance).toLocaleString()} mi<Delta value={ytd.distance - lastYtd.distance} /></span>
           <span className="text-gray-400">Hours</span>
-          <span className="text-right">{round1(ytd.hours)}h<Delta value={round1(ytd.hours - lastYtd.hours)} /></span>
+          <span className="text-right">{round1(ytd.hours)}h<Delta value={ytd.hours - lastYtd.hours} decimals={1} /></span>
           <span className="text-gray-400">Climbing</span>
           <span className="text-right">{Math.round(ytd.elevation).toLocaleString()} ft<Delta value={ytd.elevation - lastYtd.elevation} /></span>
           <span className="text-gray-400">Rides</span>

@@ -5,7 +5,13 @@
     "atl": "33",
     "tsb": "+12",
     "trainingStatus": "Transition",
-    "rideCount": 158
+    "rideCount": 158,
+    "todayAlerts": [
+      "event-complete",
+      "feels-harder",
+      "max-hr",
+      "needs-zone"
+    ]
   },
   "importedTcx": {
     "duration": 54,

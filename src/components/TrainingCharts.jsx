@@ -106,7 +106,7 @@ export default function TrainingCharts() {
   };
 
   return (
-    <Card>
+    <Card data-chart="volume">
       <SegmentedControl
         ariaLabel="Chart"
         className="mb-4"

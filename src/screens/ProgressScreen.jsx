@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { navigate } from '../state/useHashRoute.js';
 import { Screen, Card, SectionHeader } from '../components/ui/index.js';
 import ProgressionLevels from '../components/ProgressionLevels.jsx';
@@ -18,6 +18,15 @@ import RecordsCard from '../components/RecordsCard.jsx';
 // rides (V2_PLAN.md §6.4) — data-progress-screen marks the tab for the regression check's
 // timing measurement.
 export default function ProgressScreen() {
+  // V2_PLAN.md §6.4: the regression check times the tab switch with performance.now() from a
+  // mark it sets right before tapping the Progress tab, read back here after paint. Wrapped in
+  // try/catch: window.__navStart only exists during that check, never in normal use.
+  useEffect(() => {
+    try {
+      if (window.__navStart != null) window.__progressReadyMs = performance.now() - window.__navStart;
+    } catch { /* not running under the regression check */ }
+  }, []);
+
   return (
     <Screen title="Progress">
       <div data-progress-screen />

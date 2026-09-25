@@ -141,7 +141,7 @@ export default function PowerSkillsCard() {
   }
 
   return (
-    <div className="bg-gray-800 rounded-2xl p-4">
+    <div className="bg-gray-800 rounded-2xl p-4" data-chart="power-skills">
       <div className="flex justify-between items-start gap-2 mb-1">
         <h3 className="font-semibold text-base">Power Skills</h3>
         {hasAll ? (

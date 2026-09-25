@@ -54,7 +54,7 @@ export default function PowerCurveChart() {
   };
 
   return (
-    <Card>
+    <Card data-chart="power-curve">
       <div className="flex items-center justify-between gap-3 mb-1">
         <h3 className="font-medium">Power Curve</h3>
       </div>

@@ -43,7 +43,7 @@ export default function FitnessChart() {
   if (data.length === 0) return null;
 
   return (
-    <Card>
+    <Card data-chart="fitness">
       <div className="flex flex-wrap justify-between items-baseline gap-x-3 mb-3">
         <h3 className="font-medium">Fitness</h3>
         {rampRate != null && (
