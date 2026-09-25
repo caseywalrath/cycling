@@ -6,7 +6,7 @@ src/
   App.jsx              # Main component, ProgressionTracker (~3,400 lines)
   lib/                 # Pure helpers, no React (V2 Phase 1)
     dates.js           #   toLocalDateStr, parseDateLocal, parseDuration, formatDateWithDay, DAYS_OF_WEEK
-    zones.js           #   ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, ZONE_POWER_RATIO_RANGES, categoryForRatio
+    zones.js           #   ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, ZONE_BOUNDS, zoneForRatio, categoryForRatio, zoneWattRange, zoneRangeLabel (V2 Phase 2)
     rideFiles.js       #   parseFitFile, buildRideFromRecords, parseTcxFile, downsampleRecords, calculateNormalizedPower
     eftp.js            #   EFTP_* constants, bestAveragePower, estimateRideFtp, buildEftpTimeline
     intervals.js       #   interval-detection constants, meanOf, adaptiveWorkThreshold, mergeLapBlocks, buildIntervalLabel, detectIntervals
@@ -83,6 +83,34 @@ ZONE_EXPECTED_RPE // Auto-assigned RPE by zone (3-9)
 ZONE_ADJACENCY  // Zone neighbor map for trickle effect (one-hop, 20% factor each)
 STORAGE_KEY     // localStorage key: 'cycling-progression-data-v2'
 DAYS_OF_WEEK    // Day name lookup array (Sunday → Saturday)
+```
+
+## Zone Definitions (V2 Phase 2)
+
+Before Phase 2, the on-screen zone labels (`getZoneDescription`, in `App.jsx`) and interval
+detection (`ZONE_POWER_RATIO_RANGES`, in `src/lib/zones.js`) used two different sets of %FTP
+edges, so 79–83% FTP fell in no zone on screen even though detection filed it somewhere.
+They're now one table, `ZONE_BOUNDS` in `src/lib/zones.js`, using detection's edges (tuned in
+Session 19 — unchanged, so no existing interval gets re-filed):
+
+```javascript
+ZONE_BOUNDS = {
+  recovery:  [0,    0.55],
+  endurance: [0.55, 0.70],
+  tempo:     [0.70, 0.81],
+  sweetspot: [0.81, 0.94],
+  threshold: [0.94, 1.02],
+  vo2max:    [1.02, 1.20],
+  anaerobic: [1.20, Infinity],
+}
+zoneForRatio(ratio)          // first zone whose [min, max) contains ratio
+categoryForRatio(ratio)      // same exact behavior as before Phase 2 (verified: 2,001 ratios
+                              //   from 0.000 to 2.000 in 0.001 steps, 0 mismatches); ratios
+                              //   below 0.55 still return 'endurance', since detection never
+                              //   files a block as recovery
+zoneWattRange(zoneId, ftp)   // { min, max } in watts (max: null for the open-ended top zone)
+zoneRangeLabel(zoneId, ftp)  // "Z2: 127-162W" or "277W+" style label shown on the progression
+                              //   bars — replaces getZoneDescription()
 ```
 
 ## Utility Functions (`src/lib/`)
@@ -167,7 +195,9 @@ intervalData: {
 ```
 Both fields live inside the same `history` entries and round-trip through the existing localStorage/Export/Import/Google Drive sync paths with no separate storage — no IndexedDB, no new storage key. `detectIntervals()` produces `intervalData` from a FIT-derived `stream`; a ride can have a `stream` with `intervalData: null` (steady ride, no intervals found).
 
-**FIT backfill**: importing a FIT file whose date matches an already-logged ride offers to attach `stream`/`intervalData` to that ride in place, instead of creating a duplicate. TSS, zone, and progression fields on the existing ride are untouched by a backfill.
+**Outdoor rides and `intervalData.category` (V2 Phase 2, D5)**: an outdoor ride is never filed under a training zone — `zone` is always `null` for outdoor rides, and as of Phase 2 `intervalData.category` is always `null` for them too. Before Phase 2, `category` fell back to the *detected* zone whenever no zone was picked, which is exactly the outdoor case, so outdoor rides like a Draper or West Valley ride could show up under a Workout Progression zone tab (e.g. VO2max) even though they were never classified there. Every path that builds or updates `intervalData` now sets `category: null` for outdoor rides: both Log Ride save paths (`handleLogWorkout`), `redetectForRide` (used by 🔍 Re-detect and 🔍 Re-scan intervals), and the FIT/TCX backfill ("attach to existing ride") path. Importing an outdoor file also no longer pre-selects a zone on the Log Ride form. Workout Progression already filters rides with `intervalData?.category === zone`, so a `null` category is enough to exclude a ride — no separate outdoor check was needed there. A one-off migration in the load effect clears `category` to `null` on any already-saved ride with `rideType === 'Outdoor'` and a set category, so previously-misfiled rides self-correct the first time the app opens after this update; `label`, `sets` and `segments` are untouched, so the Ride page still shows the detected efforts.
+
+**FIT backfill**: importing a FIT file whose date matches an already-logged ride offers to attach `stream`/`intervalData` to that ride in place, instead of creating a duplicate. TSS, zone, and progression fields on the existing ride are untouched by a backfill. **Matching by duration, not just date (V2 Phase 2)**: `findMatchingRideForImport()` picks, among rides logged on the same date as the imported file, the one whose stored `duration` is closest to the file's — and only within 25% (a ride with `duration` 0/unset always qualifies, since there's nothing to compare). If no same-day ride qualifies (e.g. two rides logged that day and neither is a close-enough match), the file becomes a new ride without asking, instead of guessing.
 
 ## Persistence
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
@@ -198,6 +228,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `parseFitFile(arrayBuffer)` | Parses a `.fit` file into Log Ride form field values (date, duration, NP, distance, elevation, ride type) |
 | `parseTcxFile(text)` | Parses a `.tcx` file into the same shape as `parseFitFile()`; missing `<Watts>` = 0W (Session 21) |
 | `buildRideFromRecords({...})` | Shared FIT/TCX step: records + ride totals → form values, `stream`, `laps` (elevation from ascent or summed altitude gains, NP fallback chain, GPS → Outdoor) |
+| `findMatchingRideForImport(rides, parsed)` | (V2 Phase 2) Among same-day rides, the one whose `duration` is closest to the imported file's, within 25% (a ride with `duration` 0 always qualifies). `null` if none qualify — the file becomes a new ride, not a guessed attachment |
 | `calculateNormalizedPower(powerSamples)` | NP from a per-second power stream — 30s rolling average, 4th-power mean, 4th root |
 | `calculateMonthlyElevation()` | Monthly elevation totals (11-month rolling window, rides with elevation > 0) |
 | `getTrainingStatus()` | Training status from TSB% with low-fitness override and transition detection |
@@ -261,11 +292,11 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 1. **Header bar**: App title, FTP/W·kg/eFTP display (eFTP now the calculated `currentEftp.value`, Session 20; hidden when null), Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
-4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width). Shown only when saved `powerCurveData` exists (from an old intervals.icu import; the importer was removed in V2 Phase 1). **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.
+4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width). Shown only when saved `powerCurveData` exists (from an old intervals.icu import; the importer was removed in V2 Phase 1). Tooltips show "Xth percentile" (V2 Phase 2 — was "Top X%", which read backwards since a higher number is better). **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.
 5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
 6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB%) and, below it, the **Copy for Claude** button (moved here in Session 17). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
 7. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
-8. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`
+8. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`, or `Event complete | CTL Target: 80-100` once the event date has passed (V2 Phase 2, D4 — this used to show a negative day count, e.g. "Days to Event: -104"). No countdown text at all when no event date is set. Same rule applies to the Copy for Claude text.
 9. **Ride History button**: Full-width, opens History modal
 10. **Workout Progression button** (Session 18): Full-width, directly below Ride History, opens the Interval Progression modal
 11. **Bottom action bar**: Import | Export (left) — Reset Levels (right, subtle text link)
@@ -273,9 +304,9 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (outside the modal) closes it (via `onClick` on backdrop + `stopPropagation` on inner content). Key modals:
 - **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID. Outdoor rides grey out Zone/Completed; Indoor greys out Distance/Elevation. Form closes immediately on Save. Since Session 18, a FIT import that detects intervals shows a confirmation panel under the Import FIT File button (`pendingFitDetail`) before Save.
-- **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride. Since Session 18, entries with `stream`/`intervalData` show a "📊" button (opens Workout Detail) and the detected interval label as a tag.
+- **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride. Since Session 18, entries with `stream`/`intervalData` show a "📊" button (opens Workout Detail) and the detected interval label as a tag. Since V2 Phase 2, that interval label sits on its own line under the date instead of appended to the title, so a long ride name no longer runs under the 📊 ✏️ 🗑️ buttons at 390px — a minimal fix, since this card is redesigned in Phase 4.
 - **Post-Log Summary** (`showPostLogSummary`): Shows progression change after logging
-- **Profile** (`showProfileModal`): Weight, HR, age settings
+- **Profile** (`showProfileModal`): Weight, HR, age settings. FTP box (V2 Phase 2): typing updates a local text value (`ftpInputValue`) only, not `currentFTP` directly, so clearing the box to retype no longer snaps it to 235 on every keystroke. Save validates 100–500; outside that range (including empty) keeps the previous FTP, shows an inline error below the field, and leaves the modal open. "Reset progression levels?" (shown when FTP changes) and the bottom-bar "Reset Levels" link both build their reset object from `{ ...DEFAULT_LEVELS }` (was missing `recovery` before Phase 2).
 - **Event** (`showEventModal`): Goal event configuration
 - **Workout Detail** (`showWorkoutDetail`, Session 18): Power/HR timeline chart (Recharts `ComposedChart`) with detected intervals shaded via `ReferenceArea`, plus an interval table. Opened from Ride History's 📊 button, the Progression modal's session list, or automatically after a FIT backfill. Header carries a **🔍 Re-detect** button (Session 19) that re-runs detection on the ride's saved stream.
 - **Workout Progression** (`showProgressionModal`, Session 18): Header carries a **🔍 Re-scan intervals** button (Session 19) that re-runs detection across every ride with a saved stream (skipping `intervalData.source === 'manual'`). Opens with no zone tab selected — that default view lists the 5 most recent indoor workouts with their zones. Selecting a category tab (`progressionCategory`) switches to that zone's interval session history: a work-minutes/avg-watts trend chart and a newest-first session list — the planning view for deciding the next block's duration/wattage.

@@ -1,5 +1,45 @@
 # Changelog
 
+## Session 23 - V2 Phase 2: Bug Fixes and One Zone Table (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 2. It's a bug-fix pass — nothing about how the app looks or works day-to-day changes, except the zone ranges shown on the progression bars and a few small wording/validation fixes.
+
+### What you'll see on your iPhone
+- **The zone ranges under each progression bar now line up with how the app actually files your workouts.** Before this fix, the labels and the behind-the-scenes zone detection disagreed, so power between 79–83% of your FTP wasn't labeled as belonging to any zone at all, even though a ride in that range was still being filed under Tempo or Sweet Spot. At your current FTP (231W) the six zones now read: **Z2: 127–162W · Z3: 162–187W · 187–217W (Sweet Spot) · Z4: 217–236W · Z5: 236–277W · Z6: 277W+**.
+- **Outdoor rides no longer show up under a training zone.** A handful of outdoor rides (for example, ones named things like "Draper" or "West Valley") were incorrectly showing up in the Workout Progression screen's VO2max tab. Outdoor rides were never supposed to count toward a zone — that's fixed, both going forward and for the rides that were already affected (see "One-off data fix" below).
+- **The Profile FTP box behaves properly.** Before, clearing the box to type a new number would sometimes flash to 235 partway through typing. Now you can clear it and type freely; if you tap Save with it empty or with a number outside 100–500, you'll see a small red message and your old FTP stays in place instead of being silently overwritten.
+- **"Days to Event" no longer goes negative.** Once your event date has passed, the Fitness Progress card and the Copy for Claude text now say "Event complete" instead of something like "Days to Event: -104".
+- **Power Skills tooltips now say "62nd percentile"** instead of "Top 62%" — the old wording read backwards, since a bigger number there is better, not worse.
+- **Importing a FIT/TCX file matches the right ride** when you've logged more than one ride on the same day — it now compares ride length, not just the date, before offering to attach the file to an existing ride.
+- **Ride History cards**: the interval label (like "3x8 @ 250W") now sits on its own line instead of occasionally running under the 📊 ✏️ 🗑️ buttons on a long ride name.
+- **Reset Levels** (both the Profile "FTP changed, reset levels?" prompt and the bottom-bar Reset Levels link) now correctly reset Recovery along with the other six zones — before, Recovery was silently skipped.
+
+### One-off data fix: outdoor rides' zone tag
+On the first load after this update, the app does a one-time cleanup: any ride already saved with `rideType: 'Outdoor'` that had a zone category attached to its interval data (from the bug described above) gets that category cleared. This does **not** touch anything else about the ride — its name, duration, distance, elevation, detected interval label, and power/heart-rate data are all untouched. It only stops the ride from being counted under a training zone it was never supposed to belong to. This can't be undone by "Undo" since it isn't a button — but nothing is deleted, and re-running the app doesn't change it again once it's been cleaned up (rides without a category are left alone).
+
+### Why this happened (for the technically curious)
+Every ride's `intervalData.category` field is supposed to record which training zone a workout's effort was filed under. For outdoor rides, that field was supposed to stay empty, but the code had a fallback: whenever no zone was manually picked, it fell back to whatever zone the automatic interval detector guessed from the power data. Outdoor rides never have a manually picked zone, so they always hit that fallback and got a guessed zone anyway. That's now fixed everywhere the field gets set: saving a ride, editing a ride, re-running interval detection, and attaching a FIT/TCX file to an existing ride.
+
+### Checks
+- Build passes.
+- Regression check (`tools/v2-check.mjs`): **no differences vs baseline**, no page errors — expected, since Phase 2 doesn't touch the synthetic indoor test ride's numbers.
+- `categoryForRatio()` (the function that decides which zone a detected interval belongs to) was checked against its old behavior for 2,001 ratios (0.000 to 2.000, in steps of 0.001): **0 mismatches**. No existing ride gets re-filed into a different zone by this update.
+- By-hand checks: seeded an outdoor ride with a leftover zone category, reloaded, and confirmed localStorage cleared it to `null` and it no longer appeared under the Workout Progression VO2max tab. Screenshotted the progression bars at FTP 231W and confirmed the exact zone label text above. Walked through the Profile FTP box: typed 240 and saved (header updated to 240W), then cleared it and saved again (inline error shown, FTP stayed at 240W).
+
+### Deferred to later phases (not fixed here, on purpose)
+- The app's overall layout, navigation and design (bottom tabs, Today tab, etc.) — Phase 3.
+- Heart-rate-only rides logging 0 TSS, and several other metrics-engine gaps — Phase 5.
+- The progression-level ceiling bug — Phase 7.
+- `window.alert`/`window.confirm` usage throughout the app is unchanged in this phase; Phase 3/4 replace them with in-app toasts and confirm sheets.
+
+### Files Changed
+- `src/lib/zones.js` — `ZONE_BOUNDS` replaces `ZONE_POWER_RATIO_RANGES`; adds `zoneForRatio`, `zoneWattRange`, `zoneRangeLabel`; `categoryForRatio` behavior unchanged; `ZONES[].description` (hard-coded 235W-FTP text, unused) removed
+- `src/App.jsx` — `getZoneDescription` removed (replaced by `zoneRangeLabel`); outdoor rides no longer get a zone category (`handleLogWorkout`, `redetectForRide`, FIT/TCX backfill, Log Ride pre-select); one-off outdoor-category migration in the load effect; FIT/TCX same-day matching now uses `findMatchingRideForImport` (duration-based); Profile FTP box validates and no longer snaps to 235; both "reset levels" code paths use `{ ...DEFAULT_LEVELS }`; "Event complete" replaces negative day counts (Fitness Progress card, Copy for Claude); Power Skills tooltips say "Xth percentile"; Ride History interval label moved to its own line
+- `ARCHITECTURE.md` — new "Zone Definitions" section; updated Ride Source Model / Interval Data / UI Layout / Modal system / Key Functions sections for the above
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 23 - V2 Phase 1: Remove intervals.icu and Tidy the Code (2026-09-25)
 
 ### What you'll see on your iPhone
