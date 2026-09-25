@@ -1,13 +1,14 @@
 # Architecture
 
-**As of V2 Phase 5 (Session 24).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
+**As of V2 Phase 6 (Session 24).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
 Settings**. All data lives in one React context; screens are built from a small UI kit. Rides,
 the Ride page, Log Ride and Settings have their Phase 4 design (filters/search, a redesigned
 calendar, an import summary + manual-entry Log Ride, and Google Drive auto-sync). Phase 5 adds a
 metrics engine — full-resolution power/HR data at import, heart-rate TSS, and per-ride/
-across-rides analysis — with the Ride page now showing best efforts, time in zones, heart-rate
-drift and efficiency. Progress still has its Phase 3 look; Phase 6 redesigns it and wires these
-new metrics into charts and alerts.
+across-rides analysis. Phase 6 redesigns the Progress tab around that metrics engine (a Fitness
+chart, a training-volume "Zones" view, a power curve, an aerobic-fitness chart and a Records
+card) and adds four new Today alerts (new best, ramp rate, feels-harder-than-usual, max heart
+rate).
 
 ## Testing (`npm test`)
 
@@ -37,8 +38,19 @@ src/
   components/
     ui/                      # the UI kit (see "UI kit" below); index.js re-exports everything
     ProgressionLevels.jsx    # zone level bars (Progress tab); tap → Workout Progression page
-    TrainingCharts.jsx       # Hours / TSS / Elevation / eFTP charts with a SegmentedControl
-    PowerSkillsCard.jsx      # radar + power bars + Rider Type sheet
+    ZoneBar.jsx              # one zone's level bar (V2 Phase 6): tap the bar to open its
+                             #   Workout Progression page; the recent-change/idle badges are
+                             #   their own tap targets (a toast), not a hover-only title
+    FitnessChart.jsx         # V2 Phase 6: CTL/ATL/TSB chart, 90d/180d/1y, ramp rate in header
+    TrainingCharts.jsx       # Hours / TSS / Elevation / Zones charts with a SegmentedControl
+                             #   (V2 Phase 6: eFTP moved out to EftpChart.jsx; Zones is new)
+    EftpChart.jsx            # V2 Phase 6: eFTP Progress chart, now its own standalone card
+    PowerCurveChart.jsx      # V2 Phase 6: log-scale power-duration curve (last 90 days + all-time)
+    PowerSkillsCard.jsx      # radar + power bars + Rider Type sheet (V2 Phase 6: fed from the
+                             #   app's own last-90-day power curve, powerCurveData is now only a
+                             #   fallback for a missing duration)
+    AerobicFitnessCard.jsx   # V2 Phase 6: efficiency-factor scatter + 6-week median, 30-day HR drift
+    RecordsCard.jsx          # V2 Phase 6: personal bests table, longest/climbing/highest-TSS, YTD
     ActivityCalendar.jsx     # monthly calendar (Rides tab): zone-coloured ride dots, week-TSS
                              #   column, day taps (V2 Phase 4)
     RideRow.jsx              # one ride row in the Rides list (V2 Phase 4; replaces RideHistoryList)
@@ -69,11 +81,15 @@ src/
                              #   aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, rpeMismatch
     records.js                #   Phase 5: across-rides analysis — powerCurve, personalBests,
                              #   newBestsForRide, records, observedMaxHr
-    chartData.js             #   calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation, calculateEFTPHistory
-    summary.js               #   getDaysUntilEvent, weekComparison, latestRide, buildAnalysisText (Copy for Claude), copyToClipboard
-    alerts.js                #   buildAlerts, ridesNeedingZone (Today alerts)
+    chartData.js             #   calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation,
+                             #   calculateEFTPHistory, weeklyTimeInZones (Phase 6)
+    summary.js               #   getDaysUntilEvent, weekComparison, latestRide, mondayOf,
+                             #   buildAnalysisText (Copy for Claude, Phase 6 additions §6.3), copyToClipboard
+    alerts.js                #   buildAlerts, ridesNeedingZone; Phase 6 adds new-best/ramp-rate/
+                             #   feels-harder/max-hr, ALERT_DISMISSALS_KEY, MAXHR_PROMPT_KEY,
+                             #   readDismissals/writeDismissal (Today alerts)
     format.js                #   formatChange, getChangeDescription, ordinal, shortDayDate, formatMinutes
-    *.test.js                #   Phase 5: vitest unit tests, next to the code they test
+    *.test.js                #   vitest unit tests, next to the code they test (Phase 6 adds alerts.test.js)
 tools/
   v2-check.mjs               # regression check (see V2_PLAN.md §0.4); v2-baseline.json
 public/                      # PWA icons, apple-touch-icon.png
@@ -136,7 +152,7 @@ No router library. `useHashRoute()` parses `location.hash` into
 | `event` | `{ name, date, distance, targetCTL }` |
 | `userProfile` | `{ maxHR, restingHR, lthr, weight (lb), age, sex }` — `lthr` (Threshold HR) is optional, added V2 Phase 4, read by Phase 5's heart-rate TSS |
 | `intervalsFTP`, `vo2maxEstimates` | **Pass-through** (V2 §0.3): loaded, saved, exported, synced unchanged, never edited |
-| `powerCurveData` | Pass-through; still read by Power Skills until Phase 6 |
+| `powerCurveData` | Pass-through; V2 Phase 6: Power Skills now only falls back to it for a duration its own computed power curve is missing |
 | `exportedAt`, `lastSyncedAt` | Sync timestamps (see Google Drive Sync) |
 
 ### Other state in the provider
@@ -155,6 +171,11 @@ No router library. `useHashRoute()` parses `location.hash` into
 (`calculateTrainingLoads`), `trainingStatus` (`getTrainingStatus`). They depend on `history` /
 `levels` plus a "today" key that refreshes when the app returns to the foreground, so a
 PWA left open overnight doesn't show yesterday's numbers.
+
+**V2 Phase 6** — the Progress tab's shared inputs, memoised the same way (keyed on `history` and
+`currentFTP`, even for a value that doesn't itself depend on FTP, per V2_PLAN.md §6.4): `fitnessSeries`
+(`dailyLoadSeries`), `rampRate` (from `fitnessSeries`), `bestCurves` (`personalBests` — `{ allTime,
+last90Days }`), `rideRecords` (`records()`), `maxHrObserved` (`observedMaxHr`).
 
 ### Actions
 | Action | Does | Returns |
@@ -176,7 +197,9 @@ PWA left open overnight doesn't show yesterday's numbers.
 | `readBackupFile(file)` / `restoreBackup(parsed)` | Read a backup / replace local data with it (caller confirms in between) | parsed / ride count |
 | `syncWithDrive()` | The old `handleDriveSync` | sync result |
 | `resolveEftpAlert(value)` | Store the answered eFTP value (Dismiss or Update FTP) | – |
-| `buildCopyText()` | Copy for Claude text | string |
+| `resolveMaxHrAlert(value)` | V2 Phase 6: store the answered max-HR value (`maxhr-prompted-value`), same pattern as eFTP | – |
+| `dismissAlert(key, value)` | V2 Phase 6: write one entry into the device-local `alert-dismissals` map (new-best per ride id, ramp-rate's date, feels-harder's ride id) | – |
+| `buildCopyText()` | Copy for Claude text (Phase 6 adds ramp rate/90-day bests/HR drift/time-in-zone share, §6.3) | string |
 | `closePostLogSummary()` | Start the level-bar animation for `lastLoggedWorkout` | – |
 | `markDataChanged()` | `exportedAt = now` — called by every mutation | – |
 
@@ -240,6 +263,21 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
    - *N rides need a zone* (`ridesNeedingZone`: indoor, `zone == null`, `source === 'imported'`,
      not `historical`) → `#/rides?filter=needs-zone`.
    - *Event complete* (event date passed) → `#/settings/event`.
+   - **V2 Phase 6** (all four dismissible via a device-local `alert-dismissals` JSON map,
+     `lib/alerts.js`'s `readDismissals`/`writeDismissal`, wrapped in try/catch):
+     - *New best* — the latest ride set a new all-time/90-day best at 1m/5m/20m/60m (or also
+       5s/30s when the ride has full 1-second `bests`), from `newBestsForRide`. **View ride** /
+       **Dismiss**; dismissed per ride id (`new-best-<id>`), so it never re-appears for that ride.
+     - *Ramp rate* — `rampRate(dailyLoadSeries(...)) > 7`: "Fitness is climbing fast
+       (+X/week). Watch for fatigue." **Dismiss** hides it for 7 days (`ramp-rate`: dismissal
+       date), then it can return if still true.
+     - *Feels harder than usual* — 2+ of the last 5 power rides have `rpeMismatch(ride) >= 2`.
+       **Dismiss** stores the current latest ride's id (`feels-harder`); it stays hidden until a
+       newer ride is logged.
+     - *Max heart rate* — `observedMaxHr(history)` is above the profile's Max HR (or Max HR is
+       unset) and above the device-local `maxhr-prompted-value` (same pattern as the eFTP alert).
+       **Update profile** (opens `#/settings/profile?maxhr=<value>`, which pre-fills the Max HR
+       box) / **Dismiss** — either answer stores the value.
 4. **This week:** Monday → today vs last Monday → same weekday (`weekComparison`): hours, TSS,
    rides with ▲/▼, and a 7-dot Mon–Sun row coloured by zone (grey outdoor), today ringed.
 5. **Latest ride** (`latestRide`: latest date): name, zone/Outdoor/Needs-zone pill, date,
@@ -267,10 +305,47 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
    Grouped by calendar month with a sticky month header, most recent first, loaded 3 months at a
    time with a "Show older rides" button so 150+ rides stay fast to render.
 
-### Progress (`screens/ProgressScreen.jsx`)
-Progression level bars (tap a zone → `#/progress/zone/<id>`), the chart card (SegmentedControl:
-Hours · TSS · Elevation · eFTP), Power Skills (Rider Type opens a Sheet), and a "Workout
-progression" row → `#/progress/workouts`. Still its Phase 3 look; Phase 6 redesigns it.
+### Progress (`screens/ProgressScreen.jsx`, V2 Phase 6 redesign)
+Top to bottom, each its own `Card`. Every across-rides computation here (`dailyLoadSeries`,
+`personalBests`, `records()`, `observedMaxHr`) is memoised in `AppDataContext` — keyed on
+`history`/`currentFTP` — as `fitnessSeries`, `rampRate`, `bestCurves`, `rideRecords`,
+`maxHrObserved`, so switching to this tab stays fast (measured 130–170ms with 158 seeded rides
+in `tools/v2-check.mjs`, well under the 300ms budget). `<div data-progress-screen>` at the top
+marks the tab for that check's timing measurement (a `useEffect` records
+`window.__progressReadyMs` after first paint — a no-op outside the check, wrapped in try/catch).
+
+1. **Progression levels** (`ProgressionLevels.jsx` → `components/ZoneBar.jsx`, tap a zone bar →
+   `#/progress/zone/<id>`). The "recent change" and "idle" badges are now their own 44px tap
+   targets that show a `Toast`, replacing a hover-only `title` (a phone has no hover).
+2. **Fitness** (`FitnessChart.jsx`): Fitness (CTL, blue) and Fatigue (ATL, orange) as lines,
+   Form (TSB) as bars around a zero reference line (green above/red below) — one shared y-axis,
+   since all three are the same TSS-point units. `SegmentedControl` for 90d/180d/1y (default
+   180d); the header shows the ramp rate ("+4.2 fitness/week").
+3. **Training volume** (`TrainingCharts.jsx`): `SegmentedControl` Hours · TSS · Elevation ·
+   **Zones**. Hours/TSS/Elevation are the original Phase-3 charts, unchanged. **Zones** (V2 Phase
+   6) is a 12-week Monday-start stacked bar of time-in-zone minutes (`weeklyTimeInZones`, rides
+   with a power stream only — noted beneath the chart).
+4. **Power curve** (`PowerCurveChart.jsx`): log-scale x-axis (ticks 5s/30s/1m/5m/20m/1h/2h),
+   last-90-days (solid) and all-time (faint) lines from `bestCurves`/`BEST_DURATIONS`. Tapping a
+   point's tooltip shows watts, W/kg (from the profile weight) and which ride/date set it.
+5. **Power Skills** (`PowerSkillsCard.jsx`): fed from the app's own last-90-day `powerCurve`
+   (Phase 5) instead of the one-time intervals.icu CSV import — the percentile formula and
+   phenotype rules are unchanged, only the input source. The old `powerCurveData` is now only a
+   fallback for a duration the computed curve is missing, and that's labelled ("5s, 30s from old
+   intervals.icu import"). Missing any of the 9 durations replaces the Rider Type button with
+   "Import a ride with a sprint to see your rider type" and skips the phenotype calculation
+   entirely (a partial radar can't tell Sprint/Attack/Climb apart).
+6. **eFTP** (`EftpChart.jsx`): the original eFTP Progress chart, now its own standalone card
+   (previously a tab inside the training-volume control, which is now Hours/TSS/Elevation/Zones).
+7. **Aerobic Fitness** (`AerobicFitnessCard.jsx`): `efficiencyFactor` per qualifying ride over the
+   last 6 months as a scatter (indoor blue, outdoor teal) plus a 6-week rolling-median line.
+   Beneath it, the average `aerobicDecoupling` of qualifying rides in the last 30 days with its
+   `decouplingBand` sentence (or a note when there isn't enough steady-ride data).
+8. **Records** (`RecordsCard.jsx`): a personal-bests table (5s/1m/5m/20m/60m, all-time and 90-day,
+   with W/kg) from `bestCurves`; longest ride, most climbing and highest TSS from `rideRecords`
+   (`records()`), each tappable to its ride; year-to-date vs. the same point last year
+   (distance/hours/climbing/rides) with ▲/▼ deltas.
+9. **Workout progression** row → `#/progress/workouts` (unchanged).
 
 ### Settings (`screens/SettingsScreen.jsx`, V2 Phase 4 rebuild)
 Cards, each with its own Save: **Profile** (FTP validated 100–500 with an inline error and a live
@@ -334,6 +409,8 @@ ZONE_ADJACENCY    // Zone neighbour map for the trickle effect (one hop, 20% eac
 STORAGE_KEY       // 'cycling-progression-data-v2' (state/AppDataContext.jsx)
 SCHEMA_VERSION    // 2 (state/AppDataContext.jsx), written to every saved object
 EFTP_PROMPT_KEY   // 'eftp-prompted-value' (device-local)
+ALERT_DISMISSALS_KEY // 'alert-dismissals' (device-local, V2 Phase 6 — lib/alerts.js)
+MAXHR_PROMPT_KEY  // 'maxhr-prompted-value' (device-local, V2 Phase 6 — lib/alerts.js)
 ```
 
 ## Zone Definitions (V2 Phase 2)
@@ -517,8 +594,8 @@ shows "TSS 64 (from heart rate)" for these rides, and Save no longer requires NP
 **Training load history** (`lib/load.js`): `dailyLoadSeries(history, today)` returns one
 `{ date, tss, ctl, atl, tsb }` entry per calendar day from the first ride to today, using the
 same 42-day CTL / 7-day ATL exponential smoothing as before — moved out of
-`calculateTrainingLoads()` so a future Fitness chart (Phase 6) can plot the whole history without
-re-deriving the math. `calculateTrainingLoads()` is rebuilt on top of it with **identical
+`calculateTrainingLoads()` so the Progress tab's Fitness chart (Phase 6) can plot the whole
+history without re-deriving the math. `calculateTrainingLoads()` is rebuilt on top of it with **identical
 output** (verified by both a unit test and the regression check). `rampRate(series)` is CTL
 today minus CTL 7 days ago, one decimal — `null` without at least a week of series.
 
@@ -536,18 +613,19 @@ needs, rather than a misleading number:
   drift" (amber), >8% "Drifting: base needs work" (red).
 - `efficiencyFactor(ride)` → NP / avg HR, only for an easy, long ride (IF ≤0.80, ≥45 min).
 - `expectedRpe(intensityFactor)` / `rpeMismatch(ride)` → the RPE a rider would be expected to
-  report at a given IF, and how far the ride's actual RPE was from it (used by a Phase 6 alert).
+  report at a given IF, and how far the ride's actual RPE was from it (drives the Today "feels
+  harder than usual" alert, V2 Phase 6).
 
 **Across-rides analysis** (`lib/records.js`):
 - `powerCurve(history, { from, to })` → per duration, the best power across the (optionally
   date-bounded) rides in `history`, with which ride and date set it.
 - `personalBests(history)` → `{ allTime, last90Days }` power curves.
 - `newBestsForRide(history, ride)` → durations where `ride` set a new all-time or 90-day best
-  (drives the Ride page's "★ New best" badges, and a Phase 6 Today alert).
+  (drives the Ride page's "★ New best" badges, and the Today "New best" alert, V2 Phase 6).
 - `records(history)` → longest ride (by duration and by distance), most elevation, highest TSS,
   and year-to-date totals (distance/hours/elevation/rides) vs. the same date last year.
 - `observedMaxHr(history)` → the highest HR ever seen, preferring `hrStats.max` and falling back
-  to the stream for older rides (feeds a Phase 6 "update your Max HR?" alert).
+  to the stream for older rides (feeds the Today "Highest heart rate seen" alert, V2 Phase 6).
 
 ## Persistence
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
@@ -613,16 +691,27 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 
 **Indoor vs outdoor**: the adaptive threshold only runs for indoor rides (`{ indoor: true }`, derived from `rideType`). Indoor ERG power is a near-square wave, so the ride's own two power levels are trustworthy; outdoor power from rolling terrain is not, and would generate phantom intervals — outdoor rides keep the conservative fixed 85%-FTP threshold.
 
-## Charts (Progress tab: Hours, TSS, Elevation, eFTP)
+## Charts (Progress tab)
 
-All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (height 200px).
+The original Hours/TSS/Elevation/eFTP charts use Recharts `<AreaChart>` inside
+`<ResponsiveContainer>` (height 200px); V2 Phase 6's new charts (Fitness, Zones, Power Curve,
+Aerobic Fitness) are documented in "Progress" above and use `<ComposedChart>`/`<LineChart>`/
+`<BarChart>`/`<ScatterChart>` as their content needs. Every chart's tooltip works on tap (Recharts
+does this by default; no extra code needed) — `tools/v2-check.mjs` taps each one and screenshots
+the result. Each new chart card carries a `data-chart="<name>"` attribute (`fitness`,
+`volume`, `power-curve`, `power-skills`, `eftp`, `aerobic`) so that check can find its
+`.recharts-wrapper` reliably.
 
 | Chart | Color | dataKey | Y-axis width | Dot style |
 |-------|-------|---------|-------------|-----------|
 | Weekly Hours | Orange `#FB923C` | `hours` | 45 | `r: 4` solid fill |
 | Weekly TSS | Blue `#3B82F6` | `tss` | 45 | `r: 4` solid fill |
 | Monthly Elevation | Green `#22C55E` | `elevation` | 55 | `r: 4` solid fill |
+| Zones (V2 Phase 6) | one colour per zone (`ZONES`) | one `<Bar>` per zone, `stackId="zones"` | 45 | stacked bars, no dots |
 | eFTP Progress | Purple `#A855F7` | `eFTP` | 55 | `r: 4`, hollow (`fill: '#1F2937'`) for legacy/imported months, solid for calculated months |
+| Fitness (V2 Phase 6) | CTL blue `#3B82F6` / ATL orange `#FB923C` lines, TSB green/red `#22C55E`/`#EF4444` bars | `ctl`/`atl`/`tsb` | 40 | lines have no dots (too many points); TSB bars colour per-point via `<Cell>` |
+| Power Curve (V2 Phase 6) | Purple `#A855F7`, solid (last 90 days) / 40% opacity (all-time) | `last90`/`allTime` | 45 | `r: 4` solid / `r: 3` faint; log-scale x-axis (`scale="log"`, ticks at 5/30/60/300/1200/3600/7200s) |
+| Aerobic Fitness (V2 Phase 6) | indoor `#3B82F6`, outdoor `#14B8A6` dots; grey `#9CA3AF` median line | scatter `x`/`y` (epoch days), line `x`/`y` | 40 | `r: 4` dots, 2px median line, no dots on the line |
 
 **eFTP chart specifics (updated Session 20):**
 - Data: `calculateEFTPHistory(history, eftpTimeline)` — one point per calendar month, each
@@ -646,6 +735,37 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 - Tooltip: month/year label, total elevation, ride count (only rides with elevation > 0)
 
 **Weekly charts** (Hours, TSS): X-axis uses `dataKey="label"` with `interval="preserveStartEnd"`. Tooltips show week label, value, and ride count.
+
+**Zones chart specifics (V2 Phase 6):**
+- Data: `weeklyTimeInZones(history, ftp, weeks=12)` (`lib/chartData.js`) — one entry per
+  Monday-start week, minutes per zone from `timeInZones(ride, ftp)` (Phase 5), summed across
+  rides with a power stream in that week. A ride with no stream is silently skipped (the note
+  under the chart: "Rides with power data only").
+- Empty state when no ride in the window has stream data.
+
+**Fitness chart specifics (V2 Phase 6):**
+- Data: `fitnessSeries` (`dailyLoadSeries`, memoised in `AppDataContext`), sliced to the
+  selected window (90/180/365 days via `SegmentedControl`, default 180).
+- One shared y-axis for CTL/ATL/TSB (all three are the same TSS-point units) — never a
+  dual-axis chart.
+- Header shows `rampRate` ("+4.2 fitness / week"), `null` until there's at least a week of series.
+
+**Power Curve chart specifics (V2 Phase 6):**
+- Data: `bestCurves.allTime` / `bestCurves.last90Days` (`personalBests`, Phase 5's
+  `powerCurve`), one point per `BEST_DURATIONS` entry (`lib/rideFiles.js`) that exists in
+  either curve; `connectNulls` so a missing duration doesn't break the line.
+- X-axis: `type="number" scale="log" domain={[5, 7200]}`, explicit `ticks` at 5/30/60/300/1200/3600/7200s.
+- Tooltip: watts, W/kg (profile weight in kg), and which ride/date set it — prefers the
+  90-day point over all-time when both exist at that duration.
+
+**Aerobic Fitness chart specifics (V2 Phase 6):**
+- Scatter data: `efficiencyFactor(ride)` (Phase 5) for every ride in the last 6 months that
+  qualifies, plotted at its actual date (as epoch days, so it shares a numeric x-axis with the
+  weekly median line — Recharts lets each child of a `<ComposedChart>` supply its own `data`).
+- Line data: a 6-week trailing rolling median of those same efficiency-factor values, bucketed
+  by Monday-start week (`mondayOf`, `lib/summary.js`).
+- Below the chart: the mean `aerobicDecoupling` of rides in the last 30 days that qualify for
+  it, with `decouplingBand`'s sentence and colour (or a note when there isn't enough data).
 
 ### Clipboard
 `copyToClipboard()` (`lib/summary.js`) uses `navigator.clipboard.writeText()` with a `document.execCommand('copy')` fallback for HTTP/LAN contexts. A failure shows a toast.

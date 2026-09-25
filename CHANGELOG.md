@@ -1,5 +1,90 @@
 # Changelog
 
+## Session 24 - V2 Phase 6: Progress Tab and New Alerts (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 6. It redesigns the **Progress** tab around the
+metrics engine Phase 5 built underneath the app, and adds four new alerts to the **Today** tab.
+Nothing about Rides, Log Ride, Settings or the Ride page changes.
+
+### What you'll see on your iPhone
+
+**Progress tab — new charts, top to bottom:**
+
+- **Progression levels** look the same, but the small "+0.3" and "↓ 12d idle" badges under each
+  zone now work by **tapping** them (they show a short explanation), instead of only on a
+  hover that a phone can never do.
+- **Fitness** — a new chart: your Fitness (blue line) and Fatigue (orange line) over the last
+  90/180/365 days (pick with the buttons), with your Form shown as green/red bars around the
+  middle. The heading shows how fast your fitness is climbing or falling per week.
+- **Training volume** now has a fourth tab, **Zones**, next to Hours/TSS/Elevation — a
+  12-week bar chart of how many minutes you spent in each training zone (only counts rides
+  with a power file attached).
+- **Power Curve** — a new chart showing your best power for every effort length from 5 seconds
+  to 2 hours, from your last 90 days (solid line) plus your all-time bests (faint line). Tap
+  any point to see the watts, watts-per-kilogram, and which ride set it.
+- **Power Skills** now uses your own last-90-days data instead of the one-time file imported
+  from intervals.icu years ago — that old import is only used to fill in a gap if one of the
+  nine effort lengths hasn't been ridden recently, and it's labelled when that happens. If
+  several are missing, "Rider Type" is replaced with a note asking for a ride with a sprint in
+  it.
+- **eFTP Progress** moved to its own card (it used to be a tab inside the Hours/TSS/Elevation
+  chart; now that spot is Zones instead).
+- **Aerobic Fitness** — a new chart: a dot for every long, steady ride showing how efficiently
+  you were riding (power per heartbeat), plus a smoothed trend line. Below it, your average
+  heart-rate drift over your last 30 days of steady rides, in plain words ("Solid aerobic
+  base" / "Some drift" / "Drifting: base needs work").
+- **Records** — a new card: your best-ever and best-in-90-days power at five effort lengths
+  (with watts-per-kilogram), your longest ride, biggest climb and highest-effort ride (tap any
+  to open it), and this year's totals compared with the same point last year.
+
+**Today tab — four new alerts** (each has a Dismiss button; the app remembers you dismissed it):
+
+- **New best** — when your latest ride sets a new best at a meaningful effort length.
+- **Fitness is climbing fast** — a heads-up when your Fitness (CTL) is rising quickly, so you
+  can watch for fatigue. Dismissing hides it for a week.
+- **Feels harder than usual** — shows up when several of your last few rides felt tougher than
+  their power/heart-rate numbers would suggest (could be fatigue, heat, life stress). Stays
+  dismissed until you log a new ride.
+- **Highest heart rate seen** — if a ride recorded a heart rate above what's saved in your
+  profile (or you haven't set a Max HR yet), this offers to update it for you, the same way
+  the "raise your FTP?" alert already worked.
+
+### Under the hood (for the curious)
+
+- The Progress tab's new charts are all built from the Phase 5 metrics engine
+  (`dailyLoadSeries`, `personalBests`, `records()`, `observedMaxHr`, `timeInZones`,
+  `efficiencyFactor`, `aerobicDecoupling`) — nothing new is computed that wasn't already
+  possible from your saved ride data.
+- Those computations are memoised (cached) in the app's shared data layer, keyed to your ride
+  history and FTP, so switching to the Progress tab stays fast even with 150+ rides — measured
+  at 130–170ms in the automated check, well under the 300ms target.
+- The four new alerts' "don't show me this again" state lives in one small, on-this-device-only
+  file (not part of your backup or Google Drive sync), the same way the existing "eFTP above
+  FTP" alert already worked.
+- "Copy for Claude" now also includes your ramp rate, your 90-day best efforts, your recent
+  heart-rate drift, and how your last 4 weeks split across training zones — appended after
+  everything that was already there, so nothing about the existing text changed.
+- 15 new automated tests cover the four new alert rules (84 tests total, up from 69).
+
+### Anything skipped?
+
+- One more hover-only "title" tooltip remains, on the Today tab's 7-day dot row (Session 3's
+  original work) — it wasn't part of this phase's task list (only the Progress level-bar
+  badges were), so it's left for a later cleanup pass rather than fixed here.
+- Assigning a zone to an imported ride can still move `lastWorkedDates[zone]` backwards — a
+  known Phase 5 carryover, unrelated to this phase, still slated for Phase 7.
+- The "Edit numbers" cosmetic issue on an HR-only import (still shows an NP field defaulting to
+  0) from Phase 5 is also unchanged — out of scope for this phase.
+
+### Baseline change (the automated regression check)
+
+`tools/v2-check.mjs` now also seeds two of the synthetic history's most recent rides with a
+high reported effort (RPE) and a high heart rate, records which Today alerts are showing, times
+the Progress tab switch, and taps every new chart's tooltip for a screenshot. Only one thing
+changed in the baseline: a new `numbers.todayAlerts` field lists the alerts the seeded data
+produces — no existing number (Fitness/Fatigue/Form, the imported test ride's numbers, etc.)
+changed at all.
+
 ## Session 24 - V2 Phase 5: Metrics Engine (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 5. It doesn't change how any screen looks or
