@@ -1,10 +1,22 @@
 # Architecture
 
-**As of V2 Phase 4 (Session 24).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
+**As of V2 Phase 5 (Session 24).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
 Settings**. All data lives in one React context; screens are built from a small UI kit. Rides,
-the Ride page, Log Ride and Settings now have their Phase 4 design (filters/search, a redesigned
-calendar, an import summary + manual-entry Log Ride, and Google Drive auto-sync). Progress still
-has its Phase 3 look; Phase 6 redesigns it.
+the Ride page, Log Ride and Settings have their Phase 4 design (filters/search, a redesigned
+calendar, an import summary + manual-entry Log Ride, and Google Drive auto-sync). Phase 5 adds a
+metrics engine — full-resolution power/HR data at import, heart-rate TSS, and per-ride/
+across-rides analysis — with the Ride page now showing best efforts, time in zones, heart-rate
+drift and efficiency. Progress still has its Phase 3 look; Phase 6 redesigns it and wires these
+new metrics into charts and alerts.
+
+## Testing (`npm test`)
+
+Phase 5 adds **vitest** (the only new dependency the whole V2 plan allows) as the project's test
+runner: `npm test` runs `vitest run`. Tests live next to the code they test, as `*.test.js`, and
+cover the pure `src/lib/` functions only (no React component tests) — `dates.test.js`,
+`zones.test.js`, `rideFiles.test.js`, `eftp.test.js`, `intervals.test.js`, `load.test.js`,
+`analysis.test.js`, `records.test.js`. This is separate from `tools/v2-check.mjs`, the
+Playwright-based regression check (§0.4 in `V2_PLAN.md`), which drives the real app in a browser.
 
 ## File Structure
 ```
@@ -46,15 +58,22 @@ src/
     zones.js                 #   ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, ZONE_BOUNDS,
                              #   zoneForRatio, categoryForRatio, zoneWattRange, zoneRangeLabel, getZoneName, getZoneColor
     rideFiles.js             #   parseFitFile, buildRideFromRecords, parseTcxFile, downsampleRecords,
-                             #   calculateNormalizedPower, findMatchingRideForImport
+                             #   calculateNormalizedPower, findMatchingRideForImport,
+                             #   toOneHzSeries, bestsFromOneHz, hrStatsFromSeries, avgPowerFromSeries (Phase 5)
     eftp.js                  #   EFTP_* constants, bestAveragePower, estimateRideFtp, buildEftpTimeline
     intervals.js             #   interval-detection constants, detectIntervals and helpers
     progression.js           #   applyDecay, calculateNewLevel
-    load.js                  #   calculateTSS, calculateIF, calculateTrainingLoads, getTrainingStatus
+    load.js                  #   calculateTSS, calculateIF, calculateTrainingLoads, getTrainingStatus,
+                             #   estimateLthr, hrTss, dailyLoadSeries, rampRate (Phase 5)
+    analysis.js              #   Phase 5: per-ride analysis — bestsForRide, timeInZones,
+                             #   aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, rpeMismatch
+    records.js                #   Phase 5: across-rides analysis — powerCurve, personalBests,
+                             #   newBestsForRide, records, observedMaxHr
     chartData.js             #   calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation, calculateEFTPHistory
     summary.js               #   getDaysUntilEvent, weekComparison, latestRide, buildAnalysisText (Copy for Claude), copyToClipboard
     alerts.js                #   buildAlerts, ridesNeedingZone (Today alerts)
     format.js                #   formatChange, getChangeDescription, ordinal, shortDayDate, formatMinutes
+    *.test.js                #   Phase 5: vitest unit tests, next to the code they test
 tools/
   v2-check.mjs               # regression check (see V2_PLAN.md §0.4); v2-baseline.json
 public/                      # PWA icons, apple-touch-icon.png
@@ -268,15 +287,21 @@ levels** (Reset, confirmed), **About** (app version from `package.json`, a link 
 CHANGELOG).
 
 ### Pages and sheets
-- **Ride page** (`WorkoutDetailPage`, `#/ride/<id>`, V2 Phase 4 rebuild): header (name, date,
-  type/zone pill, interval label); a 3×2 `StatTile` stats grid (Duration, Distance, Elevation,
-  NP, TSS, IF), plus Avg HR when the ride has a stream with heart rate; the power/HR chart with
-  shaded intervals (unchanged, rides with a stream only); the interval table; notes; and an
+- **Ride page** (`WorkoutDetailPage`, `#/ride/<id>`, V2 Phase 4 rebuild, Phase 5 metrics added):
+  header (name, date, type/zone pill, interval label); a 3×2 `StatTile` stats grid (Duration,
+  Distance, Elevation, NP, TSS, IF), plus Avg HR when the ride has a stream with heart rate; the
+  power/HR chart with shaded intervals (rides with a stream only — HR-only rides, `stream.power
+  === null`, draw the HR line alone with no power axis); the interval table; notes; and an
   action row — **Edit ride**, **Attach ride file** (runs the FIT/TCX backfill for *this* ride
   directly, no date guessing — calls `importRideFile` then `attachRideFile`), and **Delete**
   (destructive ConfirmSheet, then back to Rides). Header right action: **Re-detect** (rides with
-  a stream; result as a toast). Marked `{/* Phase 5: … */}` slots hold best efforts, time in
-  zones, heart-rate drift and efficiency factor once Phase 5 adds them.
+  a stream; result as a toast). **Phase 5 metrics** (each shown only when the ride has the data
+  for it — see "Metrics engine" below): a **best efforts** table (5s/1m/5m/20m/60m, `★ New best`
+  badges from `newBestsForRide`, a footnote when the bests come from the coarser 10s stream
+  instead of 1Hz data); a **time in zones** stacked bar with minutes per zone
+  (`timeInZones`, needs a power stream and the current FTP); **heart-rate drift**
+  (`aerobicDecoupling` + `decouplingBand`, steady rides only); **efficiency** (`efficiencyFactor`,
+  "Higher over time = fitter").
 - **Workout Progression** (`WorkoutProgressionPage`): zone Chips, Work Minutes / Avg Watts
   SegmentedControl, trend chart, session list (tap → Ride page); header action **Re-scan**
   (ConfirmSheet first). No zone selected: the 5 most recent indoor workouts.
@@ -351,12 +376,22 @@ estimateRideFtp(ride)    // Best 20-min power x 0.95, or best 60-min power if hi
 buildEftpTimeline(history, today) // { byRideId, current, firstStreamDate }
 applyDecay(levels, lastWorkedDates) // 14-day grace, -0.1/week (VO2max/Anaerobic 1.5x), floor max(1.0, level*0.5)
 calculateNewLevel(current, workoutLevel, rpe, completed) // progression step (Phase 7 replaces it)
-downsampleRecords(records, binSeconds=10) // FIT records -> { binSeconds, power[], hr[] }, null if no power data
+downsampleRecords(records, binSeconds=10) // FIT records -> { binSeconds, power[]|null, hr[] }, null if no power AND no HR
 detectIntervals(stream, ftp, laps, { indoor }) // -> { segments, sets, category, label } or null
 calculateTrainingLoads(history, now) // { ctl, atl, tsb, weeklyTSS, twoWeekTSS, ctl14dAgo, atl14dAgo, tsb14dAgo }
 getTrainingStatus(ctl, atl, tsb, ctl14dAgo) // { label, color, description }
 weekComparison(history, now) // { thisWeek, lastWeek, days } for the Today "This week" card
 buildAlerts(state, derived, today) // Today alerts (lib/alerts.js)
+
+// V2 Phase 5 — see "Metrics Engine" above for details
+toOneHzSeries(records)   // { power: number[]|null, hr: (number|null)[] }, 1-second resolution
+bestsFromOneHz(power), hrStatsFromSeries(hr), avgPowerFromSeries(power) // lib/rideFiles.js
+estimateLthr(profile), hrTss(durationMin, avgHr, restingHr, lthr)       // lib/load.js
+dailyLoadSeries(history, today), rampRate(series)                       // lib/load.js
+bestsForRide(ride), timeInZones(ride, ftp), aerobicDecoupling(ride)     // lib/analysis.js
+efficiencyFactor(ride), expectedRpe(if), rpeMismatch(ride)              // lib/analysis.js
+powerCurve(history, {from,to}), personalBests(history)                 // lib/records.js
+newBestsForRide(history, ride), records(history), observedMaxHr(history) // lib/records.js
 ```
 
 **Important**: Never use `new Date("YYYY-MM-DD")` to parse date strings — it creates midnight UTC, which in US timezones becomes the previous evening. Always use `parseDateLocal()` for ride/event date strings.
@@ -420,7 +455,8 @@ unaffected.
 ## Interval Data (Session 18)
 Two optional fields on ride history entries, both `undefined` on rides that predate this feature — every consumer null-checks:
 ```javascript
-stream: { binSeconds: 10, power: [145, 150, ...], hr: [98, 101, ...] } // downsampled per-ride stream, ~8-12KB/ride
+stream: { binSeconds: 10, power: [145, 150, ...] | null, hr: [98, 101, ...] } // downsampled per-ride
+  // stream, ~8-12KB/ride. power is null (V2 Phase 5) for a ride with heart rate but no power.
 intervalData: {
   source: 'auto' | 'manual',
   category: 'sweetspot',  // one of the ZONES ids
@@ -434,6 +470,84 @@ Both fields live inside the same `history` entries and round-trip through the ex
 **Outdoor rides and `intervalData.category` (V2 Phase 2, D5)**: an outdoor ride is never filed under a training zone — `zone` is always `null` for outdoor rides, and as of Phase 2 `intervalData.category` is always `null` for them too. Before Phase 2, `category` fell back to the *detected* zone whenever no zone was picked, which is exactly the outdoor case, so outdoor rides like a Draper or West Valley ride could show up under a Workout Progression zone tab (e.g. VO2max) even though they were never classified there. Every path that builds or updates `intervalData` now sets `category: null` for outdoor rides: both Log Ride save paths (`saveRide`, formerly `handleLogWorkout`), `redetectForRide` (used by Re-detect on the Ride page and Re-scan on Workout Progression), and the FIT/TCX backfill ("attach to existing ride") path. Importing an outdoor file also no longer pre-selects a zone on the Log Ride form. Workout Progression already filters rides with `intervalData?.category === zone`, so a `null` category is enough to exclude a ride — no separate outdoor check was needed there. A one-off migration in the load effect clears `category` to `null` on any already-saved ride with `rideType === 'Outdoor'` and a set category, so previously-misfiled rides self-correct the first time the app opens after this update; `label`, `sets` and `segments` are untouched, so the Ride page still shows the detected efforts.
 
 **FIT backfill**: importing a FIT file whose date matches an already-logged ride offers to attach `stream`/`intervalData` to that ride in place, instead of creating a duplicate. TSS, zone, and progression fields on the existing ride are untouched by a backfill. **Matching by duration, not just date (V2 Phase 2)**: `findMatchingRideForImport()` picks, among rides logged on the same date as the imported file, the one whose stored `duration` is closest to the file's — and only within 25% (a ride with `duration` 0/unset always qualifies, since there's nothing to compare). If no same-day ride qualifies (e.g. two rides logged that day and neither is a close-enough match), the file becomes a new ride without asking, instead of guessing.
+
+## Metrics Engine (V2 Phase 5)
+
+**New optional ride fields** (all `undefined`/absent on rides saved before Phase 5 — every
+consumer null-checks; nothing is ever backfilled onto an existing ride's other fields):
+
+```javascript
+bests: { "5": 620, "15": 480, "30": 410, "60": 340, "120": 290, "300": 250, "600": 230, ... }
+  // best average power (W) per duration in seconds, from the ride's full 1-second data.
+  // Keys for durations longer than the ride are omitted. Set at import (both save paths and
+  // the "Attach ride file" backfill) by rideFiles.js's toOneHzSeries()+bestsFromOneHz().
+hrStats: { avg: 142, max: 176 }   // from the same 1-second data; null if the ride has no HR
+avgPower: 187                     // mean of the 1-second power series INCLUDING zeros/coasting
+tssSource: 'hr'                   // present only for a heart-rate-TSS ride; absent means 'power'
+```
+
+**Full-resolution (1Hz) data at import** (`toOneHzSeries()` in `lib/rideFiles.js`): a FIT/TCX
+file's raw per-record data is placed at 1-second resolution (rounded offset from the first
+record). A gap of ≤10s between two records forward-fills the earlier one's power/HR across it
+(FIT "smart recording" only writes a new record every few seconds when nothing changes); a
+gap of >10s is treated as a stop — power 0, HR unknown (`null`) for the whole gap. This is
+**separate from** the existing `stream` field (`downsampleRecords()`, still 10-second bins, used
+for the Ride page chart and `detectIntervals()`) — `bests`/`hrStats`/`avgPower` are the only
+things computed at 1Hz; everything else still works from the coarser stream.
+
+**Heart-rate-only rides** (a file with HR but no power at all — an outdoor ride with a strap and
+no power meter): `downsampleRecords()` now returns a stream with `power: null` (instead of
+`null` for the whole stream) whenever there's power **or** HR, so these rides still get a chart.
+Every reader of `stream.power` across the codebase is null-safe: `bestAveragePower`,
+`detectIntervals` and `estimateRideFtp` all return `null` (never `0`, which could otherwise look
+like a real, terrible number) for an HR-only stream; the Ride page chart draws the HR line alone
+with no power axis; `toOneHzSeries()` returns `power: null` the same way.
+
+**Heart-rate TSS** (`lib/load.js`): when the just-imported file has HR but no power,
+`computeRideMetrics()` in `AppDataContext` saves the ride with `tss` from `hrTss()` and
+`tssSource: 'hr'` instead of the usual power-based TSS, and leaves `normalizedPower`/
+`intensityFactor` `null` (there's nothing to compute them from). Manual entry is unchanged —
+always power-based. `estimateLthr(profile)` uses `profile.lthr` if the user set one (Settings →
+Profile → Threshold HR), else estimates it as `0.89 × maxHR`, else `null`. `hrTss(durationMin,
+avgHr, restingHr, lthr)` returns `null` if any input is missing or `lthr <= restingHr`, otherwise
+`round(durationMin/60 × hrIF² × 100)` where `hrIF = (avgHr - restingHr) / (lthr - restingHr)` —
+the same 100-at-threshold-effort scale as power-based TSS. The Log Ride sheet's import summary
+shows "TSS 64 (from heart rate)" for these rides, and Save no longer requires NP > 0 for them.
+
+**Training load history** (`lib/load.js`): `dailyLoadSeries(history, today)` returns one
+`{ date, tss, ctl, atl, tsb }` entry per calendar day from the first ride to today, using the
+same 42-day CTL / 7-day ATL exponential smoothing as before — moved out of
+`calculateTrainingLoads()` so a future Fitness chart (Phase 6) can plot the whole history without
+re-deriving the math. `calculateTrainingLoads()` is rebuilt on top of it with **identical
+output** (verified by both a unit test and the regression check). `rampRate(series)` is CTL
+today minus CTL 7 days ago, one decimal — `null` without at least a week of series.
+
+**Per-ride analysis** (`lib/analysis.js`) — each returns `null` when the ride lacks the data it
+needs, rather than a misleading number:
+- `bestsForRide(ride)` → `{ bests, source }`. Prefers the ride's own `bests` (1-second
+  resolution, `source: '1s'`); falls back to the saved 10-second `stream` for durations ≥60s on
+  older rides (`source: '10s'`) — the Ride page shows a footnote to re-attach the file for
+  sprint-length bests in that case.
+- `timeInZones(ride, ftp)` → seconds per zone, binned from `stream.power` via `zoneForRatio`;
+  null power bins are skipped, not counted as 0W.
+- `aerobicDecoupling(ride)` → % heart-rate drift between the first and second half of a steady
+  ride (drops the first 10 minutes, needs ≥60 min, no detected intervals, and VI ≤ 1.15).
+  `decouplingBand(pct)` gives the sentence + color: <5% "Solid aerobic base" (green), 5–8% "Some
+  drift" (amber), >8% "Drifting: base needs work" (red).
+- `efficiencyFactor(ride)` → NP / avg HR, only for an easy, long ride (IF ≤0.80, ≥45 min).
+- `expectedRpe(intensityFactor)` / `rpeMismatch(ride)` → the RPE a rider would be expected to
+  report at a given IF, and how far the ride's actual RPE was from it (used by a Phase 6 alert).
+
+**Across-rides analysis** (`lib/records.js`):
+- `powerCurve(history, { from, to })` → per duration, the best power across the (optionally
+  date-bounded) rides in `history`, with which ride and date set it.
+- `personalBests(history)` → `{ allTime, last90Days }` power curves.
+- `newBestsForRide(history, ride)` → durations where `ride` set a new all-time or 90-day best
+  (drives the Ride page's "★ New best" badges, and a Phase 6 Today alert).
+- `records(history)` → longest ride (by duration and by distance), most elevation, highest TSS,
+  and year-to-date totals (distance/hours/elevation/rides) vs. the same date last year.
+- `observedMaxHr(history)` → the highest HR ever seen, preferring `hrStats.max` and falling back
+  to the stream for older rides (feeds a Phase 6 "update your Max HR?" alert).
 
 ## Persistence
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
