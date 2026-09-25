@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ComposedChart, Line, ReferenceArea, Legend } from 'recharts';
 import GoogleDriveSync from './google-drive-sync.js';
-import { ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY } from './lib/zones.js';
+import { ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, zoneRangeLabel } from './lib/zones.js';
 import { toLocalDateStr, parseDateLocal, parseDuration, formatDateWithDay } from './lib/dates.js';
 import { parseFitFile, parseTcxFile } from './lib/rideFiles.js';
 import { EFTP_PROMPT_MARGIN, EFTP_PROMPT_KEY, buildEftpTimeline } from './lib/eftp.js';
@@ -243,28 +243,6 @@ export default function ProgressionTracker() {
   const markDataChanged = () => {
     setExportedAt(new Date().toISOString());
   };
-
-  // Calculate zone descriptions dynamically based on current FTP
-  const getZoneDescription = (zoneId, ftp) => {
-    const zones = {
-      recovery: { min: 0, max: Math.round(ftp * 0.55), label: 'Z1' },
-      endurance: { min: Math.round(ftp * 0.55), max: Math.round(ftp * 0.70), label: 'Z2' },
-      tempo: { min: Math.round(ftp * 0.70), max: Math.round(ftp * 0.79), label: 'Z3' },
-      sweetspot: { min: Math.round(ftp * 0.83), max: Math.round(ftp * 0.94), label: '' },
-      threshold: { min: Math.round(ftp * 0.94), max: ftp, label: 'Z4' },
-      vo2max: { min: ftp, max: Math.round(ftp * 1.19), label: 'Z5' },
-      anaerobic: { min: Math.round(ftp * 1.19), max: null, label: 'Z6' },
-    };
-
-    const zone = zones[zoneId];
-    if (!zone) return '';
-
-    if (zone.max === null) {
-      return `${zone.label}: ${zone.min}W+`;
-    }
-    return `${zone.label ? zone.label + ': ' : ''}${zone.min}-${zone.max}W`;
-  };
-
 
   const animateLevel = (zone, fromLevel, toLevel, duration = 800) => {
     setAnimatingZone(zone);
@@ -1790,7 +1768,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                       </span>
                     )}
                   </span>
-                  <span className="text-gray-400">{getZoneDescription(zone.id, currentFTP)}</span>
+                  <span className="text-gray-400">{zoneRangeLabel(zone.id, currentFTP)}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="flex-1 bg-gray-700 rounded-full h-5 overflow-hidden relative">

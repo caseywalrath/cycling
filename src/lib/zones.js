@@ -1,11 +1,11 @@
 export const ZONES = [
-  { id: 'recovery', name: 'Recovery', color: '#6B7280', description: 'Z1: <130W' },
-  { id: 'endurance', name: 'Endurance', color: '#3B82F6', description: 'Z2: 130-165W' },
-  { id: 'tempo', name: 'Tempo', color: '#22C55E', description: 'Z3: 165-185W' },
-  { id: 'sweetspot', name: 'Sweet Spot', color: '#EAB308', description: '195-220W' },
-  { id: 'threshold', name: 'Threshold', color: '#F97316', description: 'Z4: 220-235W' },
-  { id: 'vo2max', name: 'VO2max', color: '#EF4444', description: 'Z5: 235-280W' },
-  { id: 'anaerobic', name: 'Anaerobic', color: '#8B5CF6', description: 'Z6: 280W+' },
+  { id: 'recovery', name: 'Recovery', color: '#6B7280' },
+  { id: 'endurance', name: 'Endurance', color: '#3B82F6' },
+  { id: 'tempo', name: 'Tempo', color: '#22C55E' },
+  { id: 'sweetspot', name: 'Sweet Spot', color: '#EAB308' },
+  { id: 'threshold', name: 'Threshold', color: '#F97316' },
+  { id: 'vo2max', name: 'VO2max', color: '#EF4444' },
+  { id: 'anaerobic', name: 'Anaerobic', color: '#8B5CF6' },
 ];
 
 export const DEFAULT_LEVELS = {
@@ -38,15 +38,58 @@ export const ZONE_ADJACENCY = {
   vo2max:    [{ zone: 'threshold', factor: 0.2 }, { zone: 'anaerobic', factor: 0.2 }],
   anaerobic: [{ zone: 'vo2max', factor: 0.2 }],
 };
-// %FTP boundaries for filing a detected interval under a training zone. These mirror the
-// watt ranges in ZONES (which are written for a 235W FTP), so a 205W block lands in Sweet
-// Spot rather than Tempo.
-export const ZONE_POWER_RATIO_RANGES = [
-  { max: 0.70, zone: 'endurance' },  // < 165W @ 235 FTP
-  { max: 0.81, zone: 'tempo' },      // 165-190W
-  { max: 0.94, zone: 'sweetspot' },  // 190-220W
-  { max: 1.02, zone: 'threshold' },  // 220-240W
-  { max: 1.20, zone: 'vo2max' },     // 240-282W
-  { max: Infinity, zone: 'anaerobic' },
-];
-export const categoryForRatio = (ratio) => ZONE_POWER_RATIO_RANGES.find(r => ratio < r.max).zone;
+// V2 Phase 2: single source of truth for zone boundaries (fraction of FTP), replacing the
+// old ZONE_POWER_RATIO_RANGES (interval detection) and the separate, disagreeing
+// getZoneDescription() table (labels shown on screen). These edges are detection's, tuned in
+// Session 19 - unchanged, so no existing interval gets re-filed into a different zone.
+// [min, max) - the last zone's max is Infinity.
+export const ZONE_BOUNDS = {
+  recovery:  [0,    0.55],
+  endurance: [0.55, 0.70],
+  tempo:     [0.70, 0.81],
+  sweetspot: [0.81, 0.94],
+  threshold: [0.94, 1.02],
+  vo2max:    [1.02, 1.20],
+  anaerobic: [1.20, Infinity],
+};
+
+// First zone (in ZONES order) whose [min, max) contains ratio.
+export const zoneForRatio = (ratio) => {
+  for (const zone of ZONES) {
+    const [min, max] = ZONE_BOUNDS[zone.id];
+    if (ratio >= min && ratio < max) return zone.id;
+  }
+  return 'anaerobic';
+};
+
+// Interval detection never files a block as recovery (it only ever compares work segments
+// against the endurance-and-up boundaries), so ratios below 0.55 keep returning 'endurance',
+// matching the old categoryForRatio() exactly.
+export const categoryForRatio = (ratio) => (ratio < ZONE_BOUNDS.endurance[0] ? 'endurance' : zoneForRatio(ratio));
+
+export const zoneWattRange = (zoneId, ftp) => {
+  const [lo, hi] = ZONE_BOUNDS[zoneId];
+  return {
+    min: Math.round(lo * ftp),
+    max: hi === Infinity ? null : Math.round(hi * ftp),
+  };
+};
+
+// "Z2:"-style prefixes, matching Session-era zone naming. Sweet spot has no prefix.
+const ZONE_LABEL_PREFIX = {
+  recovery: 'Z1',
+  endurance: 'Z2',
+  tempo: 'Z3',
+  sweetspot: '',
+  threshold: 'Z4',
+  vo2max: 'Z5',
+  anaerobic: 'Z6',
+};
+
+// e.g. "127-162W" or "277W+"
+export const zoneRangeLabel = (zoneId, ftp) => {
+  const { min, max } = zoneWattRange(zoneId, ftp);
+  const prefix = ZONE_LABEL_PREFIX[zoneId];
+  const range = max === null ? `${min}W+` : `${min}-${max}W`;
+  return prefix ? `${prefix}: ${range}` : range;
+};
