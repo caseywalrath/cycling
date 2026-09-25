@@ -945,11 +945,41 @@ export default function ProgressionTracker() {
   };
 
 
+  // Among rides logged on the same date as an imported file, pick the one whose duration is
+  // closest to the file's, and only if that's within 25% (or the ride's stored duration is
+  // 0, i.e. unset). Otherwise there's no confident match, and the file becomes a new ride
+  // without asking — a same-day match by date alone was pairing files with the wrong ride
+  // when two rides were logged on the same day.
+  const findMatchingRideForImport = (rides, parsed) => {
+    const sameDay = rides.filter(w => w.date === parsed.date);
+    if (sameDay.length === 0) return null;
+    let best = null;
+    let bestDiff = Infinity;
+    for (const ride of sameDay) {
+      let diff;
+      let qualifies;
+      if (!ride.duration || ride.duration === 0) {
+        // Unset duration always qualifies, but a real close-duration match still wins.
+        diff = Infinity;
+        qualifies = true;
+      } else {
+        diff = Math.abs(ride.duration - parsed.duration) / ride.duration;
+        qualifies = diff <= 0.25;
+      }
+      if (qualifies && diff <= bestDiff) {
+        best = ride;
+        bestDiff = diff;
+      }
+    }
+    return best;
+  };
+
   // Pre-fills Log Ride form fields from a .FIT or .TCX file. Does not touch Zone, Ride
   // Name, or RPE — the user still classifies and confirms those before saving.
   // Also detects interval structure (power/HR streams + set/rep detection) and, if the
-  // FIT file's date matches an already-logged ride, offers to backfill that ride instead
-  // of creating a duplicate.
+  // FIT file's date matches an already-logged ride (by duration, see
+  // findMatchingRideForImport), offers to backfill that ride instead of creating a
+  // duplicate.
   const handleFitFileImport = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -958,7 +988,7 @@ export default function ProgressionTracker() {
     reader.onload = async (e) => {
       try {
         const parsed = isTcx ? parseTcxFile(e.target.result) : await parseFitFile(e.target.result);
-        const existing = history.find(w => w.date === parsed.date);
+        const existing = findMatchingRideForImport(history, parsed);
 
         if (existing) {
           const existingName = existing.name || existing.notes || 'Workout';
