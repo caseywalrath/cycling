@@ -23,16 +23,20 @@ export const STORAGE_KEY = 'cycling-progression-data-v2';
 export const SCHEMA_VERSION = 2;
 const FTP = 235;
 
+// V2 Phase 4: no invented defaults for a fresh manual entry — duration, NP and zone start
+// empty/unset, and the Log Ride sheet's Save button stays disabled until they're filled in.
+// A file import overwrites duration/normalizedPower from the file, and pre-selects a zone
+// for indoor rides when interval detection found one (unchanged from Phase 2/3).
 export const getDefaultFormData = () => {
   return {
     name: '',
     date: toLocalDateStr(new Date()),
-    zone: 'endurance',
-    workoutLevel: ZONE_EXPECTED_RPE['endurance'],
+    zone: null,
+    workoutLevel: null,
     rpe: 5,
     completed: true,
-    duration: 60,
-    normalizedPower: 150,
+    duration: '',
+    normalizedPower: '',
     rideType: 'Indoor',
     distance: 0,
     elevation: 0,
@@ -101,10 +105,16 @@ export function AppDataProvider({ children }) {
   const [userProfile, setUserProfile] = useState({
     maxHR: null,
     restingHR: null,
+    lthr: null, // Threshold HR (bpm), optional — V2 Phase 4, used by Phase 5's heart-rate TSS
     weight: null, // lb
     age: null,
     sex: 'male', // 'male' or 'female'
   });
+
+  // V2 Phase 4: true once a data change hasn't been auto-synced yet (no valid Google token at
+  // the time the 3s debounce fired). Shown as a badge on the Settings tab.
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
+  const autoSyncTimer = useRef(null);
 
   // VO2max estimates storage (pass-through from old intervals.icu imports)
   const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
@@ -246,6 +256,35 @@ export function AppDataProvider({ children }) {
     }
   }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
 
+  // ---------------- Google Drive auto-sync (V2 Phase 4, D3) ----------------
+  // After any data change, wait 3s so a burst of edits (e.g. typing in a form, or an import
+  // followed by a save) triggers one sync, not one per change. Then, only if a Google
+  // sign-in is still valid, push silently — this never opens a sign-in popup on its own.
+  // Without a valid token, mark the change as unsynced; the Settings tab shows a badge and
+  // its Sync button (a user tap) can start a new sign-in.
+  const isAutoSyncInitialMount = useRef(true);
+  useEffect(() => {
+    if (isAutoSyncInitialMount.current) {
+      isAutoSyncInitialMount.current = false;
+      return undefined;
+    }
+    clearTimeout(autoSyncTimer.current);
+    autoSyncTimer.current = setTimeout(() => {
+      if (GoogleDriveSync.hasValidToken()) {
+        // handleDriveSync() itself calls GoogleDriveSync.sync(), which calls authenticate()
+        // internally — but since we've just confirmed a valid token is present, that call
+        // resolves immediately from the cached token and never opens a popup.
+        handleDriveSync().then((result) => {
+          if (result?.status !== 'error') setHasUnsyncedChanges(false);
+        });
+      } else {
+        setHasUnsyncedChanges(true);
+      }
+    }, 3000);
+    return () => clearTimeout(autoSyncTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, lastWorkedDates]);
+
   // ---------------- eFTP alert (replaces the old window.confirm prompt) ----------------
   // The highest eFTP value the user has already answered (device-local). The Today tab shows
   // the "raise your FTP?" alert only for a higher estimate; the value is stored when the
@@ -306,8 +345,13 @@ export function AppDataProvider({ children }) {
     const distance = isOutdoor ? formData.distance : 0;
     const elevation = isOutdoor ? formData.elevation : 0;
     const duration = parseDuration(formData.duration);
-    const tss = calculateTSS(formData.normalizedPower, duration);
-    const intensityFactor = calculateIF(formData.normalizedPower);
+    // V2 Phase 4: normalizedPower can be a string while the user is typing in a manual-entry
+    // field with no invented default; coerce once here for TSS/IF and the saved value.
+    const normalizedPower = Number(formData.normalizedPower) || 0;
+    const tss = calculateTSS(normalizedPower, duration);
+    const intensityFactor = calculateIF(normalizedPower);
+    // V2 Phase 4: "Name" defaults to "Indoor ride" / "Outdoor ride" when left blank.
+    const name = formData.name || (isOutdoor ? 'Outdoor ride' : 'Indoor ride');
 
     if (editingRide) {
       // Editing existing workout
@@ -335,7 +379,8 @@ export function AppDataProvider({ children }) {
         distance,
         elevation,
         duration,
-        name: formData.name,
+        normalizedPower,
+        name,
         id: editingRide,
         previousLevel,
         newLevel,
@@ -402,7 +447,8 @@ export function AppDataProvider({ children }) {
         distance,
         elevation,
         duration,
-        name: formData.name,
+        normalizedPower,
+        name,
         id: Date.now(),
         previousLevel: currentLevel,
         newLevel: newLevel,
@@ -683,6 +729,28 @@ export function AppDataProvider({ children }) {
     markDataChanged();
   };
 
+  // Settings → "Old imported rides" (V2 Phase 4). Old CSV/API imports that were never given a
+  // zone clutter the "needs zone" alert and list forever if the user genuinely doesn't have
+  // the data to classify them. This sets `historical: true` on them so they're excluded from
+  // ridesNeedingZone() and the Today alert count, without deleting anything. "Show them again"
+  // reverses it. The caller confirms before calling hideOldImportedRides.
+  const oldImportedRideCount = () =>
+    history.filter(w => w.rideType !== 'Outdoor' && w.zone == null && w.source === 'imported' && !w.historical).length;
+
+  const hideOldImportedRides = () => {
+    setHistory(prev => prev.map(w =>
+      (w.rideType !== 'Outdoor' && w.zone == null && w.source === 'imported' && !w.historical)
+        ? { ...w, historical: true }
+        : w
+    ));
+    markDataChanged();
+  };
+
+  const showOldImportedRides = () => {
+    setHistory(prev => prev.map(w => w.historical ? { ...w, historical: false } : w));
+    markDataChanged();
+  };
+
   // ---------------- export / import / sync ----------------
   const exportData = () => {
     const now = new Date().toISOString();
@@ -837,7 +905,7 @@ export function AppDataProvider({ children }) {
     levels, displayLevels, animatingZone, history, recentChanges, lastWorkedDates,
     currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData,
     exportedAt, lastSyncedAt, isDriveSyncing, driveSyncStatus, eftpPromptedValue,
-    lastLoggedWorkout,
+    lastLoggedWorkout, hasUnsyncedChanges,
     // Log Ride form
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     // derived
@@ -853,6 +921,7 @@ export function AppDataProvider({ children }) {
     redetectRide: handleRedetectRide, redetectCandidates, redetectAll: handleRedetectAll,
     saveEvent: handleSaveEvent, deleteEvent: handleDeleteEvent,
     saveProfile, resetLevels,
+    oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
     exportData, readBackupFile, restoreBackup,
     syncWithDrive: handleDriveSync,
     resolveEftpAlert,
