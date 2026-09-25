@@ -1,6 +1,6 @@
 # Implementation Plan: Casey Rides 2.0
 
-**Status:** Phases 1–6 done (orchestrated run, Sessions 23–24). Phase 7 not started (waiting for the user's backup file).
+**Status:** Complete. All 7 phases done (orchestrated run, Sessions 23–24). Version 2.0.0.
 **Designed:** 2026-09-25 (session on branch `claude/eftp-metric-analysis-9qd058`)
 **Written against:** `src/App.jsx` at commit `6354d97` (5,353 lines). Line numbers are
 approximate and go stale after the first phase. **Always find code by the quoted search
@@ -128,7 +128,7 @@ complete:
 - [x] Phase 4 — Rides, Ride page, Log Ride, Settings (Sonnet)
 - [x] Phase 5 — metrics engine (Sonnet)
 - [x] Phase 6 — Progress tab and alerts (Sonnet)
-- [ ] Phase 7 — progression rebuild (Opus) → **needs user's backup and sign-off**
+- [x] Phase 7 — progression rebuild (Opus) → **needs user's backup and sign-off**
 
 ---
 
