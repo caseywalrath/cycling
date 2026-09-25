@@ -1,288 +1,321 @@
-import React from 'react';
-import { ZONES, ZONE_EXPECTED_RPE, getZoneName } from '../lib/zones.js';
+import React, { useEffect, useState } from 'react';
+import { ZONES, ZONE_EXPECTED_RPE, getZoneColor, getZoneName } from '../lib/zones.js';
 import { parseDuration } from '../lib/dates.js';
+import { shortDayDate } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
-import { Sheet, Button, useConfirm, useToast } from '../components/ui/index.js';
+import { Sheet, Button, Chip, SegmentedControl, useToast } from '../components/ui/index.js';
 
-// Log Ride / Edit Ride, as a bottom sheet. Re-homed from the old Log Ride modal in V2 Phase 3
-// with the same fields (Phase 4 redesigns it as "Log Ride v2"). The form state and every
-// save rule live in AppDataContext; this sheet only renders the form and decides what to show:
-//   - after a file import with a same-day match, a ConfirmSheet offers to attach the file to
-//     that ride (this used to be a window.confirm);
-//   - read errors show as a toast (used to be alert()).
+// Log Ride v2 (V2 Plan §4.3). Two entry modes for a new ride — Import file (default) and
+// Enter manually — chosen at the top; editing an existing ride always shows the full manual
+// form (attaching a file to an already-logged ride is now done from the Ride page's "Attach
+// ride file" action instead, with no date guessing). Save stays disabled until the ride is
+// valid: duration > 0, NP > 0, and an indoor ride has a zone. No invented defaults.
 const inputClass = 'w-full bg-gray-700 rounded-lg px-3 py-2 text-base min-h-[44px]';
-const disabledInputClass = 'w-full bg-gray-800 text-gray-600 rounded-lg px-3 py-2 text-base min-h-[44px]';
+const labelClass = 'block text-sm text-gray-400 mb-1';
+
+const RPE_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const {
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     saveRide, importRideFile, applyRideImport, attachRideFile, calculateTSS, currentFTP,
   } = useAppData();
-  const confirm = useConfirm();
   const toast = useToast();
+
+  const [mode, setMode] = useState('import'); // 'import' | 'manual' — ignored while editing
+  const [pendingImport, setPendingImport] = useState(null); // { parsed, detection, existingMatch }
+  const [showNumbers, setShowNumbers] = useState(false);
+
+  // Reset the sheet's own UI state (not the form — that's AppDataContext's job) each time it
+  // opens, so a stale attach card or "Edit numbers" toggle never leaks into the next open.
+  useEffect(() => {
+    if (open) {
+      setMode('import');
+      setPendingImport(null);
+      setShowNumbers(false);
+    }
+  }, [open]);
 
   if (!open) return null;
 
-  const currentIF = formData.normalizedPower / currentFTP;
-  const currentTSS = calculateTSS(formData.normalizedPower, parseDuration(formData.duration));
+  const isEdit = !!editingRide;
+  const isOutdoor = formData.rideType === 'Outdoor';
+  const isIndoor = !isOutdoor;
+  const duration = parseDuration(formData.duration);
+  const normalizedPower = Number(formData.normalizedPower) || 0;
+  const canSave = duration > 0 && normalizedPower > 0 && (isOutdoor || !!formData.zone);
+  const currentIF = currentFTP ? normalizedPower / currentFTP : 0;
+  const currentTSS = calculateTSS(normalizedPower, duration);
 
-  // Pre-fills the form from a .FIT or .TCX file, or attaches it to a matching ride.
-  const handleFitFileImport = async (event) => {
-    const file = event.target.files[0];
-    // Reset file input so the same file can be re-imported
-    event.target.value = '';
+  const switchToManual = () => {
+    setMode('manual');
+    setPendingImport(null);
+    setPendingFitDetail(null);
+    setFormData(prev => ({ ...prev, duration: '', normalizedPower: '', zone: null, workoutLevel: null }));
+  };
+
+  const handleFileInput = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
     try {
       const result = await importRideFile(file);
-      const existing = result.existingMatch;
-      if (existing) {
-        const existingName = existing.name || existing.notes || 'Workout';
-        const attach = await confirm({
-          title: 'Attach to an existing ride?',
-          message:
-            `A ride on ${result.parsed.date} already exists (${existingName}, ${existing.duration} min).\n\n` +
-            `Attach this file's power and heart-rate data to it instead of creating a new ride?`,
-          confirmLabel: 'Attach to existing ride',
-          cancelLabel: 'Save as a new ride',
-        });
-        if (attach) {
-          const { rideId, detection } = attachRideFile(existing, result);
-          onAttached(rideId, detection);
-          return;
-        }
-        // "Save as a new ride" → fall through to the normal new-ride flow below
+      if (result.existingMatch) {
+        setPendingImport(result);
+      } else {
+        applyRideImport(result);
+        setShowNumbers(false);
       }
-      applyRideImport(result);
     } catch (err) {
       toast(err.message || 'Could not read this ride file.', { tone: 'error' });
     }
   };
 
+  const handleAttach = () => {
+    const { rideId, detection } = attachRideFile(pendingImport.existingMatch, pendingImport);
+    setPendingImport(null);
+    onAttached(rideId, detection);
+  };
+
+  const handleSaveAsNew = () => {
+    applyRideImport(pendingImport);
+    setPendingImport(null);
+    setShowNumbers(false);
+  };
+
   const handleSave = () => {
+    if (!canSave) return;
     const result = saveRide();
     onSaved(result);
   };
 
-  const isOutdoor = formData.rideType === 'Outdoor';
-  const isIndoor = formData.rideType === 'Indoor';
+  const setZone = (zoneId) => setFormData({ ...formData, zone: zoneId, workoutLevel: ZONE_EXPECTED_RPE[zoneId] });
+
+  const importedSummary = !isEdit && mode === 'import' && pendingFitDetail && !pendingImport;
+  const showManualFields = isEdit || mode === 'manual' || (importedSummary && showNumbers);
 
   return (
     <Sheet
       open
       onClose={onClose}
-      title={editingRide ? 'Edit Workout' : 'Log Workout'}
+      title={isEdit ? 'Edit ride' : 'Log ride'}
       footer={
-        <Button variant="primary" block onClick={handleSave}>
-          {editingRide ? 'Update Workout' : 'Save Workout'}
+        <Button variant="primary" block disabled={!canSave} onClick={handleSave}>
+          {isEdit ? 'Update ride' : 'Save ride'}
         </Button>
       }
     >
-      {/* FIT/TCX import — pre-fills Date/Duration/NP/Distance/Elevation/Ride Type below; Name/RPE stay manual */}
-      <div className="mb-4">
-        <label className="inline-flex items-center gap-2 min-h-[44px] bg-gray-700 hover:bg-gray-600 text-gray-100 text-base px-4 rounded-xl cursor-pointer transition">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 16V4M7 9l5-5 5 5M4 20h16" />
-          </svg>
-          Import FIT/TCX File
-          <input type="file" accept=".fit,.FIT,.tcx,.TCX" onChange={handleFitFileImport} className="hidden" />
-        </label>
-        {pendingFitDetail && (
-          <div className="mt-2 bg-gray-700 rounded-xl pl-3 flex items-start justify-between gap-2">
-            <div className="text-sm py-2">
-              {pendingFitDetail.detection ? (
-                <>
-                  <div className="text-yellow-400 font-mono">⚡ Detected: {pendingFitDetail.detection.label}</div>
-                  <div className="text-gray-400 text-sm mt-0.5">
-                    {getZoneName(pendingFitDetail.detection.category)} interval — will be saved with this ride.
-                    Adjust the Zone below if the category looks wrong.
+      {/* Mode selector — new rides only */}
+      {!isEdit && (
+        <SegmentedControl
+          ariaLabel="Entry mode"
+          className="mb-4"
+          value={mode}
+          onChange={(v) => (v === 'manual' ? switchToManual() : setMode(v))}
+          options={[
+            { value: 'import', label: 'Import file' },
+            { value: 'manual', label: 'Enter manually' },
+          ]}
+        />
+      )}
+
+      {/* Import mode */}
+      {!isEdit && mode === 'import' && (
+        <div className="mb-4">
+          {pendingImport ? (
+            /* Inline "attach to existing ride?" card — replaces the old window.confirm. */
+            <div className="bg-gray-700 rounded-xl p-3">
+              <p className="text-base text-gray-200">
+                You already logged <strong>{pendingImport.existingMatch.name || pendingImport.existingMatch.notes || 'a ride'}</strong> on{' '}
+                {shortDayDate(pendingImport.existingMatch.date)} ({pendingImport.existingMatch.duration} min).
+              </p>
+              <div className="flex flex-col gap-2 mt-3">
+                <Button variant="primary" block onClick={handleAttach}>Attach this file to it</Button>
+                <Button variant="secondary" block onClick={handleSaveAsNew}>Save as a new ride</Button>
+              </div>
+            </div>
+          ) : importedSummary ? (
+            <div>
+              <div className="bg-gray-700 rounded-xl p-3 text-sm space-y-1.5">
+                <div className="flex justify-between"><span className="text-gray-400">Date</span><span className="tabular-nums">{shortDayDate(formData.date)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Type</span><span>{formData.rideType}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Duration</span><span className="tabular-nums">{formData.duration} min</span></div>
+                {isOutdoor && (
+                  <>
+                    <div className="flex justify-between"><span className="text-gray-400">Distance</span><span className="tabular-nums">{formData.distance} mi</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Elevation</span><span className="tabular-nums">{formData.elevation} ft</span></div>
+                  </>
+                )}
+                <div className="flex justify-between"><span className="text-gray-400">Normalized Power</span><span className="tabular-nums">{formData.normalizedPower}W</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Estimated TSS</span><span className="tabular-nums">{currentTSS}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Intensity Factor</span><span className="tabular-nums">{currentIF.toFixed(2)}</span></div>
+                {pendingFitDetail.detection ? (
+                  <div className="flex justify-between pt-1.5 border-t border-gray-600">
+                    <span className="text-gray-400">Detected</span>
+                    <span className="font-mono text-yellow-400">{pendingFitDetail.detection.label}</span>
                   </div>
-                </>
-              ) : (
-                <div className="text-gray-400 text-sm">
-                  No structured intervals detected — power/HR chart will still be saved.
-                </div>
+                ) : (
+                  <div className="text-gray-400 pt-1.5 border-t border-gray-600">No structured intervals detected.</div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNumbers(v => !v)}
+                className="min-h-[44px] mt-1 text-base text-blue-400 hover:text-blue-300"
+              >
+                {showNumbers ? 'Hide numbers' : 'Edit numbers'}
+              </button>
+            </div>
+          ) : (
+            <label className="flex items-center justify-center gap-2 min-h-[56px] bg-gray-700 hover:bg-gray-600 text-gray-100 text-base font-medium rounded-xl cursor-pointer transition">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 16V4M7 9l5-5 5 5M4 20h16" />
+              </svg>
+              Import ride file (.fit or .tcx)
+              <input type="file" accept=".fit,.FIT,.tcx,.TCX" onChange={handleFileInput} className="hidden" />
+            </label>
+          )}
+        </div>
+      )}
+
+      {/* Manual numeric fields — manual mode, edit mode, or "Edit numbers" on an import */}
+      {showManualFields && !pendingImport && (
+        <div className="mb-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass} htmlFor="ride-date">Date</label>
+              <input id="ride-date" type="date" value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="ride-type">Ride type</label>
+              <select id="ride-type" value={formData.rideType}
+                onChange={(e) => setFormData({ ...formData, rideType: e.target.value })} className={inputClass}>
+                <option value="Indoor">Indoor</option>
+                <option value="Outdoor">Outdoor</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass} htmlFor="ride-duration">Duration (min)</label>
+              <input id="ride-duration" type="text" inputMode="numeric" value={formData.duration}
+                onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
+                onBlur={(e) => setFormData({ ...formData, duration: e.target.value === '' ? '' : parseDuration(e.target.value) })}
+                placeholder="e.g. 60 or 1h15" className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="ride-np">Normalized Power (W)</label>
+              <input id="ride-np" type="number" inputMode="numeric" value={formData.normalizedPower}
+                onChange={(e) => setFormData({ ...formData, normalizedPower: e.target.value })}
+                placeholder="e.g. 180" min="0" max="600" className={inputClass} />
+            </div>
+          </div>
+          {isOutdoor && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass} htmlFor="ride-distance">Distance (mi)</label>
+                <input id="ride-distance" type="number" inputMode="decimal" value={formData.distance || ''}
+                  onChange={(e) => setFormData({ ...formData, distance: parseFloat(e.target.value) || 0 })}
+                  min="0" step="0.1" max="300" className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="ride-elevation">Elevation (ft)</label>
+                <input id="ride-elevation" type="number" inputMode="numeric" value={formData.elevation || ''}
+                  onChange={(e) => setFormData({ ...formData, elevation: parseInt(e.target.value) || 0 })}
+                  min="0" max="30000" className={inputClass} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Fields common to both modes */}
+      {!pendingImport && (
+        <div className="space-y-4">
+          <div>
+            <label className={labelClass} htmlFor="ride-name">Ride name</label>
+            <input id="ride-name" type="text" value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder={isOutdoor ? 'Outdoor ride' : 'Indoor ride'} className={inputClass} />
+          </div>
+
+          {isIndoor && (
+            <div>
+              <label className={labelClass}>Zone</label>
+              <div className="flex flex-wrap gap-2">
+                {ZONES.map((zone) => (
+                  <Chip key={zone.id} selected={formData.zone === zone.id} color={getZoneColor(zone.id)} onClick={() => setZone(zone.id)}>
+                    {zone.name}
+                  </Chip>
+                ))}
+              </div>
+              {pendingFitDetail?.detection && formData.zone !== pendingFitDetail.detection.category && (
+                <p className="text-xs text-gray-500 mt-1">Detected as {getZoneName(pendingFitDetail.detection.category)}.</p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => setPendingFitDetail(null)}
-              className="text-gray-400 hover:text-white text-base min-h-[44px] min-w-[44px] flex-shrink-0"
-              aria-label="Discard interval data"
-            >
-              ✕
-            </button>
+          )}
+
+          {isIndoor && (
+            <label className="flex items-center gap-2 text-base min-h-[44px]">
+              <input type="checkbox" checked={formData.completed}
+                onChange={(e) => setFormData({ ...formData, completed: e.target.checked })}
+                className="rounded w-5 h-5" />
+              Completed all intervals
+            </label>
+          )}
+
+          <div>
+            <label className={labelClass}>
+              Effort (RPE): <span className="tabular-nums text-gray-300">{formData.rpe}</span>
+            </label>
+            <div className="grid grid-cols-5 gap-2" role="group" aria-label="Rate of perceived exertion">
+              {RPE_VALUES.map((v) => {
+                const expected = isIndoor && formData.zone && ZONE_EXPECTED_RPE[formData.zone] === v;
+                const selected = formData.rpe === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setFormData({ ...formData, rpe: v })}
+                    className={`min-h-[44px] rounded-lg text-base font-semibold tabular-nums border-2 transition-colors ${
+                      selected ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-transparent text-gray-200 hover:bg-gray-600'
+                    } ${expected && !selected ? 'ring-2 ring-blue-400' : ''}`}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>Easy</span>
+              <span>Hard</span>
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Row 1: Ride Name | Date */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Ride Name</label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className={inputClass}
-            placeholder="e.g., Morning Ride"
-          />
-        </div>
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Date</label>
-          <input
-            type="date"
-            value={formData.date}
-            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-            className={inputClass}
-          />
-        </div>
-      </div>
+          {/* Calculated values preview (manual mode; the import summary already shows these) */}
+          {!importedSummary && (
+            <div className="bg-gray-700 rounded-xl p-3 grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-gray-400">Estimated TSS: </span>
+                <span className="font-mono font-bold tabular-nums">{currentTSS}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">Intensity Factor: </span>
+                <span className="font-mono font-bold tabular-nums">{currentIF.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
 
-      {/* Row 2: Ride Type | Completed All Intervals */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Ride Type</label>
-          <select
-            value={formData.rideType}
-            onChange={(e) => setFormData({ ...formData, rideType: e.target.value })}
-            className={inputClass}
-          >
-            <option value="Indoor">Indoor</option>
-            <option value="Outdoor">Outdoor</option>
-          </select>
+          <div>
+            <label className={labelClass} htmlFor="ride-notes">Notes (optional)</label>
+            <textarea id="ride-notes" value={formData.notes}
+              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              placeholder="How it felt, weather, etc..." className="w-full bg-gray-700 rounded-lg px-3 py-2 text-base h-20" />
+          </div>
         </div>
-        <div className="flex items-end">
-          <label className={`flex items-center gap-2 text-base min-h-[44px] ${isOutdoor ? 'text-gray-600' : ''}`}>
-            <input
-              type="checkbox"
-              checked={isOutdoor ? false : formData.completed}
-              onChange={(e) => setFormData({ ...formData, completed: e.target.checked })}
-              className="rounded w-5 h-5"
-              disabled={isOutdoor}
-            />
-            Completed all intervals
-          </label>
-        </div>
-      </div>
-
-      {/* Row 3: Primary Zone | Normalized Power */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div>
-          <label className={`block text-sm mb-1 ${isOutdoor ? 'text-gray-600' : 'text-gray-400'}`}>Primary Zone</label>
-          <select
-            value={formData.zone}
-            onChange={(e) => setFormData({
-              ...formData,
-              zone: e.target.value,
-              workoutLevel: ZONE_EXPECTED_RPE[e.target.value]
-            })}
-            className={isOutdoor ? disabledInputClass : inputClass}
-            disabled={isOutdoor}
-          >
-            {ZONES.map((zone) => (
-              <option key={zone.id} value={zone.id}>
-                {zone.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Normalized Power (W)</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={formData.normalizedPower || ''}
-            onChange={(e) => setFormData({ ...formData, normalizedPower: parseInt(e.target.value) || 0 })}
-            className={inputClass}
-            min="50"
-            max="500"
-          />
-        </div>
-      </div>
-
-      {/* Row 4: Duration | Distance | Elevation */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Duration (min)</label>
-          <input
-            type="text"
-            value={formData.duration || ''}
-            onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
-            onBlur={(e) => setFormData({ ...formData, duration: parseDuration(e.target.value) || 0 })}
-            placeholder="e.g. 71 or 1h11"
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className={`block text-sm mb-1 ${isIndoor ? 'text-gray-600' : 'text-gray-400'}`}>Distance (mi)</label>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={isIndoor ? '' : (formData.distance || '')}
-            onChange={(e) => setFormData({ ...formData, distance: parseFloat(e.target.value) || 0 })}
-            className={isIndoor ? disabledInputClass : inputClass}
-            min="0"
-            step="0.1"
-            max="200"
-            disabled={isIndoor}
-          />
-        </div>
-        <div>
-          <label className={`block text-sm mb-1 ${isIndoor ? 'text-gray-600' : 'text-gray-400'}`}>Elevation (ft)</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={isIndoor ? '' : (formData.elevation || '')}
-            onChange={(e) => setFormData({ ...formData, elevation: parseInt(e.target.value) || 0 })}
-            className={isIndoor ? disabledInputClass : inputClass}
-            min="0"
-            max="20000"
-            disabled={isIndoor}
-          />
-        </div>
-      </div>
-
-      {/* Row 5: RPE Slider (Phase 4 replaces it with tap targets) */}
-      <div className="mb-4">
-        <label className="block text-sm text-gray-400 mb-1">
-          RPE: <span className="tabular-nums">{formData.rpe}</span> <span className="text-gray-500 text-xs">(Expected {formData.workoutLevel})</span>
-        </label>
-        <input
-          type="range"
-          min="1"
-          max="10"
-          value={formData.rpe}
-          onChange={(e) => setFormData({ ...formData, rpe: parseInt(e.target.value) })}
-          className="w-full h-11"
-        />
-        <div className="flex justify-between text-xs text-gray-500">
-          <span>Easy</span>
-          <span>Hard</span>
-        </div>
-      </div>
-
-      {/* Calculated values preview */}
-      <div className="bg-gray-700 rounded-xl p-3 mb-4 grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-400">Estimated TSS: </span>
-          <span className="font-mono font-bold tabular-nums">{currentTSS}</span>
-        </div>
-        <div>
-          <span className="text-gray-400">Intensity Factor: </span>
-          <span className="font-mono font-bold tabular-nums">{currentIF.toFixed(2)}</span>
-        </div>
-      </div>
-
-      {/* Notes */}
-      <div>
-        <label className="block text-sm text-gray-400 mb-1">Notes (optional)</label>
-        <textarea
-          value={formData.notes}
-          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-          placeholder="How it felt, weather, etc..."
-          className="w-full bg-gray-700 rounded-lg px-3 py-2 text-base h-20"
-        />
-      </div>
+      )}
     </Sheet>
   );
 }

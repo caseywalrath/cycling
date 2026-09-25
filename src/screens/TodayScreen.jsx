@@ -233,7 +233,7 @@ export default function TodayScreen() {
         </Card>
       ) : (
         <Card>
-          <EmptyState message="No rides yet. Log your first ride to get started." actionLabel="Log a ride" onAction={openLogRide} />
+          <EmptyState message="No rides yet. Log your first ride to get started." actionLabel="Log a ride" onAction={() => openLogRide()} />
         </Card>
       )}
 
