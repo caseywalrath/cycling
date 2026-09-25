@@ -11,7 +11,7 @@ strings, not by line number.**
 ## How to use this plan
 
 The work is split into **7 phases**. Each phase is one Claude Code session, and ends in a
-working, deployable app. Do not start a phase until the previous one is merged or pulled.
+working, deployable app. Do not start a phase until the previous one is pushed.
 
 To run a phase, start a new session with the recommended model and say:
 
@@ -48,7 +48,7 @@ To run a phase, start a new session with the recommended model and say:
    - what changed, as the user will see it on their iPhone;
    - anything skipped and why;
    - regression check results;
-   - the `git pull` instructions from `CLAUDE.md`;
+   - the branch it was pushed to and whether it is live yet (see `CLAUDE.md`);
    - and a final line in exactly this form:
 
    > **Next: Phase N+1 — <name>. Best model: <Haiku | Sonnet | Opus>.** Start a new session
@@ -102,13 +102,14 @@ complete:
 - Each phase's plain-language summary goes in its CHANGELOG entry. The phase rules already
   require this; the orchestrator makes sure it's written for a beginner.
 - The user gets a short progress message after each phase (one or two lines) and a full
-  report at each pause and at the end. That report includes the `git pull` instructions and
+  report at each pause and at the end. That report says which branch holds the work and
+  whether it is live, and includes
   a "What's new in 2.0" list at the end.
 - The "Next: Phase N+1 … Best model" line is not needed between phases. It goes in the
   report only when the run stops early.
 
 **Required pauses.** Stop and wait for the user:
-- **After Phase 3.** Ask the user to pull or deploy and try the new layout on their iPhone.
+- **After Phase 3.** Ask the user to get it live (merge the branch into `main`, which deploys to GitHub Pages) and try the new layout on their iPhone.
   Every later phase copies Phase 3's design, so changes are cheapest here. Continue only
   when the user says so, and apply any requested layout changes (with an Opus sub-agent)
   before Phase 4.

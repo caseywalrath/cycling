@@ -20,7 +20,7 @@ Do not skip these steps. They prevent duplicate work, reverted features, and con
 
 **User Experience Level**: Beginner/non-coder
 - Limited experience with Git, GitHub, and project development
-- Uses VS Code primarily for running `npm run dev` and pulling from Git
+- Does not run the app or Git locally; works through Claude Code sessions and uses the live app on iPhone
 - Interfaces with Claude through web/chat, not terminal-based development
 - Requires clear, step-by-step instructions with explicit file paths
 
@@ -32,7 +32,6 @@ Do not skip these steps. They prevent duplicate work, reverted features, and con
 - Always specify full file paths (e.g., `src/App.jsx` not "the main file")
 - Explain *where* code changes are happening before making them
 - Verify branch state before implementing features
-- Show git commands explicitly: `git status`, `git pull`, `git checkout branch-name`
 - Explain deployment implications (what happens when code is pushed)
 - Confirm which branch should be used as base before starting work
 - Use specific line numbers when referencing code locations
@@ -45,13 +44,7 @@ Each Claude Code session is assigned a new `claude/` branch (e.g., `claude/fix-p
 
 **At session start**: Always notify the user what branch you are working on and why a new branch was created. Example: "This session is on branch `claude/review-changelog-SDb6v`. It was created automatically for this session and includes all prior work."
 
-**After every set of changes**: End with explicit pull instructions so the user can sync locally in VS Code:
-```
-git fetch origin <branch-name>
-git checkout <branch-name>
-git pull origin <branch-name>
-```
-If the user is already on the branch, remind them that only `git pull origin <branch-name>` is needed.
+**After every set of changes**: End by stating which branch the work was pushed to, and whether it is live. Changes only reach the live app (GitHub Pages) once the branch is merged into `main`; say so plainly, and explain what the user needs to do to get it live (e.g. merge the pull request) if they ask for that.
 
 ---
 
