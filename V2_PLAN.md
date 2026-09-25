@@ -1,6 +1,6 @@
 # Implementation Plan: Casey Rides 2.0
 
-**Status:** Planned, not started
+**Status:** Phase 1 done (orchestrated run, Session 23). Phases 2–7 not started.
 **Designed:** 2026-09-25 (session on branch `claude/eftp-metric-analysis-9qd058`)
 **Written against:** `src/App.jsx` at commit `6354d97` (5,353 lines). Line numbers are
 approximate and go stale after the first phase. **Always find code by the quoted search
@@ -122,7 +122,7 @@ complete:
 
 **Progress checklist** (the orchestrator ticks these as it goes; manual runs may too)
 
-- [ ] Phase 1 — dead code and helpers (Haiku)
+- [x] Phase 1 — dead code and helpers (Haiku)
 - [ ] Phase 2 — bug fixes and zones (Sonnet)
 - [ ] Phase 3 — shell, kit, Today (Opus) → **pause for user review**
 - [ ] Phase 4 — Rides, Ride page, Log Ride, Settings (Sonnet)
