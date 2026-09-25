@@ -193,12 +193,24 @@ for (const tab of ['today', 'rides', 'progress', 'settings']) {
 }
 await goTab('today');
 
-// Import the synthetic TCX through the Log Ride sheet (＋ Log Ride on Today) and save it.
+// Open the Log Ride sheet (＋ Log Ride on Today) and screenshot both entry modes (V2 Phase 4:
+// "Import file" is the default; "Enter manually" starts every field empty) before importing
+// and saving the synthetic TCX.
 let imported = null;
 let importedId = null;
 try {
   await page.getByRole('button', { name: /log ride/i }).first().click();
   await page.waitForTimeout(500);
+  extras.tapTargetsUnder44.logRideSheetImportMode = await smallTapTargets();
+  await page.screenshot({ path: path.join(OUT, 'log-ride-import-mode.png') });
+
+  await page.getByRole('tab', { name: /enter manually/i }).click();
+  await page.waitForTimeout(300);
+  extras.tapTargetsUnder44.logRideSheetManualMode = await smallTapTargets();
+  await page.screenshot({ path: path.join(OUT, 'log-ride-manual-mode.png') });
+
+  await page.getByRole('tab', { name: /import file/i }).click();
+  await page.waitForTimeout(300);
   await page.locator('input[type=file][accept*=".tcx"]').first().setInputFiles(tcxPath);
   await page.waitForTimeout(1500);
   extras.tapTargetsUnder44.logRideSheet = await smallTapTargets();
