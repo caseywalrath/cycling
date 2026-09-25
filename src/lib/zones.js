@@ -18,6 +18,7 @@ export const DEFAULT_LEVELS = {
   anaerobic: 1,
 };
 
+// Expected RPE based on zone/ride type
 export const ZONE_EXPECTED_RPE = {
   recovery: 3,
   endurance: 4,
@@ -28,6 +29,7 @@ export const ZONE_EXPECTED_RPE = {
   anaerobic: 9,
 };
 
+// Zone adjacency map for trickle effect: a workout in one zone gives a small bonus to neighbors
 export const ZONE_ADJACENCY = {
   endurance: [{ zone: 'tempo', factor: 0.2 }],
   tempo:     [{ zone: 'endurance', factor: 0.2 }, { zone: 'sweetspot', factor: 0.2 }],
@@ -36,14 +38,15 @@ export const ZONE_ADJACENCY = {
   vo2max:    [{ zone: 'threshold', factor: 0.2 }, { zone: 'anaerobic', factor: 0.2 }],
   anaerobic: [{ zone: 'vo2max', factor: 0.2 }],
 };
-
-const ZONE_POWER_RATIO_RANGES = [
-  { max: 0.70, zone: 'endurance' },
-  { max: 0.81, zone: 'tempo' },
-  { max: 0.94, zone: 'sweetspot' },
-  { max: 1.02, zone: 'threshold' },
-  { max: 1.20, zone: 'vo2max' },
+// %FTP boundaries for filing a detected interval under a training zone. These mirror the
+// watt ranges in ZONES (which are written for a 235W FTP), so a 205W block lands in Sweet
+// Spot rather than Tempo.
+export const ZONE_POWER_RATIO_RANGES = [
+  { max: 0.70, zone: 'endurance' },  // < 165W @ 235 FTP
+  { max: 0.81, zone: 'tempo' },      // 165-190W
+  { max: 0.94, zone: 'sweetspot' },  // 190-220W
+  { max: 1.02, zone: 'threshold' },  // 220-240W
+  { max: 1.20, zone: 'vo2max' },     // 240-282W
   { max: Infinity, zone: 'anaerobic' },
 ];
-
 export const categoryForRatio = (ratio) => ZONE_POWER_RATIO_RANGES.find(r => ratio < r.max).zone;

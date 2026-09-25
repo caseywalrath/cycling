@@ -15,7 +15,6 @@ export const parseDateLocal = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d);
 };
-
 export const parseDuration = (input) => {
   const str = String(input ?? '').trim();
   const hMatch = str.match(/^(\d+)h(\d+)?$/i);
@@ -24,7 +23,6 @@ export const parseDuration = (input) => {
   if (colonMatch) return parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
   return parseInt(str) || 0;
 };
-
 export const formatDateWithDay = (dateStr) => {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);

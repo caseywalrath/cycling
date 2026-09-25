@@ -1,31 +1,33 @@
-import { ZONE_ADJACENCY } from './zones.js';
 import { parseDateLocal } from './dates.js';
 
-const DECAY_GRACE_DAYS = 14;
-const DECAY_RATE_PER_WEEK = 0.1;
-const DECAY_MULTIPLIER_EXTENDED = 1.5;
-
+// Apply decay to progression levels based on days since last worked per zone.
+// Grace period: 14 days of inactivity, then -0.1/week (VO2max/Anaerobic decay 1.5x faster).
+// Floor: never below max(1.0, level * 0.5).
+// Recovery zone excluded. Zones with no lastWorkedDate are not decayed (first-time grace).
 export const applyDecay = (levels, lastWorkedDates) => {
+  const HIGH_DECAY_ZONES = ['vo2max', 'anaerobic'];
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  today.setHours(0, 0, 0, 0);
+
   const decayed = { ...levels };
 
-  for (const zone in levels) {
-    if (zone === 'recovery') continue;
-    const lastDate = lastWorkedDates[zone];
-    if (!lastDate) continue;
+  Object.keys(levels).forEach(zone => {
+    if (zone === 'recovery') return;
+    const lastWorked = lastWorkedDates[zone];
+    if (!lastWorked) return; // No recorded date — no decay (infinite grace until first workout)
 
-    const daysSince = Math.floor((parseDateLocal(todayStr) - parseDateLocal(lastDate)) / (1000 * 60 * 60 * 24));
-    if (daysSince <= DECAY_GRACE_DAYS) continue;
+    const lastDate = parseDateLocal(lastWorked);
+    const daysIdle = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
 
-    const decayWeeks = (daysSince - DECAY_GRACE_DAYS) / 7;
-    const isExtended = ['vo2max', 'anaerobic'].includes(zone);
-    const multiplier = isExtended ? DECAY_MULTIPLIER_EXTENDED : 1;
-    const decayAmount = DECAY_RATE_PER_WEEK * multiplier * decayWeeks;
-    const newLevel = levels[zone] - decayAmount;
-    const floorValue = Math.max(1.0, levels[zone] * 0.5);
-    decayed[zone] = Math.max(floorValue, newLevel);
-  }
+    if (daysIdle <= 14) return; // Grace period
+
+    const weeksOverdue = (daysIdle - 14) / 7;
+    const multiplier = HIGH_DECAY_ZONES.includes(zone) ? 1.5 : 1.0;
+    const decay = weeksOverdue * 0.1 * multiplier;
+
+    const floor = Math.max(1.0, levels[zone] * 0.5);
+    decayed[zone] = Math.max(floor, levels[zone] - decay);
+  });
 
   return decayed;
 };
