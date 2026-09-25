@@ -1,5 +1,5 @@
 import { parseDateLocal } from './dates.js';
-import { ZONE_BOUNDS, ZONE_EXPECTED_RPE } from './zones.js';
+import { ZONE_BOUNDS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, DEFAULT_LEVELS } from './zones.js';
 
 // Apply decay to progression levels based on days since last worked per zone.
 // Grace period: 14 days of inactivity, then -0.1/week (VO2max/Anaerobic decay 1.5x faster).
@@ -82,7 +82,7 @@ export const calculateNewLevelLegacy = (currentLevel, workoutLevel, rpe, complet
 
 // ---------------------------------------------------------------------------------------------
 // V2 Phase 7: workout level from the ride's real structure, and a level update driven by it.
-// DRAFT constants (stage A): tuned against the user's history, awaiting sign-off (V2_PLAN §7.3).
+// Constants calibrated against the user's real history and agreed with the user (V2_PLAN §7.3).
 // ---------------------------------------------------------------------------------------------
 
 // A workout exactly at a zone's reference session earns this level.
@@ -120,11 +120,12 @@ export const OPEN_ZONE_WIDTH = 0.3;
 export const ZONE_SET_TOLERANCE = 0.03;
 
 // Endurance is levelled from the whole ride (duration at IF), not from detected surges:
-// a ride of `minutes` at IF `ratio` earns LEVEL_AT_REFERENCE.
-export const ENDURANCE_REFERENCE = { minutes: 120, ratio: 0.65 };
+// a ride of `minutes` at IF `ratio` earns LEVEL_AT_REFERENCE. Tuned with the user (Phase 7):
+// 1 h @ 0.62 ≈ 3.8, 2 h @ 0.65 ≈ 6, 3 h @ 0.68 ≈ 7.5, 5 h @ 0.65 ≈ 8.4.
+export const ENDURANCE_REFERENCE = { minutes: 80, ratio: 0.65 };
 
-// Endurance levels gained per doubling of ride duration (60 min ≈ 3, 4 h ≈ 7 at IF 0.65).
-export const ENDURANCE_TIME_SLOPE = 2;
+// Endurance levels gained per doubling of ride duration.
+export const ENDURANCE_TIME_SLOPE = 1.8;
 
 // Endurance levels per full zone-width of IF (smaller: whole-ride IF includes warm-up/cool-down).
 export const ENDURANCE_INTENSITY_SLOPE = 2;
@@ -262,4 +263,55 @@ export const advanceLastWorked = (lastWorkedDates, zone, date) => {
   const current = lastWorkedDates?.[zone];
   if (!zone || !date || (current && current >= date)) return lastWorkedDates;
   return { ...lastWorkedDates, [zone]: date };
+};
+
+// Does a ride count toward progression levels? Indoor (or old rides with no type), classified
+// into a zone other than recovery, and not hidden as `historical` (D5, §4.4).
+export const affectsProgression = (ride) =>
+  !!ride && ride.rideType !== 'Outdoor' && !!ride.zone && ride.zone !== 'recovery'
+  && !ride.historical && !!ZONE_BOUNDS[ride.zone];
+
+// Trickle to neighbouring zones after a gain in `zone` — the same rule Log Ride uses: 20% of
+// the gain, only to neighbours whose effective level is still below the new level. Returns
+// [{ zone, amount }].
+export const trickleFor = (zone, change, newLevel, effectiveLevels) => {
+  if (!(change > 0) || !ZONE_ADJACENCY[zone]) return [];
+  return ZONE_ADJACENCY[zone]
+    .filter(({ zone: adj }) => !(effectiveLevels[adj] >= newLevel))
+    .map(({ zone: adj, factor }) => ({ zone: adj, amount: change * factor }));
+};
+
+// V2 Phase 7 §7.4: rebuild levels by replaying every classified indoor ride, oldest first,
+// through the new model, starting every zone at 1.0, with decay between rides and trickle.
+// Each ride is scored at the FTP it was saved with (NP ÷ IF), falling back to `fallbackFtp`.
+// A ride the user levelled by hand keeps its manual level; a ride the model can't score (no
+// interval data, not endurance) counts as a typical session for its zone (LEVEL_AT_REFERENCE).
+// Pure: returns { levels, lastWorkedDates, scored, typical, manual } and changes nothing.
+export const recalculateLevelsFromHistory = (history, fallbackFtp) => {
+  const levels = { ...DEFAULT_LEVELS };
+  let lastWorkedDates = {};
+  const counts = { scored: 0, typical: 0, manual: 0 };
+  const rides = (history || [])
+    .filter(r => affectsProgression(r) && r.date)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id || 0) - (b.id || 0)));
+
+  for (const ride of rides) {
+    const effective = applyDecay(levels, lastWorkedDates, ride.date);
+    let L = null;
+    if (ride.workoutLevelSource === 'manual' && Number.isFinite(Number(ride.workoutLevel))) {
+      L = Number(ride.workoutLevel);
+      counts.manual++;
+    } else {
+      L = workoutLevelFromStructure(ride, rideFtpAtTime(ride) || fallbackFtp);
+      if (L == null) { L = LEVEL_AT_REFERENCE; counts.typical++; } else counts.scored++;
+    }
+    const before = effective[ride.zone];
+    const after = calculateNewLevel(before, L, ride.rpe, ride.completed !== false, ride.zone);
+    levels[ride.zone] = after;
+    trickleFor(ride.zone, after - before, after, effective).forEach(({ zone, amount }) => {
+      levels[zone] = Math.min(10, levels[zone] + amount);
+    });
+    lastWorkedDates = advanceLastWorked(lastWorkedDates, ride.zone, ride.date);
+  }
+  return { levels, lastWorkedDates, ...counts };
 };

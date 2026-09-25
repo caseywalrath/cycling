@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   workoutLevelFromStructure, calculateNewLevel, applyDecay, advanceLastWorked, rideFtpAtTime,
+  recalculateLevelsFromHistory, trickleFor, LEVEL_AT_REFERENCE,
 } from './progression.js';
 
 const FTP = 250;
@@ -82,11 +83,14 @@ describe('workoutLevelFromStructure', () => {
   });
 
   it('levels endurance rides from duration at IF, monotonic in both', () => {
-    expect(L(enduranceRide(120, 0.65))).toBe(5);
+    expect(L(enduranceRide(80, 0.65))).toBe(5);
+    expect(L(enduranceRide(60, 0.62))).toBeGreaterThanOrEqual(3.5);
+    expect(L(enduranceRide(60, 0.62))).toBeLessThanOrEqual(4.0);
+    expect(L(enduranceRide(300, 0.65))).toBeLessThanOrEqual(9);
     expect(L(enduranceRide(180, 0.65))).toBeGreaterThan(L(enduranceRide(120, 0.65)));
     expect(L(enduranceRide(120, 0.68))).toBeGreaterThan(L(enduranceRide(120, 0.62)));
     // Endurance with detected surges still uses the whole ride
-    const withSurges = { ...enduranceRide(120, 0.65), intervalData: { category: 'endurance', sets: [{ reps: 1, workSeconds: 120, avgWatts: 200 }] } };
+    const withSurges = { ...enduranceRide(80, 0.65), intervalData: { category: 'endurance', sets: [{ reps: 1, workSeconds: 120, avgWatts: 200 }] } };
     expect(L(withSurges)).toBe(5);
   });
 
@@ -188,5 +192,81 @@ describe('rideFtpAtTime', () => {
   it('recovers the FTP a ride was scored with from NP / IF', () => {
     expect(rideFtpAtTime({ normalizedPower: 200, intensityFactor: 0.8 })).toBe(250);
     expect(rideFtpAtTime({ normalizedPower: 200 })).toBeNull();
+  });
+});
+
+describe('recalculateLevelsFromHistory (synthetic history)', () => {
+  // A ride saved at FTP 250: NP / IF = 250.
+  const ss = (id, date, sets, extra = {}) => ({
+    ...intervalRide('sweetspot', sets), id, date, rpe: 6, completed: true, normalizedPower: 200, intensityFactor: 0.8, ...extra,
+  });
+
+  it('starts every zone at 1.0 and changes nothing for an empty history', () => {
+    const r = recalculateLevelsFromHistory([], FTP);
+    expect(r.levels.sweetspot).toBe(1);
+    expect(r.lastWorkedDates).toEqual({});
+    expect(r.scored + r.typical + r.manual).toBe(0);
+  });
+
+  it('replays rides oldest first, so the result does not depend on stored order', () => {
+    const rides = [ss(1, '2026-03-01', [[3, 12, 0.89]]), ss(2, '2026-03-05', [[2, 20, 0.89]]), ss(3, '2026-03-09', [[3, 20, 0.89]])];
+    const a = recalculateLevelsFromHistory(rides, FTP);
+    const b = recalculateLevelsFromHistory([...rides].reverse(), FTP);
+    expect(a.levels).toEqual(b.levels);
+    expect(a.levels.sweetspot).toBeGreaterThan(3);
+    expect(a.lastWorkedDates.sweetspot).toBe('2026-03-09');
+    expect(a.scored).toBe(3);
+  });
+
+  it('matches a hand replay through calculateNewLevel, with trickle to neighbours', () => {
+    const rides = [ss(1, '2026-03-01', [[2, 20, 0.89]])];
+    const L = workoutLevelFromStructure(rides[0], 250);
+    const expected = calculateNewLevel(1, L, 6, true, 'sweetspot');
+    const r = recalculateLevelsFromHistory(rides, FTP);
+    expect(r.levels.sweetspot).toBeCloseTo(expected, 10);
+    const trickle = trickleFor('sweetspot', expected - 1, expected, { tempo: 1, threshold: 1 });
+    expect(trickle.map(t => t.zone).sort()).toEqual(['tempo', 'threshold']);
+    expect(r.levels.tempo).toBeCloseTo(1 + (expected - 1) * 0.2, 10);
+  });
+
+  it('scores each ride at the FTP it was saved with (NP ÷ IF)', () => {
+    const atOldFtp = ss(1, '2026-03-01', [[2, 20, 0.89]], { normalizedPower: 200, intensityFactor: 200 / 260 });
+    const r = recalculateLevelsFromHistory([atOldFtp], 231);
+    const L = workoutLevelFromStructure(atOldFtp, 260);
+    expect(r.levels.sweetspot).toBeCloseTo(calculateNewLevel(1, L, 6, true, 'sweetspot'), 10);
+  });
+
+  it('decays between rides', () => {
+    const first = ss(1, '2026-01-01', [[3, 20, 0.9]]);
+    const soon = recalculateLevelsFromHistory([first, ss(2, '2026-01-05', [[1, 10, 0.85]], { completed: false })], FTP);
+    const late = recalculateLevelsFromHistory([first, ss(2, '2026-06-01', [[1, 10, 0.85]], { completed: false })], FTP);
+    expect(late.levels.sweetspot).toBeLessThan(soon.levels.sweetspot);
+  });
+
+  it('counts unscorable rides as a typical session, keeps manual levels, and skips outdoor, recovery and historical rides', () => {
+    const noStructure = { id: 1, date: '2026-02-01', rideType: 'Indoor', zone: 'vo2max', rpe: 8, completed: true };
+    const manual = { id: 2, date: '2026-02-02', rideType: 'Indoor', zone: 'threshold', rpe: 7, completed: true, workoutLevel: 8, workoutLevelSource: 'manual' };
+    const skipped = [
+      { ...ss(3, '2026-02-03', [[3, 20, 0.9]]), rideType: 'Outdoor', zone: null },
+      { ...ss(4, '2026-02-04', [[3, 20, 0.9]]), historical: true },
+      { id: 5, date: '2026-02-05', rideType: 'Indoor', zone: 'recovery', duration: 60, intensityFactor: 0.5 },
+    ];
+    const r = recalculateLevelsFromHistory([noStructure, manual, ...skipped], FTP);
+    expect(r.typical).toBe(1);
+    expect(r.manual).toBe(1);
+    expect(r.scored).toBe(0);
+    expect(recalculateLevelsFromHistory([noStructure], FTP).levels.vo2max)
+      .toBeCloseTo(calculateNewLevel(1, LEVEL_AT_REFERENCE, 8, true, 'vo2max'), 10);
+    expect(r.levels.threshold).toBeGreaterThan(calculateNewLevel(1, LEVEL_AT_REFERENCE, 7, true, 'threshold'));
+    expect(r.levels.sweetspot).toBeLessThan(1.5); // only trickle, never the skipped rides
+    expect(r.lastWorkedDates.recovery).toBeUndefined();
+    expect(r.lastWorkedDates.sweetspot).toBeUndefined();
+  });
+
+  it('does not modify the rides it replays', () => {
+    const rides = [ss(1, '2026-03-01', [[2, 20, 0.89]])];
+    const copy = JSON.parse(JSON.stringify(rides));
+    recalculateLevelsFromHistory(rides, FTP);
+    expect(rides).toEqual(copy);
   });
 });
