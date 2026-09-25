@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ZONES, ZONE_EXPECTED_RPE, getZoneColor, getZoneName } from '../lib/zones.js';
 import { parseDuration } from '../lib/dates.js';
 import { shortDayDate } from '../lib/format.js';
+import { estimateLthr, hrTss } from '../lib/load.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { Sheet, Button, Chip, SegmentedControl, useToast } from '../components/ui/index.js';
 
@@ -19,6 +20,7 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const {
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     saveRide, importRideFile, applyRideImport, attachRideFile, calculateTSS, currentFTP,
+    userProfile,
   } = useAppData();
   const toast = useToast();
 
@@ -43,9 +45,17 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const isIndoor = !isOutdoor;
   const duration = parseDuration(formData.duration);
   const normalizedPower = Number(formData.normalizedPower) || 0;
-  const canSave = duration > 0 && normalizedPower > 0 && (isOutdoor || !!formData.zone);
+  // V2 Phase 5 §5.2: a file with heart rate but no power gets HR-based TSS instead, and no
+  // NP/IF — Save must not require an NP the file doesn't have.
+  const isHrOnlyImport = !!pendingFitDetail && pendingFitDetail.stream && pendingFitDetail.stream.power == null;
+  const hrOnlyTss = isHrOnlyImport
+    ? hrTss(duration, formData.hrStats?.avg ?? null, userProfile.restingHR, estimateLthr(userProfile))
+    : null;
+  const canSave = duration > 0
+    && (isHrOnlyImport ? hrOnlyTss != null : normalizedPower > 0)
+    && (isOutdoor || !!formData.zone);
   const currentIF = currentFTP ? normalizedPower / currentFTP : 0;
-  const currentTSS = calculateTSS(normalizedPower, duration);
+  const currentTSS = isHrOnlyImport ? hrOnlyTss : calculateTSS(normalizedPower, duration);
 
   const switchToManual = () => {
     setMode('manual');
@@ -146,9 +156,23 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
                     <div className="flex justify-between"><span className="text-gray-400">Elevation</span><span className="tabular-nums">{formData.elevation} ft</span></div>
                   </>
                 )}
-                <div className="flex justify-between"><span className="text-gray-400">Normalized Power</span><span className="tabular-nums">{formData.normalizedPower}W</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">Estimated TSS</span><span className="tabular-nums">{currentTSS}</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">Intensity Factor</span><span className="tabular-nums">{currentIF.toFixed(2)}</span></div>
+                {isHrOnlyImport ? (
+                  <>
+                    {formData.hrStats?.avg != null && (
+                      <div className="flex justify-between"><span className="text-gray-400">Avg heart rate</span><span className="tabular-nums">{formData.hrStats.avg} bpm</span></div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">TSS</span>
+                      <span className="tabular-nums">{currentTSS != null ? `${currentTSS} (from heart rate)` : 'Add resting HR in Settings to estimate'}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between"><span className="text-gray-400">Normalized Power</span><span className="tabular-nums">{formData.normalizedPower}W</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Estimated TSS</span><span className="tabular-nums">{currentTSS}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Intensity Factor</span><span className="tabular-nums">{currentIF.toFixed(2)}</span></div>
+                  </>
+                )}
                 {pendingFitDetail.detection ? (
                   <div className="flex justify-between pt-1.5 border-t border-gray-600">
                     <span className="text-gray-400">Detected</span>

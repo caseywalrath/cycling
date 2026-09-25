@@ -6,7 +6,7 @@ import { parseFitFile, parseTcxFile, findMatchingRideForImport } from '../lib/ri
 import { EFTP_PROMPT_KEY, buildEftpTimeline } from '../lib/eftp.js';
 import { detectIntervals } from '../lib/intervals.js';
 import { applyDecay, calculateNewLevel } from '../lib/progression.js';
-import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus } from '../lib/load.js';
+import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
 
 // All persisted app data and every action that changes it (V2 Phase 3).
@@ -41,6 +41,11 @@ export const getDefaultFormData = () => {
     distance: 0,
     elevation: 0,
     notes: '',
+    // V2 Phase 5: full-resolution bests/HR stats/true avg power, carried through from an
+    // imported file (see rideFiles.js toOneHzSeries()). null for a manual entry.
+    bests: null,
+    hrStats: null,
+    avgPower: null,
   };
 };
 
@@ -338,6 +343,26 @@ export function AppDataProvider({ children }) {
   const calculateTSS = (normalizedPower, durationMinutes) => tssFor(normalizedPower, durationMinutes, currentFTP);
   const calculateIF = (normalizedPower) => ifFor(normalizedPower, currentFTP);
 
+  // V2 Phase 5 §5.2: a ride imported from a file with heart rate but no power gets
+  // heart-rate-based TSS instead of the usual power-based TSS. Manual entry is unchanged
+  // (power only, per §5.2). `isHrOnly` is true only for the file-import path, using
+  // pendingFitDetail (the just-imported stream), not a previously-saved ride's own tssSource
+  // — editing an already-saved HR-only ride without re-importing keeps its stored tss/source.
+  const computeRideMetrics = (duration, normalizedPower, hrStats) => {
+    const isHrOnly = !!pendingFitDetail && pendingFitDetail.stream && pendingFitDetail.stream.power == null;
+    if (isHrOnly) {
+      const lthr = estimateLthr(userProfile);
+      const tss = hrTss(duration, hrStats?.avg ?? null, userProfile.restingHR, lthr);
+      return { normalizedPower: null, tss, intensityFactor: null, tssSource: 'hr' };
+    }
+    return {
+      normalizedPower,
+      tss: calculateTSS(normalizedPower, duration),
+      intensityFactor: calculateIF(normalizedPower),
+      tssSource: undefined, // absent means 'power' (§0.5)
+    };
+  };
+
   // ---------------- rides ----------------
 
   // Save the Log Ride form as a new ride, or as the edit of `editingRide`.
@@ -351,9 +376,9 @@ export function AppDataProvider({ children }) {
     const duration = parseDuration(formData.duration);
     // V2 Phase 4: normalizedPower can be a string while the user is typing in a manual-entry
     // field with no invented default; coerce once here for TSS/IF and the saved value.
-    const normalizedPower = Number(formData.normalizedPower) || 0;
-    const tss = calculateTSS(normalizedPower, duration);
-    const intensityFactor = calculateIF(normalizedPower);
+    const rawNormalizedPower = Number(formData.normalizedPower) || 0;
+    // V2 Phase 5: HR-only imports get heart-rate TSS instead, and no NP/IF (§5.2).
+    const { normalizedPower, tss, intensityFactor, tssSource } = computeRideMetrics(duration, rawNormalizedPower, formData.hrStats);
     // V2 Phase 4: "Name" defaults to "Indoor ride" / "Outdoor ride" when left blank.
     const name = formData.name || (isOutdoor ? 'Outdoor ride' : 'Indoor ride');
 
@@ -390,6 +415,7 @@ export function AppDataProvider({ children }) {
         newLevel,
         change,
         tss,
+        tssSource,
         intensityFactor,
         source: 'manual', // Editing always marks as manually classified
         ...(pendingFitDetail ? {
@@ -458,6 +484,7 @@ export function AppDataProvider({ children }) {
         newLevel: newLevel,
         change: primaryChange,
         tss,
+        tssSource,
         intensityFactor,
         source: 'manual',
         trickleEffects, // Stored for post-log summary display
@@ -607,11 +634,16 @@ export function AppDataProvider({ children }) {
   };
 
   // FIT backfill: attach a parsed file's stream + detected intervals to an existing ride.
-  // TSS, zone and progression fields are untouched. Returns { rideId, detection }.
+  // TSS, zone and progression fields are untouched. V2 Phase 5: also saves the file's
+  // full-resolution bests/hrStats/avgPower onto the ride (§5.1), same as a fresh import.
+  // Returns { rideId, detection }.
   const attachRideFile = (existing, { parsed, detection }) => {
     setHistory(prev => prev.map(w => w.id === existing.id ? {
       ...w,
       stream: parsed.stream,
+      bests: parsed.bests,
+      hrStats: parsed.hrStats,
+      avgPower: parsed.avgPower,
       intervalData: detection
         ? { ...detection, source: 'auto', category: existing.rideType === 'Outdoor' ? null : detection.category }
         : null,
