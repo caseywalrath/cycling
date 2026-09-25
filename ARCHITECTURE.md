@@ -34,7 +34,10 @@ All state via `useState` hooks. No external state library.
 | `lastWorkedDates` | `{ zoneId: 'YYYY-MM-DD' }` — when each zone was last directly trained (decay clock) |
 | `history` | Array of ride objects |
 | `currentFTP` | User's FTP setting |
-| `intervalsFTP` | eFTP from intervals.icu (with decay) |
+| `intervalsFTP` | Legacy eFTP from intervals.icu (unused by current eFTP calculation; kept only for old saved data / Drive sync round-tripping) |
+| `eftpTimeline` | `useMemo` — `buildEftpTimeline(history, new Date())` (Session 20). `{ byRideId, current, firstStreamDate }` — see "eFTP Estimation" below |
+| `currentEftp` | `eftpTimeline.current`, i.e. `{ value, peakRideName, peakRideDate } \| null` — the live eFTP shown in the header and used by the FTP-update prompt |
+| `eftpPromptedValue` | The highest eFTP value already offered to the user via the FTP-update prompt (device-local, `localStorage['eftp-prompted-value']`) — prevents re-prompting for the same or a lower estimate |
 
 ### UI State
 Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModal`, etc.
@@ -42,7 +45,7 @@ Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModa
 ### Form State
 | State | Purpose |
 |-------|---------|
-| `formData` | Log ride form fields (eFTP shown in both log and edit, defaults to latest from history) |
+| `formData` | Log ride form fields. No `eFTP` field (Session 20) — eFTP is calculated, not entered. Legacy `ride.eFTP` values on existing rides are preserved via `...oldWorkout` in the edit-save path, not through `formData` |
 | `editingRide` | ID of ride being edited (null = new ride) |
 | `pendingFitDetail` | `{ stream, detection }` from a FIT import, awaiting Save — spread onto the new/edited ride entry in `handleLogWorkout()`, cleared on every Log Ride modal exit path |
 
@@ -78,7 +81,10 @@ DAYS_OF_WEEK    // Day name lookup array (Sunday → Saturday)
 toLocalDateStr(date)     // YYYY-MM-DD using local timezone (replaces toISOString)
 parseDateLocal(dateStr)  // Parse "YYYY-MM-DD" as local midnight (avoids UTC off-by-one)
 formatDateWithDay(str)   // "2026-02-05 - Thursday" from YYYY-MM-DD string
-getDefaultFormData(hist) // Default form values with latest eFTP from history
+getDefaultFormData()     // Default form values for a new ride (no eFTP field, Session 20)
+bestAveragePower(stream, seconds) // Best average power over any window of `seconds` in a downsampled stream (null-bins count as 0W); null if stream too short
+estimateRideFtp(ride)    // Best 20-min power x 0.95, or best 60-min power if higher; null if ride has no stream/is too short (Session 20)
+buildEftpTimeline(history, today) // { byRideId, current, firstStreamDate } — see "eFTP Estimation" below (Session 20)
 applyDecay(levels, lastWorkedDates) // Returns levels with decay applied (14-day grace,
                          //   -0.1/week, VO2max/Anaerobic 1.5x, floor max(1.0, level*0.5))
 downsampleRecords(records, binSeconds=10) // FIT records -> { binSeconds, power[], hr[] }, null if no power data
@@ -89,6 +95,34 @@ buildIntervalLabel(sets)            // Sets -> display string, e.g. "4x6 @ 280W"
 ```
 
 **Important**: Never use `new Date("YYYY-MM-DD")` to parse date strings — it creates midnight UTC, which in US timezones becomes the previous evening. Always use `parseDateLocal()` for ride/event date strings.
+
+## eFTP Estimation (Session 20)
+
+Replaced the intervals.icu-dependent eFTP with one calculated from the app's own FIT-imported
+power streams (`ride.stream`). See `EFTP_ESTIMATE_PLAN.md` for the original design.
+
+- **Per-ride estimate** (`estimateRideFtp`): `round(max(0.95 * best20min, best60min ?? 0))`,
+  from the ride's own `stream`. Requires at least 20 minutes of stream data; `null` otherwise.
+  Null (empty) bins count as 0W — a dropout can only lower the estimate.
+- **Rolling current eFTP** (`buildEftpTimeline`): the highest per-ride estimate among rides
+  dated in the last `EFTP_WINDOW_DAYS` (90) days. Rises with a new best effort, falls away
+  after 90 days without one. Also returns `firstStreamDate` — the earliest ride date with an
+  estimate — used to hand off the eFTP Progress chart from legacy to calculated values.
+- **Constants**: `EFTP_WINDOW_DAYS` (90), `EFTP_20MIN_FACTOR` (0.95), `EFTP_PROMPT_MARGIN` (10W),
+  `EFTP_PROMPT_KEY` (`'eftp-prompted-value'`, device-local `localStorage` key, not part of
+  `STORAGE_KEY` or Drive sync).
+- **FTP-update prompt**: fires when `currentEftp.value >= currentFTP + EFTP_PROMPT_MARGIN` and
+  the value hasn't already been prompted (`eftpPromptedValue`, persisted to
+  `EFTP_PROMPT_KEY` before the `confirm()` dialog, so Cancel/OK both count as "asked" and a
+  re-render can't double-prompt). Effect depends only on `currentEftp?.value`, not `currentFTP`
+  — manually editing FTP never triggers it. Never prompts to lower FTP.
+- **Legacy `ride.eFTP`** (from CSV import or the old intervals.icu API sync) is never deleted
+  or rewritten. It still feeds the eFTP Progress chart for months before the first FIT-based
+  estimate exists (see chart specifics below), and the CSV importer still writes it.
+- **Known limitation**: the estimate is only as good as the hardest effort in the last 90 days.
+  ERG/sweet-spot/threshold work (e.g. 2x20 @ 95% FTP) produces an eFTP *below* true FTP
+  (0.95 x 0.95 ~= 90%). A real 20-minute test or a long hard climb gives the most accurate
+  reading. This is why the prompt only ever offers to raise FTP.
 
 ## Data Import Sources
 1. **intervals.icu API** - Direct sync via athlete ID + API key
@@ -151,7 +185,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `markDataChanged()` | Update exportedAt timestamp on any data mutation |
 | `syncFromIntervals()` | Fetch rides from intervals.icu API |
 | `importCSVData()` | Parse and import CSV data |
-| `calculateEFTPHistory()` | eFTP monthly peaks (11-month rolling window) |
+| `calculateEFTPHistory(history, eftpTimeline)` | eFTP monthly peaks (11-month rolling window). Per month, prefers the highest calculated (`eftpTimeline`) estimate; falls back to legacy `ride.eFTP` only for months before `firstStreamDate` (Session 20) |
 | `parseFitFile(arrayBuffer)` | Parses a `.fit` file into Log Ride form field values (date, duration, NP, distance, elevation, ride type) |
 | `calculateNormalizedPower(powerSamples)` | NP from a per-second power stream — 30s rolling average, 4th-power mean, 4th root |
 | `calculateMonthlyElevation()` | Monthly elevation totals (11-month rolling window, rides with elevation > 0) |
@@ -186,14 +220,22 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 | Weekly Hours | Orange `#FB923C` | `hours` | 45 | `r: 4` solid fill |
 | Weekly TSS | Blue `#3B82F6` | `tss` | 45 | `r: 4` solid fill |
 | Monthly Elevation | Green `#22C55E` | `elevation` | 55 | `r: 4` solid fill |
-| eFTP Progress | Purple `#A855F7` | `eFTP` | 55 | `r: 4` solid fill |
+| eFTP Progress | Purple `#A855F7` | `eFTP` | 55 | `r: 4`, hollow (`fill: '#1F2937'`) for legacy/imported months, solid for calculated months |
 
-**eFTP chart specifics:**
-- Data: `calculateEFTPHistory()` — one point per calendar month (highest eFTP that month)
+**eFTP chart specifics (updated Session 20):**
+- Data: `calculateEFTPHistory(history, eftpTimeline)` — one point per calendar month, each
+  tagged `source: 'estimated' | 'imported'`
 - Window: 11 months back from 1st of current month (avoids duplicate month labels on X-axis)
 - X-axis: `dataKey="month"` (short name: Jan, Feb, etc.), evenly spaced
-- Tooltip (`EFTPTooltip`): month/year label, peak wattage, ride name
+- Tooltip (`EFTPTooltip`): month/year label, peak wattage, and either the peak ride's name +
+  date (estimated) or "Imported from intervals.icu" (legacy)
+- Dots are hollow for `source: 'imported'` months, solid purple for `source: 'estimated'`
+  months — visually marks the handover from intervals.icu-imported values to the app's own
+  calculated values, at `firstStreamDate`
+- "Latest" in the chart header shows `currentEftp.value` (or `—`), matching the page header,
+  not necessarily the same as the last plotted month's value
 - Y-axis domain: `dataMin - 10` to `dataMax + 10`
+- Empty-state hint: "Import a FIT file that includes a 20-minute or longer effort."
 
 **Elevation chart specifics:**
 - Data: `calculateMonthlyElevation()` — one point per calendar month (total elevation that month)
@@ -205,7 +247,7 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 
 ## UI Layout (top to bottom, as of Session 8)
 
-1. **Header bar**: App title, FTP/W·kg/eFTP display, Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
+1. **Header bar**: App title, FTP/W·kg/eFTP display (eFTP now the calculated `currentEftp.value`, Session 20; hidden when null), Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
 4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import. **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.

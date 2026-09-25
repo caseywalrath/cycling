@@ -1,6 +1,8 @@
 # Implementation Plan: Estimate eFTP From the App's Own Ride Data
 
-**Status:** Planned, not yet built
+**Status:** Implemented in Session 20 (§3–§6 and §9; §7's optional cleanup was skipped — see
+CHANGELOG.md Session 20 for why: the sync modal has one real, if effectively dormant, trigger
+site the plan's grep missed)
 **Designed:** 2026-09-25 (session on branch `claude/eftp-metric-analysis-9qd058`)
 **Written against:** `src/App.jsx` at commit `ac69866`. Line numbers are approximate. Always
 find code by the quoted search strings, not by line number.

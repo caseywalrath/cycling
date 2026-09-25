@@ -1,5 +1,78 @@
 # Changelog
 
+## Session 20 - Calculate eFTP From FIT Power Streams (2026-09-25)
+
+### Feature: eFTP no longer depends on intervals.icu
+- **Problem**: "eFTP" (`ride.eFTP`) only ever came from the (now unreachable) intervals.icu API
+  sync or the "Paste CSV" import. Since FIT import became the primary way to log rides, that
+  field was frozen. Worse, `getDefaultFormData()` pre-filled every new ride's eFTP input with
+  the last stored value, so one imported number (243W) silently copied itself onto every ride
+  logged afterward — which is what produced the recurring "Your estimated FTP (243W) is 12W
+  higher..." popup even after the user manually lowered their FTP.
+- **Fix**: three new pure helpers (`bestAveragePower`, `estimateRideFtp`, `buildEftpTimeline`)
+  calculate eFTP directly from each ride's own `stream` (already saved from FIT import, Session
+  18): best 20-minute power x 0.95, or best 60-minute power if higher. The live eFTP shown
+  everywhere in the app is the highest such estimate from the last 90 days (`eftpTimeline`,
+  `currentEftp`) — the same rolling-window model intervals.icu itself used, just computed
+  locally. See `EFTP_ESTIMATE_PLAN.md` for the full design.
+- The eFTP input field is removed from the Log Ride / Edit Ride form entirely — eFTP is now
+  calculated, never entered. Editing an old ride preserves its legacy `eFTP` value via
+  `...oldWorkout` in the save path (nothing sets or clears it anymore).
+- **Known limitation**: the estimate reflects the hardest effort in the last 90 days, so ERG/
+  sweet-spot/threshold workouts (e.g. 2x20 @ 95% FTP) produce an eFTP *below* true FTP. A real
+  20-minute test or long hard climb gives the most accurate reading. This is why the update
+  prompt (below) only ever offers to raise FTP.
+
+### Fix: FTP update popup no longer nags
+- Replaced the old effect (ran on every `history` change, no dedup, could re-fire the same
+  prompt on every app launch) with one that only offers an FTP increase, and only once per
+  distinct new estimate: the prompted value is stored in `localStorage['eftp-prompted-value']`
+  *before* the confirm dialog opens, so Cancel and OK both count as "seen." Manually changing
+  FTP does not trigger it (the effect depends only on the calculated eFTP, not on `currentFTP`).
+  This key is device-local by design — not part of `STORAGE_KEY` or Google Drive sync — so at
+  worst a second device prompts once more.
+
+### eFTP Progress chart: kept working across the transition
+- `calculateEFTPHistory()` now takes `(history, eftpTimeline)`. Per calendar month, it prefers
+  the highest calculated estimate; only falls back to a ride's legacy `ride.eFTP` for months
+  *before* the first FIT-based estimate exists (`firstStreamDate`). This is what keeps the old
+  243W copy-forward values from drawing a false flat line across recent months — those rides
+  are ignored in favor of the calculated numbers once any FIT ride exists.
+- Chart dots are now hollow for legacy/imported months and solid for calculated months, so the
+  handover point is visible at a glance. The tooltip shows the peak ride's name/date for
+  calculated months, or "Imported from intervals.icu" for legacy ones. "Latest" in the chart
+  header now matches the page header's `currentEftp.value` instead of the last plotted month.
+- Old `ride.eFTP` values are never deleted or rewritten — a history with no FIT streams at all
+  renders identically to before this change.
+- Verified: unit-style checks on the three helpers (steady/interval/gap/rolling-window/
+  binSeconds-independence cases) and an in-browser check seeding a history with 5 months of
+  legacy-only rides, 4 months of FIT-stream rides (including a 260W/20-min effort and two stale
+  243W manual entries dated after the first stream), and `ftp: 231`: header, chart "Latest",
+  and Copy for Claude all showed the calculated 247W; the popup fired exactly once and did not
+  reappear on reload; editing and saving a legacy ride kept its stored `eFTP`; a history with no
+  streams at all rendered the chart exactly as before (all hollow dots, no header eFTP).
+- **Not done**: the plan's optional cleanup of the unreachable intervals.icu sync modal and
+  FTP-increase modal (`syncFromIntervalsICU`, `showFTPModal`/`detectedFTP`) was skipped. Their
+  triggering code (`setShowIntervalsSyncModal(true)`) turned out to have one real call site,
+  inside `analyzeActivityForVO2max()`'s "intervals.icu not configured" guard — dormant only
+  because `intervalsConfig` ships with hardcoded defaults and nothing in the UI clears it, not
+  because the call itself is unreachable. Removing the modal without also reworking that guard
+  risked breaking the (kept) VO2max analyzer, so it was left in place pending a closer look in a
+  future session.
+
+### Files Changed
+- `src/App.jsx` — `bestAveragePower()`, `estimateRideFtp()`, `buildEftpTimeline()`,
+  `eftpTimeline`/`currentEftp` (`useMemo`), `calculateEFTPHistory()`, eFTP Progress chart (dot
+  styling, tooltip, "Latest", empty-state text), FTP-update prompt effect (`eftpPromptedValue`),
+  `getDefaultFormData()` (eFTP field removed), Log/Edit Ride form (eFTP input removed, RPE
+  slider now full width), ride create/edit save paths, header eFTP display, Ride History row,
+  `copyForAnalysis()`
+- `ARCHITECTURE.md` — new "eFTP Estimation" section, updated state/function/chart tables
+- `CHANGELOG.md` — this entry
+- `EFTP_ESTIMATE_PLAN.md` — marked Status: Implemented in Session 20 (§7 cleanup not done, see above)
+
+---
+
 ## Session 19 - Interval Detection Fixes (Sub-Threshold Work & Auto-Laps) (2026-08-21)
 
 ### Bug: intervals below 85% FTP were never detected
