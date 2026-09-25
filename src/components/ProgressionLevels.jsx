@@ -12,7 +12,7 @@ export default function ProgressionLevels() {
   const { levels, displayLevels, effectiveLevels, animatingZone, recentChanges, lastWorkedDates, currentFTP } = useAppData();
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       {ZONES.filter((zone) => zone.id !== 'recovery').map((zone) => {
         const recentChange = recentChanges[zone.id];
         const displayValue = animatingZone === zone.id

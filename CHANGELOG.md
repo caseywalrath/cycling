@@ -1,5 +1,15 @@
 # Changelog
 
+## Session 24 - Tighter Progression Levels Card (2026-09-25)
+
+### What you'll see on your iPhone
+- The Progress tab's level bars take about half the height. The "+0.3" and "↓ 55d" badges now sit next to the zone name instead of on their own row, and the bars are slimmer. Tapping a badge still explains it, and tapping the name or bar still opens that zone's workouts.
+
+### Files Changed
+- `src/components/ZoneBar.jsx`, `src/components/ProgressionLevels.jsx`
+
+---
+
 ## Session 24 - V2 Phase 7: Progression Levels Rebuilt (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 7, the last phase of the 2.0 plan. It rebuilds
