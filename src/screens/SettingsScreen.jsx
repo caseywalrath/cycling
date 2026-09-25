@@ -6,8 +6,8 @@ import { navigate } from '../state/useHashRoute.js';
 import { Screen, Card, SectionHeader, Button, useConfirm, useToast } from '../components/ui/index.js';
 
 // Settings tab (V2 Phase 4 rebuild). Profile (with a live zone-watt table and LTHR), Event,
-// Sync & backup (auto-sync status + manual Sync/Export/Restore), Old imported rides, Reset
-// progression levels, and About.
+// Sync & backup (auto-sync status + manual Sync/Export/Restore), Old imported rides,
+// Progression levels (V2 Phase 7: recalculate from rides with preview + Undo, or reset), and About.
 const inputClass = 'w-full bg-gray-700 rounded-lg px-3 py-2 text-base min-h-[44px]';
 const labelClass = 'block text-sm text-gray-400 mb-1';
 
@@ -23,6 +23,7 @@ export default function SettingsScreen({ route }) {
     currentFTP, userProfile, event, history, lastSyncedAt, isDriveSyncing, driveSyncStatus,
     hasUnsyncedChanges, saveProfile, saveEvent, deleteEvent, resetLevels, exportData,
     readBackupFile, restoreBackup, syncWithDrive, oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
+    previewRecalculation, applyRecalculation, undoRecalculation, recalcUndoAvailable,
   } = useAppData();
   const confirm = useConfirm();
   const toast = useToast();
@@ -159,6 +160,58 @@ export default function SettingsScreen({ route }) {
       resetLevels();
       toast('✓ All progression levels reset to 1.0');
     }
+  };
+
+  // V2 Phase 7 §7.4: replay every classified indoor ride through the new model. The preview
+  // (before → after per zone) is shown in the ConfirmSheet; nothing changes unless confirmed.
+  const handleRecalculate = async () => {
+    const preview = previewRecalculation();
+    const total = preview.scored + preview.typical + preview.manual;
+    if (total === 0) {
+      toast('No classified indoor rides to recalculate from yet.');
+      return;
+    }
+    const zones = ZONES.filter(z => z.id !== 'recovery');
+    const ok = await confirm({
+      title: 'Recalculate levels from your rides?',
+      message: (
+        <div data-recalc-preview>
+          <p className="mb-3">
+            Replays your {total} indoor ride{total === 1 ? '' : 's'} with a zone, oldest first, through the new level model.
+            {preview.typical > 0 && ` ${preview.typical} older ride${preview.typical === 1 ? ' has' : 's have'} no interval data, so ${preview.typical === 1 ? 'it counts' : 'they count'} as a typical session (level 5).`}
+          </p>
+          <table className="w-full text-base tabular-nums">
+            <thead>
+              <tr className="text-sm text-gray-500">
+                <th className="text-left font-normal pb-1">Zone</th>
+                <th className="text-right font-normal pb-1">Now</th>
+                <th className="text-right font-normal pb-1">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              {zones.map(z => (
+                <tr key={z.id} data-recalc-zone={z.id}>
+                  <td className="py-0.5" style={{ color: z.color }}>{z.name}</td>
+                  <td className="py-0.5 text-right text-gray-400" data-before>{(preview.before[z.id] ?? 1).toFixed(1)}</td>
+                  <td className="py-0.5 text-right font-semibold text-gray-100" data-after>{(preview.after[z.id] ?? 1).toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-3 text-sm text-gray-500">Your rides aren't changed. You can undo this until you log your next ride.</p>
+        </div>
+      ),
+      confirmLabel: 'Use these levels',
+    });
+    if (ok) {
+      applyRecalculation(preview);
+      toast('✓ Levels recalculated from your rides');
+    }
+  };
+
+  const handleUndoRecalc = () => {
+    if (undoRecalculation()) toast('Levels restored to what they were before recalculating.');
+    else toast('Nothing to undo on this device.', { tone: 'error' });
   };
 
   const oldCount = oldImportedRideCount();
@@ -366,9 +419,18 @@ export default function SettingsScreen({ route }) {
       )}
 
       {/* Reset */}
-      <Card>
-        <SectionHeader title="Progression levels" subtitle="Start every zone again from 1.0. Your rides are kept." />
-        <Button variant="ghost-destructive" block onClick={handleResetLevels}>Reset progression levels</Button>
+      <Card id="settings-progression" className="scroll-mt-4">
+        <SectionHeader title="Progression levels" subtitle="Rebuild them from your rides, or start every zone again from 1.0. Your rides are kept either way." />
+        <div className="flex flex-col gap-2">
+          <Button variant="secondary" block onClick={handleRecalculate}>Recalculate levels from my rides</Button>
+          {recalcUndoAvailable && (
+            <button type="button" onClick={handleUndoRecalc} data-recalc-undo
+              className="min-h-[44px] text-base text-blue-400 hover:text-blue-300">
+              Undo recalculation
+            </button>
+          )}
+          <Button variant="ghost-destructive" block onClick={handleResetLevels}>Reset progression levels</Button>
+        </div>
       </Card>
 
       {/* About */}
