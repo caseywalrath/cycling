@@ -2953,9 +2953,6 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                       <div className="flex-1">
                         <div className="font-medium">
                           {entry.name || entry.notes || 'Workout'} - {entry.rideType || 'Indoor'}{entry.rideType !== 'Outdoor' && entry.zone ? ` - ${getZoneName(entry.zone)}` : entry.rideType !== 'Outdoor' && !entry.zone ? ' - Unclassified' : ''}
-                          {entry.intervalData?.label && (
-                            <span className="text-yellow-400 text-xs ml-2 font-mono">{entry.intervalData.label}</span>
-                          )}
                           {entry.elevation > 2999 && (
                             <span className="ml-2" title="Big Climb">🏔️</span>
                           )}
@@ -2964,6 +2961,11 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                           )}
                         </div>
                         <div className="text-gray-400 text-xs">{formatDateWithDay(entry.date)}</div>
+                        {entry.intervalData?.label && (
+                          // v2 Phase 2: on its own line, not appended to the title, so it no
+                          // longer overlaps the 📊 ✏️ 🗑️ buttons at 390px on longer titles.
+                          <div className="text-yellow-400 text-xs font-mono mt-1">{entry.intervalData.label}</div>
+                        )}
                       </div>
                     </div>
 
