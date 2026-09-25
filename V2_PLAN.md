@@ -56,6 +56,79 @@ To run a phase, start a new session with the recommended model and say:
 
    After Phase 7, instead say that the V2 plan is complete.
 
+### Orchestrated mode (optional: one Opus session runs every phase)
+
+Instead of starting 7 sessions by hand, the user can start **one Opus session** and say:
+
+> Run V2_PLAN.md in orchestrated mode, following CLAUDE.md.
+
+The Opus session is the **orchestrator**. It runs each phase through a **sub-agent** (the
+Agent tool) with the phase's model from the table above (`model: "haiku" | "sonnet" |
+"opus"`). Everything else in this plan still applies, with these changes.
+
+**Order and branch**
+- Run phases **strictly in order, one at a time**, never in parallel. Each phase depends on
+  the previous one, and the regression check needs the one dev server on port 3000.
+- All phases go on the **session's single `claude/` branch**. Do not create a branch per
+  phase.
+- Phases already marked done in this file's **Status** line are skipped. That lets a
+  stopped run resume in a new session.
+
+**What each sub-agent gets.** Sub-agents start with no memory, so their prompt must be
+complete:
+- "Implement Phase N of `V2_PLAN.md`, following `CLAUDE.md` and the 'Rules for every
+  phase'";
+- the branch name;
+- a summary of anything earlier phases reported as deferred or changed;
+- instructions to commit (conventional commits) but **not push** and **not** write the
+  user-facing end-of-phase report;
+- instructions to return: a list of commits, the regression check output, any baseline
+  changes with reasons, anything skipped, and known issues.
+
+**The orchestrator verifies every phase itself. Never trust a sub-agent's "all passed".**
+1. Run `npm run build` (and `npm test` from Phase 5 on).
+2. Start the dev server and run `node tools/v2-check.mjs` yourself. Any diff must be one the
+   phase expects.
+3. Read the screenshots in `tools/.out/`.
+4. Read the phase's diff (`git diff <start>..HEAD`) against the phase spec.
+5. On failure, send the problem back to the same sub-agent (SendMessage) or fix it directly.
+   Re-verify, then continue.
+6. Push the branch (`git push -u origin <branch>`, retry on network errors as `CLAUDE.md`
+   says). One push per phase gives the user a restore point.
+7. Update the **Status** line and the checklist below, and commit that.
+8. Stop the dev server before starting the next phase.
+
+**Reports**
+- Each phase's plain-language summary goes in its CHANGELOG entry. The phase rules already
+  require this; the orchestrator makes sure it's written for a beginner.
+- The user gets a short progress message after each phase (one or two lines) and a full
+  report at each pause and at the end. That report includes the `git pull` instructions and
+  a "What's new in 2.0" list at the end.
+- The "Next: Phase N+1 … Best model" line is not needed between phases. It goes in the
+  report only when the run stops early.
+
+**Required pauses.** Stop and wait for the user:
+- **After Phase 3.** Ask the user to pull or deploy and try the new layout on their iPhone.
+  Every later phase copies Phase 3's design, so changes are cheapest here. Continue only
+  when the user says so, and apply any requested layout changes (with an Opus sub-agent)
+  before Phase 4.
+- **Start of Phase 7.** Ask for the exported backup (§7.3). Keep it in the scratchpad and
+  never commit it.
+- **During Phase 7.** Show the calibration table and get agreement before the constants
+  are final.
+- **Any time a phase can't be made to pass** after two fix attempts. Report what's failing
+  and stop. Do not skip ahead.
+
+**Progress checklist** (the orchestrator ticks these as it goes; manual runs may too)
+
+- [ ] Phase 1 — dead code and helpers (Haiku)
+- [ ] Phase 2 — bug fixes and zones (Sonnet)
+- [ ] Phase 3 — shell, kit, Today (Opus) → **pause for user review**
+- [ ] Phase 4 — Rides, Ride page, Log Ride, Settings (Sonnet)
+- [ ] Phase 5 — metrics engine (Sonnet)
+- [ ] Phase 6 — Progress tab and alerts (Sonnet)
+- [ ] Phase 7 — progression rebuild (Opus) → **needs user's backup and sign-off**
+
 ---
 
 ## 0. Shared reference
