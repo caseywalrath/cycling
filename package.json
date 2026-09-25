@@ -1,6 +1,6 @@
 {
   "name": "gran-fondo-utah-training",
-  "version": "1.0.0",
+  "version": "2.0.0-beta",
   "description": "Cycling training tracker for Gran Fondo Utah 2026",
   "type": "module",
   "scripts": {
