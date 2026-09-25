@@ -95,3 +95,16 @@ export const zoneRangeLabel = (zoneId, ftp) => {
   const range = max === null ? `${min}W+` : `${min}-${max}W`;
   return prefix ? `${prefix}: ${range}` : range;
 };
+
+// Display helpers, moved from App.jsx in V2 Phase 3 (unchanged).
+export const getZoneName = (zoneId) => {
+  if (!zoneId) return 'Unclassified';
+  const zone = ZONES.find(z => z.id === zoneId);
+  return zone ? zone.name : zoneId;
+};
+
+export const getZoneColor = (zoneId) => {
+  if (!zoneId) return '#888';
+  const zone = ZONES.find(z => z.id === zoneId);
+  return zone ? zone.color : '#888';
+};

@@ -214,3 +214,33 @@ export const downsampleRecords = (records, binSeconds = 10) => {
 
   return { binSeconds, power, hr };
 };
+
+// Moved from App.jsx in V2 Phase 3 (unchanged).
+// Among rides logged on the same date as an imported file, pick the one whose duration is
+// closest to the file's, and only if that's within 25% (or the ride's stored duration is
+// 0, i.e. unset). Otherwise there's no confident match, and the file becomes a new ride
+// without asking — a same-day match by date alone was pairing files with the wrong ride
+// when two rides were logged on the same day.
+export const findMatchingRideForImport = (rides, parsed) => {
+  const sameDay = rides.filter(w => w.date === parsed.date);
+  if (sameDay.length === 0) return null;
+  let best = null;
+  let bestDiff = Infinity;
+  for (const ride of sameDay) {
+    let diff;
+    let qualifies;
+    if (!ride.duration || ride.duration === 0) {
+      // Unset duration always qualifies, but a real close-duration match still wins.
+      diff = Infinity;
+      qualifies = true;
+    } else {
+      diff = Math.abs(ride.duration - parsed.duration) / ride.duration;
+      qualifies = diff <= 0.25;
+    }
+    if (qualifies && diff <= bestDiff) {
+      best = ride;
+      bestDiff = diff;
+    }
+  }
+  return best;
+};
