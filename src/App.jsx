@@ -206,6 +206,96 @@ const downsampleRecords = (records, binSeconds = 10) => {
   return { binSeconds, power, hr };
 };
 
+// eFTP estimation constants. See EFTP_ESTIMATE_PLAN.md.
+const EFTP_WINDOW_DAYS = 90;      // rolling look-back for the current estimate
+const EFTP_20MIN_FACTOR = 0.95;   // classic 20-minute test conversion
+const EFTP_PROMPT_MARGIN = 10;    // watts above FTP before offering an update
+const EFTP_PROMPT_KEY = 'eftp-prompted-value'; // device-local localStorage key
+
+// Best average power over a window of `seconds`, from a downsampled power stream.
+// A single-pass sliding-window sum, the same style as calculateNormalizedPower().
+// Null (empty) bins count as 0W — a dropout can only lower the estimate, never raise it.
+// Returns null if the stream doesn't have enough bins to fill one window.
+const bestAveragePower = (stream, seconds) => {
+  if (!stream || !stream.power || stream.power.length === 0) return null;
+  const windowBins = Math.round(seconds / stream.binSeconds);
+  if (windowBins < 1 || stream.power.length < windowBins) return null;
+
+  let windowSum = 0;
+  let best = -Infinity;
+  for (let i = 0; i < stream.power.length; i++) {
+    windowSum += stream.power[i] || 0;
+    if (i >= windowBins) windowSum -= stream.power[i - windowBins] || 0;
+    if (i >= windowBins - 1) best = Math.max(best, windowSum / windowBins);
+  }
+  return best === -Infinity ? null : best;
+};
+
+// Estimate a single ride's FTP from its own power stream: best 20-minute power x 0.95,
+// or best 60-minute power if the ride is long enough and that's higher. Returns null if
+// the ride has no stream or is shorter than 20 minutes.
+const estimateRideFtp = (ride) => {
+  const stream = ride && ride.stream;
+  const best20 = bestAveragePower(stream, 20 * 60);
+  if (best20 == null) return null;
+  const best60 = bestAveragePower(stream, 60 * 60);
+  return Math.round(Math.max(EFTP_20MIN_FACTOR * best20, best60 || 0));
+};
+
+// Build a timeline of per-ride eFTP estimates and the rolling current eFTP across history.
+// eFTP(D) = the highest rideEstimate among rides dated in (D - EFTP_WINDOW_DAYS, D].
+const buildEftpTimeline = (history, today) => {
+  const byRideId = {};
+  let firstStreamDate = null;
+
+  if (!history || history.length === 0) {
+    return { byRideId, current: null, firstStreamDate };
+  }
+
+  const sorted = [...history].sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date));
+  const windowMs = EFTP_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+  const estimatedRides = sorted
+    .map(ride => ({ ride, rideEstimate: estimateRideFtp(ride) }))
+    .filter(r => r.rideEstimate != null);
+
+  estimatedRides.forEach(({ ride }) => {
+    if (firstStreamDate == null || ride.date < firstStreamDate) firstStreamDate = ride.date;
+  });
+
+  const eftpAt = (dateMs) => {
+    let peak = null;
+    estimatedRides.forEach(({ ride, rideEstimate }) => {
+      const rideMs = parseDateLocal(ride.date).getTime();
+      if (rideMs > dateMs || rideMs <= dateMs - windowMs) return;
+      if (!peak || rideEstimate > peak.value) {
+        peak = { value: rideEstimate, peakRideName: ride.name || 'Workout', peakRideDate: ride.date };
+      }
+    });
+    return peak;
+  };
+
+  sorted.forEach(ride => {
+    const rideEstimate = estimateRideFtp(ride);
+    const rideMs = parseDateLocal(ride.date).getTime();
+    const peak = eftpAt(rideMs);
+    byRideId[ride.id] = {
+      rideEstimate,
+      eftp: peak ? peak.value : null,
+      peakRideName: peak ? peak.peakRideName : null,
+      peakRideDate: peak ? peak.peakRideDate : null,
+    };
+  });
+
+  const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const currentPeak = eftpAt(todayMs);
+  const current = currentPeak
+    ? { value: currentPeak.value, peakRideName: currentPeak.peakRideName, peakRideDate: currentPeak.peakRideDate }
+    : null;
+
+  return { byRideId, current, firstStreamDate };
+};
+
 // Interval detection constants (indoor ERG power is near-square-wave, so a simple
 // threshold + run-length approach works well). See INTERVAL_TRACKING_PLAN.md §4.
 const WORK_THRESHOLD = 0.85; // fraction of FTP that counts as "work" (fixed fallback / upper bound)
@@ -589,8 +679,7 @@ export default function ProgressionTracker() {
   const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
   const [analyzingActivity, setAnalyzingActivity] = useState(null);
 
-  const getDefaultFormData = (historyRef) => {
-    const latestEFTP = historyRef ? historyRef.find(w => w.eFTP)?.eFTP : null;
+  const getDefaultFormData = () => {
     return {
       name: '',
       date: toLocalDateStr(new Date()),
@@ -603,11 +692,10 @@ export default function ProgressionTracker() {
       rideType: 'Indoor',
       distance: 0,
       elevation: 0,
-      eFTP: latestEFTP || '',
       notes: '',
     };
   };
-  const [formData, setFormData] = useState(getDefaultFormData(null));
+  const [formData, setFormData] = useState(getDefaultFormData());
 
   // State for editing rides
   const [editingRide, setEditingRide] = useState(null);
@@ -621,6 +709,11 @@ export default function ProgressionTracker() {
 
   // Effective levels = base levels with decay applied (for display and new workout calculations)
   const effectiveLevels = useMemo(() => applyDecay(levels, lastWorkedDates), [levels, lastWorkedDates]);
+
+  // eFTP estimated from FIT power streams (see EFTP_ESTIMATE_PLAN.md). Recomputed whenever
+  // history changes; `today` is intentionally fixed at render time, not a dependency.
+  const eftpTimeline = useMemo(() => buildEftpTimeline(history, new Date()), [history]);
+  const currentEftp = eftpTimeline.current; // { value, peakRideName, peakRideDate } | null
 
   useEffect(() => {
     try {
@@ -731,22 +824,31 @@ export default function ProgressionTracker() {
     }
   }, []);
 
-  // Check FTP vs eFTP difference and prompt user if > 10
+  // Prompt to raise FTP when the calculated eFTP is meaningfully higher — see
+  // EFTP_ESTIMATE_PLAN.md §6. Prompts once per new, higher estimate (never on a plain
+  // app launch of an already-seen value, never to lower FTP).
+  const [eftpPromptedValue, setEftpPromptedValue] = useState(() => {
+    try { return parseInt(localStorage.getItem(EFTP_PROMPT_KEY), 10) || 0; } catch { return 0; }
+  });
+
   useEffect(() => {
-    const latestEFTP = history.find(w => w.eFTP)?.eFTP;
-    if (latestEFTP && Math.abs(currentFTP - latestEFTP) > 10) {
-      const difference = latestEFTP - currentFTP;
-      const direction = difference > 0 ? 'higher' : 'lower';
-      const shouldUpdate = window.confirm(
-        `Your estimated FTP (${latestEFTP}W) is ${Math.abs(difference)}W ${direction} than your current FTP (${currentFTP}W).\n\n` +
-        `Would you like to update your FTP in Profile settings?`
-      );
-      if (shouldUpdate) {
-        setProfileModalOriginalFTP(currentFTP);
-        setShowProfileModal(true);
-      }
+    const est = currentEftp?.value;
+    if (!est) return;
+    if (est < currentFTP + EFTP_PROMPT_MARGIN) return; // only offer increases
+    if (est <= eftpPromptedValue) return; // already asked about this (or higher)
+    setEftpPromptedValue(est);
+    try { localStorage.setItem(EFTP_PROMPT_KEY, String(est)); } catch { /* ignore */ }
+    const shouldUpdate = window.confirm(
+      `Your estimated FTP is ${est}W (best 20-min effort: ${currentEftp.peakRideName}, ` +
+      `${currentEftp.peakRideDate}). That's ${est - currentFTP}W above your current FTP (${currentFTP}W).\n\n` +
+      `Would you like to update your FTP in Profile settings?`
+    );
+    if (shouldUpdate) {
+      setProfileModalOriginalFTP(currentFTP);
+      setShowProfileModal(true);
     }
-  }, [history]); // Only check when history changes (new rides imported/logged)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentEftp?.value]); // intentionally not currentFTP: changing FTP by hand must not trigger a prompt
 
   // Mark data as changed (updates exportedAt timestamp for sync conflict resolution)
   const markDataChanged = () => {
@@ -1016,33 +1118,59 @@ export default function ProgressionTracker() {
     });
   };
 
-  // Calculate eFTP history for rolling one-year chart
-  const calculateEFTPHistory = (history) => {
+  // Calculate eFTP history for rolling one-year chart. Combines the app's own calculated
+  // estimates (FIT era) with legacy intervals.icu-imported values (pre-FIT era) so the chart
+  // keeps working across the transition — see EFTP_ESTIMATE_PLAN.md §4.
+  const calculateEFTPHistory = (history, eftpTimeline) => {
     if (!history || history.length === 0) return [];
+
+    const { byRideId, firstStreamDate } = eftpTimeline || { byRideId: {}, firstStreamDate: null };
 
     // Rolling 11-month window so each month name appears only once on X-axis
     const elevenMonthsAgo = new Date();
     elevenMonthsAgo.setMonth(elevenMonthsAgo.getMonth() - 11);
     elevenMonthsAgo.setDate(1); // start of that month
 
-    // Filter to workouts with eFTP in the window
     const rides = history
-      .filter(w => w.eFTP && parseDateLocal(w.date) >= elevenMonthsAgo)
+      .filter(w => parseDateLocal(w.date) >= elevenMonthsAgo)
       .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date));
 
-    if (rides.length === 0) return [];
-
-    // Group by calendar month → find max eFTP per month
+    // Group by calendar month → per month, prefer the highest estimated value; only fall
+    // back to legacy imported values (and only for rides before the first FIT stream).
     const monthMap = {};
     rides.forEach(w => {
+      const rideInfo = byRideId[w.id];
+      const estimated = rideInfo && rideInfo.eftp != null ? rideInfo.eftp : null;
+      const isLegacyEligible = w.eFTP && (firstStreamDate == null || w.date < firstStreamDate);
+
+      let value = null;
+      let source = null;
+      let rideName = null;
+      let peakDate = null;
+      if (estimated != null) {
+        value = estimated;
+        source = 'estimated';
+        rideName = rideInfo.peakRideName;
+        peakDate = rideInfo.peakRideDate;
+      } else if (isLegacyEligible) {
+        value = w.eFTP;
+        source = 'imported';
+        rideName = w.name || 'Workout';
+        peakDate = w.date;
+      } else {
+        return;
+      }
+
       const d = parseDateLocal(w.date);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (!monthMap[key] || w.eFTP > monthMap[key].eFTP) {
-        monthMap[key] = {
-          eFTP: w.eFTP,
-          rideName: w.name || 'Workout',
-          date: w.date,
-        };
+      const existing = monthMap[key];
+      // An estimated value always wins over an imported one for the same month, regardless
+      // of watts, and the highest value wins within the same source.
+      const shouldReplace = !existing
+        || (source === 'estimated' && existing.source !== 'estimated')
+        || (source === existing.source && value > existing.eFTP);
+      if (shouldReplace) {
+        monthMap[key] = { eFTP: value, rideName, peakDate, source };
       }
     });
 
@@ -1057,6 +1185,8 @@ export default function ProgressionTracker() {
         label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
         eFTP: entry.eFTP,
         rideName: entry.rideName,
+        source: entry.source,
+        peakDate: entry.peakDate,
       };
     });
 
@@ -1961,7 +2091,6 @@ export default function ProgressionTracker() {
         duration,
         name: formData.name,
         id: editingRide,
-        eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
         previousLevel,
         newLevel,
         change,
@@ -1995,7 +2124,7 @@ export default function ProgressionTracker() {
       }
 
       // Reset form
-      setFormData(getDefaultFormData(history));
+      setFormData(getDefaultFormData());
       setEditingRide(null);
       setShowLogRideModal(false);
       setShowHistoryModal(true);
@@ -2030,7 +2159,6 @@ export default function ProgressionTracker() {
         duration,
         name: formData.name,
         id: Date.now(),
-        eFTP: formData.eFTP ? parseInt(formData.eFTP) : null,
         previousLevel: currentLevel,
         newLevel: newLevel,
         change: primaryChange,
@@ -2086,7 +2214,7 @@ export default function ProgressionTracker() {
       setShowPostLogSummary(true);
 
       // Reset form
-      setFormData(getDefaultFormData(history));
+      setFormData(getDefaultFormData());
       setEditingRide(null);
     }
   };
@@ -2179,7 +2307,6 @@ export default function ProgressionTracker() {
       rideType: workout.rideType || 'Indoor',
       distance: workout.distance || 0,
       elevation: workout.elevation || 0,
-      eFTP: workout.eFTP || '',
       notes: workout.notes || '',
     });
 
@@ -2191,7 +2318,7 @@ export default function ProgressionTracker() {
   // Cancel editing
   const handleCancelEdit = () => {
     setEditingRide(null);
-    setFormData(getDefaultFormData(history));
+    setFormData(getDefaultFormData());
     setShowLogRideModal(false);
     setPendingFitDetail(null);
   };
@@ -2544,7 +2671,6 @@ export default function ProgressionTracker() {
   const copyForAnalysis = () => {
     const loads = calculateTrainingLoads();
     const recentWorkouts = history.slice(0, 7);
-    const latestEFTP = history.find(w => w.eFTP)?.eFTP;
     const daysToEvent = getDaysUntilEvent();
     const status = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
 
@@ -2584,7 +2710,7 @@ export default function ProgressionTracker() {
     const analysisText = `## Training Status - ${formatDateWithDay(toLocalDateStr(new Date()))}
 
 **Athlete Profile:**
-- FTP: ${currentFTP}W${latestEFTP ? ` | eFTP: ${latestEFTP}W` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
+- FTP: ${currentFTP}W${currentEftp ? ` | eFTP: ${currentEftp.value}W (est. best 20-min, 90d)` : ''}${daysToEvent !== null ? ` | Days to Event: ${daysToEvent}` : ''}
 
 **Training Loads:**
 - CTL (Fitness): ${loads.ctl}
@@ -2814,14 +2940,11 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
           {userProfile.weight > 0 && (
             <span> • {(currentFTP / (userProfile.weight / 2.20462)).toFixed(1)} W/kg</span>
           )}
-          {(() => {
-            // Get most recent eFTP from history
-            const latestEFTP = history.find(w => w.eFTP)?.eFTP;
-            if (latestEFTP) {
-              return <span> • eFTP: <span className="text-purple-400">{latestEFTP}W</span></span>;
-            }
-            return null;
-          })()}
+          {currentEftp && (
+            <span title={`Estimated from best 20-min power in the last 90 days (${currentEftp.peakRideName}, ${currentEftp.peakRideDate})`}>
+              {' '}• eFTP: <span className="text-purple-400">{currentEftp.value}W</span>
+            </span>
+          )}
         </p>
 
         {/* Post-Log Summary Modal */}
@@ -3530,16 +3653,16 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
               const weeklyTSSData = calculateWeeklyTSS(history);
               const weeklyHoursData = calculateWeeklyHours(history);
               const monthlyElevationData = calculateMonthlyElevation(history);
-              const eftpHistoryData = calculateEFTPHistory(history);
+              const eftpHistoryData = calculateEFTPHistory(history, eftpTimeline);
 
               const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;
               const currentWeekHours = weeklyHoursData.length > 0 ? weeklyHoursData[weeklyHoursData.length - 1].hours : 0;
               const currentMonthElevation = monthlyElevationData.length > 0
                 ? monthlyElevationData[monthlyElevationData.length - 1].elevation
                 : 0;
-              const latestEFTP = eftpHistoryData.length > 0
-                ? eftpHistoryData[eftpHistoryData.length - 1].eFTP
-                : null;
+              // "Latest" mirrors the page header's currentEftp so there's one current number,
+              // not the last chart month's peak.
+              const latestEFTP = currentEftp ? currentEftp.value : null;
 
               // Check if any data exists
               const hasData = weeklyTSSData.length > 0 || weeklyHoursData.length > 0 || monthlyElevationData.length > 0 || eftpHistoryData.length > 0;
@@ -3598,7 +3721,11 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                     <div className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
                       <p className="text-gray-300 mb-1">{data.label}</p>
                       <p className="text-purple-400 font-bold">{data.eFTP}W</p>
-                      <p className="text-gray-500 text-xs">{data.rideName}</p>
+                      <p className="text-gray-500 text-xs">
+                        {data.source === 'estimated'
+                          ? `Best 20-min effort: ${data.rideName} (${parseDateLocal(data.peakDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
+                          : 'Imported from intervals.icu'}
+                      </p>
                     </div>
                   );
                 }
@@ -3797,7 +3924,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                       <div className="flex justify-between items-center mb-3">
                         <h3 className="font-medium">eFTP Progress (1 Year)</h3>
                         <span className="text-sm text-gray-400">
-                          Latest: <span className="text-purple-400 font-bold">{latestEFTP}W</span>
+                          Latest: <span className="text-purple-400 font-bold">{latestEFTP != null ? `${latestEFTP}W` : '—'}</span>
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height={200}>
@@ -3829,7 +3956,20 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                             strokeWidth={2}
                             fillOpacity={1}
                             fill="url(#colorEFTP)"
-                            dot={{ fill: '#A855F7', strokeWidth: 2, r: 4 }}
+                            dot={(props) => {
+                              const isImported = props.payload?.source === 'imported';
+                              return (
+                                <circle
+                                  key={props.index}
+                                  cx={props.cx}
+                                  cy={props.cy}
+                                  r={4}
+                                  fill={isImported ? '#1F2937' : '#A855F7'}
+                                  stroke="#A855F7"
+                                  strokeWidth={2}
+                                />
+                              );
+                            }}
                             activeDot={{ r: 6, fill: '#A855F7', stroke: '#fff', strokeWidth: 2 }}
                           />
                         </AreaChart>
@@ -3840,7 +3980,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                   {weeklyChartView === 'eftp' && eftpHistoryData.length === 0 && (
                     <div className="text-center text-gray-400 py-8">
                       <p>No eFTP data available.</p>
-                      <p className="text-sm mt-2">Import rides with eFTP data from intervals.icu CSV.</p>
+                      <p className="text-sm mt-2">Import a FIT file that includes a 20-minute or longer effort.</p>
                     </div>
                   )}
                 </div>
@@ -4499,22 +4639,8 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
               </div>
             </div>
 
-            {/* Row 5: eFTP | RPE Slider */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">
-                  eFTP (W) <span className="text-gray-500 text-xs">(optional)</span>
-                </label>
-                <input
-                  type="number"
-                  value={formData.eFTP || ''}
-                  onChange={(e) => setFormData({ ...formData, eFTP: parseInt(e.target.value) || '' })}
-                  placeholder="e.g. 230"
-                  className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
-                  min="50"
-                  max="500"
-                />
-              </div>
+            {/* Row 5: RPE Slider */}
+            <div className="mb-4">
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
                   RPE: {formData.rpe} <span className="text-gray-500 text-xs">(Expected {formData.workoutLevel})</span>
@@ -4669,7 +4795,11 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                       <span>
                         {entry.workoutLevel != null ? `Level ${entry.workoutLevel}` : ''}
                         {entry.rpe != null ? ` • RPE ${entry.rpe}` : ''}
-                        {entry.eFTP && <span className="text-gray-400 ml-2">• eFTP {entry.eFTP}W</span>}
+                        {eftpTimeline.byRideId[entry.id]?.rideEstimate ? (
+                          <span className="text-gray-400 ml-2">• FTP est. {eftpTimeline.byRideId[entry.id].rideEstimate}W</span>
+                        ) : entry.eFTP ? (
+                          <span className="text-gray-400 ml-2">• eFTP {entry.eFTP}W</span>
+                        ) : null}
                         {!entry.zone && entry.rideType !== 'Outdoor' && <span className="text-yellow-400 ml-1">• Needs classification</span>}
                       </span>
                       {entry.previousLevel != null && entry.newLevel != null ? (
