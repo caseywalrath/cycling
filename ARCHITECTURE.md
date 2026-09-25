@@ -1,7 +1,10 @@
 # Architecture
 
-**As of V2 Phase 3 (Session 23).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
-Settings**. All data lives in one React context; screens are built from a small UI kit.
+**As of V2 Phase 4 (Session 24).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
+Settings**. All data lives in one React context; screens are built from a small UI kit. Rides,
+the Ride page, Log Ride and Settings now have their Phase 4 design (filters/search, a redesigned
+calendar, an import summary + manual-entry Log Ride, and Google Drive auto-sync). Progress still
+has its Phase 3 look; Phase 6 redesigns it.
 
 ## File Structure
 ```
@@ -24,17 +27,20 @@ src/
     ProgressionLevels.jsx    # zone level bars (Progress tab); tap → Workout Progression page
     TrainingCharts.jsx       # Hours / TSS / Elevation / eFTP charts with a SegmentedControl
     PowerSkillsCard.jsx      # radar + power bars + Rider Type sheet
-    ActivityCalendar.jsx     # monthly calendar (Rides tab)
-    RideHistoryList.jsx      # ride cards with Chart / Edit / Delete (Rides tab)
+    ActivityCalendar.jsx     # monthly calendar (Rides tab): zone-coloured ride dots, week-TSS
+                             #   column, day taps (V2 Phase 4)
+    RideRow.jsx              # one ride row in the Rides list (V2 Phase 4; replaces RideHistoryList)
     PostLogSummarySheet.jsx  # level before → after, trickle, TSS/IF/RPE
   screens/
     TodayScreen.jsx          # Today tab (the house style: later phases copy it)
-    RidesScreen.jsx          # calendar + ride history; ?filter=needs-zone
+    RidesScreen.jsx          # calendar, filter chips + search, ride list grouped by month
+                             #   (V2 Phase 4); ?filter=needs-zone
     ProgressScreen.jsx       # levels, charts, Power Skills, Workout progression row
-    SettingsScreen.jsx       # profile, event, sync & backup, reset levels
-    WorkoutDetailPage.jsx    # Ride page at #/ride/<id>
+    SettingsScreen.jsx       # profile (+ zone table, LTHR), event, sync & backup, old imported
+                             #   rides, reset levels, about (V2 Phase 4)
+    WorkoutDetailPage.jsx    # Ride page at #/ride/<id> (V2 Phase 4 rebuild)
     WorkoutProgressionPage.jsx # #/progress/workouts and #/progress/zone/<zoneId>
-    LogRideSheet.jsx         # Log / Edit ride form as a bottom sheet
+    LogRideSheet.jsx         # Log Ride v2: Import file / Enter manually (V2 Phase 4)
   lib/                       # pure helpers, no React
     dates.js                 #   toLocalDateStr, parseDateLocal, parseDuration, formatDateWithDay, DAYS_OF_WEEK
     zones.js                 #   ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, ZONE_BOUNDS,
@@ -109,7 +115,7 @@ No router library. `useHashRoute()` parses `location.hash` into
 | `history` | Array of ride objects (newest logged first) |
 | `currentFTP` | FTP (saved as `ftp`) |
 | `event` | `{ name, date, distance, targetCTL }` |
-| `userProfile` | `{ maxHR, restingHR, weight (lb), age, sex }` |
+| `userProfile` | `{ maxHR, restingHR, lthr, weight (lb), age, sex }` — `lthr` (Threshold HR) is optional, added V2 Phase 4, read by Phase 5's heart-rate TSS |
 | `intervalsFTP`, `vo2maxEstimates` | **Pass-through** (V2 §0.3): loaded, saved, exported, synced unchanged, never edited |
 | `powerCurveData` | Pass-through; still read by Power Skills until Phase 6 |
 | `exportedAt`, `lastSyncedAt` | Sync timestamps (see Google Drive Sync) |
@@ -123,6 +129,7 @@ No router library. `useHashRoute()` parses `location.hash` into
 | `formData`, `editingRide`, `pendingFitDetail` | The Log Ride form, the id being edited (null = new ride), and `{ stream, detection }` from a file import awaiting Save |
 | `isDriveSyncing`, `driveSyncStatus` | Sync button state; status clears after 5 s |
 | `eftpPromptedValue` | Highest eFTP the user has answered (device-local `localStorage['eftp-prompted-value']`) |
+| `hasUnsyncedChanges` | V2 Phase 4: true once a data change hasn't auto-synced yet (no valid Google token when the 3s debounce fired). Shown as a badge on the Settings tab; cleared on the next successful sync (auto or manual) |
 
 ### Derived (memoised)
 `effectiveLevels` (`applyDecay`), `eftpTimeline` / `currentEftp` (`buildEftpTimeline`), `loads`
@@ -143,6 +150,9 @@ PWA left open overnight doesn't show yesterday's numbers.
 | `saveProfile({ ftp, profile, resetLevels })` | Save Settings → Profile (caller validates FTP 100–500 and asks about resetting levels) | – |
 | `saveEvent(data)`, `deleteEvent()` | Event | – |
 | `resetLevels()` | All zones to 1.0, clears `lastWorkedDates` | – |
+| `oldImportedRideCount()` | Count of indoor, `source: 'imported'`, `zone == null`, not-yet-`historical` rides | number |
+| `hideOldImportedRides()` | Sets `historical: true` on those rides — V2 Phase 4's Settings "Stop asking" (caller confirms first) | – |
+| `showOldImportedRides()` | Clears `historical` on every ride that has it — "Show them again" | – |
 | `exportData()` | Download the backup file | filename |
 | `readBackupFile(file)` / `restoreBackup(parsed)` | Read a backup / replace local data with it (caller confirms in between) | parsed / ride count |
 | `syncWithDrive()` | The old `handleDriveSync` | sync result |
@@ -189,7 +199,7 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
 | `Card`, `SectionHeader` | Surface + section title (`subtitle`, `right`). `Card as="button"` for a whole-card tap |
 | `StatTile` | `label`, `sublabel`, `value`, `unit`, `delta` (▲ green / ▼ red; `tone="neutral"` for grey), `deltaLabel`, `valueColor`. Value has `data-value` |
 | `SegmentedControl` | `options=[{ value, label, color? }]`, `value`, `onChange` |
-| `Button` | `variant`: `primary` (green), `secondary`, `ghost`, `destructive`, `ghost-destructive`; `size`: `md`/`sm`; `block`. Min height 44px |
+| `Button` | `variant`: `primary` (green), `secondary`, `ghost`, `destructive`, `ghost-destructive`; `size`: `md`/`sm`; `block`; `rounded` (default `rounded-xl`, pass `rounded-full` for a pill — a class in `className` alone can't reliably override the base radius). Min height 44px |
 | `Chip` | Selectable pill; `color` tints it when selected |
 | `Toast` + `useToast()` | `toast(message, { tone: 'info' \| 'success' \| 'error', duration })`, top of screen, tap to dismiss |
 | `ConfirmSheet` + `useConfirm()` | `await confirm({ title, message, confirmLabel, cancelLabel, destructive })` → `true/false` |
@@ -221,35 +231,72 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
 7. **Copy for Claude** (secondary button; text format unchanged, `buildAnalysisText`).
 8. **＋ Log Ride** floats above the tab bar on Today and Rides (rendered by `Shell`).
 
-### Rides (`screens/RidesScreen.jsx`)
-Monthly calendar (unchanged look; day cells are 44px; tapping a ride day lists that day's rides
-with "Edit Ride →"), then **Ride history** (`RideHistoryList`, the old History modal cards, with
-labelled Chart / Edit / Delete buttons; Delete asks with a destructive ConfirmSheet). With
-`?filter=needs-zone` only the rides needing a zone are listed, with a "Show all rides" link.
+### Rides (`screens/RidesScreen.jsx`, V2 Phase 4 rebuild)
+1. **`ActivityCalendar`**: Monday-start month grid. Each ride day is a dot coloured by zone
+   (`rideDotColor`/`getZoneColor`); outdoor is teal (`#14B8A6`), an indoor ride still waiting for
+   a zone is grey (`#6B7280`), and a day with more than one ride is a two-tone split dot
+   (`DayDot`). An 8th column (`data-week-tss`) shows that week's total TSS, summed straight from
+   `history` regardless of which month is on screen. Tapping a single-ride day opens the Ride
+   page; a multi-ride day opens a small `Sheet` listing that day's rides; tapping an empty past
+   or today date calls `openLogRide(dateStr)` (Shell/`ShellContext`) to open Log Ride with that
+   date already filled in. A future empty date isn't tappable.
+2. **Filter chips** (`Chip`): All · Indoor · Outdoor · Needs zone (`ridesNeedingZone`, excludes
+   `historical` rides), plus a search box matching ride name/notes.
+3. **Ride list** (`RideRow`, replaces the old `RideHistoryList` cards): a 4px zone-coloured left
+   edge, name, short date, duration · TSS, and a second line — the interval label (indoor) or
+   distance/elevation (outdoor), or "Needs a zone" in yellow. Tapping a row opens the Ride page.
+   Grouped by calendar month with a sticky month header, most recent first, loaded 3 months at a
+   time with a "Show older rides" button so 150+ rides stay fast to render.
 
 ### Progress (`screens/ProgressScreen.jsx`)
 Progression level bars (tap a zone → `#/progress/zone/<id>`), the chart card (SegmentedControl:
 Hours · TSS · Elevation · eFTP), Power Skills (Rider Type opens a Sheet), and a "Workout
-progression" row → `#/progress/workouts`.
+progression" row → `#/progress/workouts`. Still its Phase 3 look; Phase 6 redesigns it.
 
-### Settings (`screens/SettingsScreen.jsx`)
-Cards, each with its own Save: **Profile** (FTP validated 100–500 with an inline error; if FTP
-changed, a ConfirmSheet asks whether to reset levels; other fields are a draft saved with the
-FTP), **Event** (Save; Delete with a ConfirmSheet), **Sync & backup** (Sync with Google Drive +
-status line, Export backup, Import backup → ConfirmSheet "This replaces all rides on this device
-(N) with M rides from the backup saved <date>"), **Progression levels** (Reset, confirmed).
+### Settings (`screens/SettingsScreen.jsx`, V2 Phase 4 rebuild)
+Cards, each with its own Save: **Profile** (FTP validated 100–500 with an inline error and a live
+zone-watt table underneath it, from `zoneRangeLabel`, updating as the FTP box is typed; if FTP
+changed, a ConfirmSheet asks whether to reset levels; Max HR, Resting HR, an optional **Threshold
+HR / LTHR** field — "leave blank to estimate from Max HR", read by Phase 5 — Weight, Age, Sex are
+a draft saved together with the FTP), **Event** (Save; Delete with a ConfirmSheet), **Sync &
+backup** (Sync with Google Drive; status line shows a sync result, "Unsynced changes"
+(`hasUnsyncedChanges`), or "Last synced …"; Export backup, Import backup → ConfirmSheet "This
+replaces all rides on this device (N) with M rides from the backup saved <date>"), **Old imported
+rides** (only shown when there are any: "Stop asking about N old imported rides", confirmed, sets
+`historical: true`; a "Show them again" link reverses it — see `ridesNeedingZone`), **Progression
+levels** (Reset, confirmed), **About** (app version from `package.json`, a link to the
+CHANGELOG).
 
 ### Pages and sheets
-- **Ride page** (`WorkoutDetailPage`, `#/ride/<id>`): the old Workout Detail modal full screen —
-  summary row, power/HR chart with shaded intervals, interval table, Edit ride button; header
-  action **Re-detect** (rides with a stream; result as a toast).
+- **Ride page** (`WorkoutDetailPage`, `#/ride/<id>`, V2 Phase 4 rebuild): header (name, date,
+  type/zone pill, interval label); a 3×2 `StatTile` stats grid (Duration, Distance, Elevation,
+  NP, TSS, IF), plus Avg HR when the ride has a stream with heart rate; the power/HR chart with
+  shaded intervals (unchanged, rides with a stream only); the interval table; notes; and an
+  action row — **Edit ride**, **Attach ride file** (runs the FIT/TCX backfill for *this* ride
+  directly, no date guessing — calls `importRideFile` then `attachRideFile`), and **Delete**
+  (destructive ConfirmSheet, then back to Rides). Header right action: **Re-detect** (rides with
+  a stream; result as a toast). Marked `{/* Phase 5: … */}` slots hold best efforts, time in
+  zones, heart-rate drift and efficiency factor once Phase 5 adds them.
 - **Workout Progression** (`WorkoutProgressionPage`): zone Chips, Work Minutes / Avg Watts
   SegmentedControl, trend chart, session list (tap → Ride page); header action **Re-scan**
   (ConfirmSheet first). No zone selected: the 5 most recent indoor workouts.
-- **Log Ride** (`LogRideSheet`): the old form, same fields, 16px inputs, sticky Save button.
-  Import FIT/TCX pre-fills it; with a same-day match (`findMatchingRideForImport`) a ConfirmSheet
-  offers **Attach to existing ride** (→ backfill, then the Ride page + toast) or **Save as a new
-  ride**. Outdoor greys out Zone/Completed; Indoor greys out Distance/Elevation.
+- **Log Ride v2** (`LogRideSheet`, V2 Phase 4 rebuild): two entry modes for a new ride, chosen
+  with a `SegmentedControl` — **Import file** (default) and **Enter manually**. No invented
+  defaults: `getDefaultFormData()` starts duration, normalized power and zone empty/unset; Save
+  stays disabled until duration > 0, normalized power > 0, and an indoor ride has a zone
+  (outdoor rides never need one, D5). Import mode shows a read-only summary card (date, type,
+  duration, distance/elevation, NP, estimated TSS/IF, detected interval label) with an "Edit
+  numbers" link that reveals the same editable fields Enter-manually mode uses. A same-day/
+  duration match (`findMatchingRideForImport`) shows an inline **Attach this file to it** / **Save
+  as a new ride** card in the sheet itself (replacing a ConfirmSheet popup for this one case) —
+  attaching runs the backfill and opens the Ride page with a toast; declining falls through to
+  the normal import summary. Fields common to both modes: Ride name (defaults to "Indoor
+  ride"/"Outdoor ride" at save time if left blank), Zone `Chip`s (indoor only, pre-selected by
+  detection), Completed all intervals (indoor only), Effort (RPE) as ten 44px tap targets (two
+  rows of 5) with the zone's expected effort ringed, and Notes. Editing an existing ride always
+  shows the full manual field set (attaching a file to an already-logged ride is done from the
+  Ride page's "Attach ride file" instead); saving returns to wherever the sheet was opened from
+  (Ride page or the Rides list), never to a fixed screen.
 - **Post-log summary** (`PostLogSummarySheet`): shown after a new ride is saved; Continue
   closes it and animates the level bar.
 
@@ -362,6 +409,14 @@ When editing an imported ride, the handler detects the zone change (`wasUnclassi
 
 Recovery zone (`zone: 'recovery'`) is excluded from progression level updates regardless of source.
 
+**`historical` (V2 Phase 4, optional, default false/absent)**: set on an indoor `source:
+'imported'`, zone-less ride by Settings → Old imported rides → "Stop asking about N old imported
+rides" (`hideOldImportedRides()`). It excludes the ride from `ridesNeedingZone()` — so it no
+longer appears in the Rides tab's "Needs zone" filter or counts toward the Today "N rides need a
+zone" alert — without deleting or reclassifying anything. "Show them again"
+(`showOldImportedRides()`) clears it. Every other read of a ride's zone/classification is
+unaffected.
+
 ## Interval Data (Session 18)
 Two optional fields on ride history entries, both `undefined` on rides that predate this feature — every consumer null-checks:
 ```javascript
@@ -394,9 +449,24 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 - **Backup file**: `casey-rides-backup.json` in user's Google Drive root
 - **Conflict resolution**: "Last write wins" based on `exportedAt` timestamp
 - **Sync flow**: Authenticate → find/download remote → compare `exportedAt` → push (local newer) or pull (remote newer) or skip (equal)
-- **UI**: Settings → Sync & backup → "Sync with Google Drive"; status line shows the result (clears after 5 s) or "Last synced …"
-- **State**: `isDriveSyncing`, `driveSyncStatus`, `exportedAt`, `lastSyncedAt` (all in `AppDataContext`)
+- **UI**: Settings → Sync & backup → "Sync with Google Drive"; status line shows the result (clears after 5 s), "Unsynced changes", or "Last synced …"
+- **State**: `isDriveSyncing`, `driveSyncStatus`, `exportedAt`, `lastSyncedAt`, `hasUnsyncedChanges` (all in `AppDataContext`)
 - **`markDataChanged()`**: Called on every data mutation to update `exportedAt` — the single source of truth for sync conflict resolution
+- **Auto-sync (V2 Phase 4, D3)**: after any data change, `AppDataContext` waits 3s (a debounced
+  `setTimeout`, reset on every further change, so a burst of edits triggers one sync, not one per
+  keystroke). When it fires: if `GoogleDriveSync.hasValidToken()`, it calls `syncWithDrive()`
+  silently and clears `hasUnsyncedChanges`; otherwise it sets `hasUnsyncedChanges = true`, shown
+  as a red badge on the Settings tab (`TabBar`'s `badges` prop). **A sign-in popup is never opened
+  automatically** — `hasValidToken()` is checked first, so the only code path that can start a new
+  OAuth flow (via `authenticate()`'s `requestAccessToken`) is a user tapping "Sync with Google
+  Drive" in Settings.
+- **`tokenExpiresAt`**: set in `google-drive-sync.js` wherever `accessToken` is set, to
+  `Date.now() + expires_in * 1000`. **`hasValidToken()`** is true with a token and more than 60s
+  left. `authenticate()` now treats an expired token as absent (before Phase 4 it reused a stale
+  token forever and failed on the next Drive API call) instead of skipping straight to
+  `requestAccessToken`.
+- On app open, the app never pulls automatically; a valid token surviving a reload is the only
+  case auto-sync can push without a tap, and pulling only ever happens from a user-initiated Sync.
 
 ## Key Functions
 | Function | Where | Purpose |

@@ -1,5 +1,140 @@
 # Changelog
 
+## Session 24 - V2 Phase 4: Rides, Ride Page, Log Ride, Settings and Auto-Sync (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 4. It redesigns the three tabs Phase 3 moved but
+didn't restyle — Rides, Settings, and the Ride page — and rewrites Log Ride from the ground up.
+It also turns on automatic Google Drive backups.
+
+### What you'll see on your iPhone
+
+- **Rides tab**:
+  - The monthly calendar now shows a coloured dot on every ride day — the colour matches the
+    training zone you rode (or teal for an outdoor ride, grey for an indoor ride still waiting
+    for a zone). A day with two rides shows a two-tone dot. A new column on the right of the
+    calendar shows each week's total TSS.
+  - Tap a ride day to open its chart. Tap a day with more than one ride to see a short list and
+    pick one. Tap an empty day in the past (or today) to log a ride on that date.
+  - New filter chips — **All · Indoor · Outdoor · Needs zone** — plus a search box that matches
+    a ride's name or notes.
+  - Your ride history below the calendar is grouped by month with the month name stuck to the
+    top as you scroll, and loads a few months at a time with a **Show older rides** button, so
+    it stays fast even with hundreds of rides.
+- **Ride pages** (tap any ride): a cleaner layout — the ride's name, date, type/zone and any
+  detected interval label at the top; a grid of Duration, Distance, Elevation, NP, TSS, IF (and
+  Avg HR when known); the same power/heart-rate chart and interval table as before; your notes;
+  and three buttons at the bottom: **Edit ride**, **Attach ride file** (add a FIT/TCX file's
+  chart to this exact ride — no more guessing which ride it belongs to), and **Delete ride**.
+- **Log Ride** is rebuilt:
+  - You now choose **Import file** or **Enter manually** at the top.
+  - Importing a file shows a short summary (date, duration, power, estimated TSS, detected
+    intervals) instead of a form full of numbers. Tap **Edit numbers** if you need to correct
+    anything.
+  - If you already logged a ride that day, you'll see "You already logged … — **Attach this
+    file to it** / **Save as a new ride**" right there in the sheet.
+  - Entering a ride by hand now starts with everything blank — no more surprise "60 minutes,
+    150 watts" left over from a previous ride. **Save** stays greyed out until you've filled in
+    a duration, a power number, and (for an indoor ride) picked a zone.
+  - Effort (RPE) is now ten tappable numbers instead of a slider, with the effort your zone
+    normally expects circled for you.
+- **Settings tab**:
+  - Your **Profile** now shows a table of your six training zones and their watt ranges right
+    under the FTP box, updating live as you type a new FTP. There's also a new optional
+    **Threshold HR / LTHR** field — leave it blank and the app estimates it from your Max HR.
+  - **Sync & backup** now says **"Unsynced changes"** if a change hasn't made it to Google Drive
+    yet (see auto-sync below).
+  - A new **Old imported rides** section lets you say "stop asking" about old rides from the
+    original import that never got a training zone — they'll stop showing up in "Needs zone"
+    and in the Today alert. Changed your mind? Tap "Show them again."
+  - A new **About** section shows the app's version number and a link to this changelog.
+  - The **Settings** tab in the bottom bar shows a small red badge when you have changes that
+    haven't synced yet.
+- **Google Drive auto-sync**: once you've signed in once (Settings → Sync with Google Drive),
+  the app now backs up automatically a few seconds after you make a change — log a ride, edit
+  one, change your profile — with no extra taps. If your sign-in has expired, nothing pops up
+  on its own; the Settings badge just lets you know there's something to sync next time you
+  open Settings and tap Sync.
+- The **＋ Log Ride** button is now a proper rounded pill (a small cosmetic bug left over from
+  the last update).
+
+### Small behaviour changes (on purpose)
+
+- A brand-new manual ride entry starts completely blank (no default 60 minutes / 150 watts / a
+  pre-picked zone), so you can't accidentally save a ride with numbers you never actually typed.
+- Attaching a FIT/TCX file to an *existing* ride is now done from that ride's own page
+  ("Attach ride file"), not by re-opening Log Ride and hoping it finds the right day.
+- A Google sign-in that's expired is now treated as signed-out (it used to be reused forever and
+  quietly fail on the next sync); the Sync button will ask you to sign in again when that happens.
+
+### Checks
+
+- Build passes.
+- **Regression check** (`tools/v2-check.mjs`): **no differences vs baseline** — same CTL 45,
+  ATL 33, TSB +12, "Transition", and the same imported test ride (54 min, NP 208, TSS 73,
+  zone `vo2max`, "3x8 @ 250W"), even though the Log Ride sheet and the Rides tab both changed
+  underneath it. The script now opens Log Ride and screenshots both entry modes (Import file,
+  Enter manually) before importing the test file — the file input is found the same way, since
+  Import file is still the sheet's first, default mode. No tap targets under 44px, no sideways
+  scrolling, no page errors.
+- `grep -rn "window.confirm\|alert(" src/`: only the one storage-full `alert()` remains (it must
+  stay one, by design — it fires when the app itself may be broken). No `window.confirm` anywhere.
+- **By-hand checks**, each confirmed against the saved data:
+  - Manual entry: Save stayed disabled with everything blank, with only a duration, and with a
+    duration + power but no zone (indoor); it enabled once all three were filled in. Switching to
+    Outdoor removed the zone requirement (and hid the zone chips) as expected.
+  - Importing an outdoor file also hid the zone chips.
+  - The "attach to an existing ride" card: choosing **Save as a new ride** fell through to the
+    normal import summary; choosing **Attach this file to it** added the file's chart to the
+    existing ride without changing its TSS or zone, created no duplicate, and opened its Ride
+    page.
+  - A test week with a 50-TSS ride and a 70-TSS ride showed **120** in that week's calendar
+    column.
+  - "Stop asking about old imported rides" removed them from the "Needs zone" filter and from
+    the Today alert count; "Show them again" brought both back.
+  - Editing a ride from its Ride page saved and returned to that same Ride page; editing a ride
+    opened from the Rides list did the same.
+  - Auto-sync logic, checked with a temporary test stub (removed before committing): a burst of
+    three quick profile edits produced exactly **one** sync call when a Google sign-in was
+    valid; with no valid sign-in, the Settings tab showed the unsynced-changes badge and no sync
+    was attempted.
+
+### Deferred to later phases (not changed here, on purpose)
+
+- Best efforts, time in zones, heart-rate drift and efficiency factor on the Ride page: Phase 5
+  (the page has marked slots waiting for them).
+- The Progress tab's look, and the new Today alerts (new best, ramp rate, "feels harder than
+  usual", max heart rate): Phase 6.
+- The progression-level ceiling, and the "assigning a zone to an old imported ride can move its
+  decay clock backwards" quirk noted in Session 23: Phase 7.
+- Google Drive auto-sync can't be tested against the real Google sign-in in this environment
+  (no network access to Google's servers); it was checked with a stub that stands in for
+  `GoogleDriveSync.hasValidToken()`/`sync()`, as the plan asks for. Please try a real sign-in and
+  a few edits on your phone and confirm Settings shows "Last synced …" afterward.
+
+### Files Changed
+- `src/components/ui/Button.jsx`, `src/Shell.jsx` — `Button` takes a `rounded` prop; the ＋ Log
+  Ride button is a real pill
+- `src/google-drive-sync.js` — `tokenExpiresAt`, `hasValidToken()`, `authenticate()` no longer
+  reuses an expired token
+- `src/state/AppDataContext.jsx` — `userProfile.lthr`; `hasUnsyncedChanges` + the 3s auto-sync
+  debounce; `hideOldImportedRides()`/`showOldImportedRides()`/`oldImportedRideCount()`;
+  `getDefaultFormData()` starts duration/NP/zone empty; ride name defaults at save time
+- `src/state/ShellContext.js` — `openLogRide(date)` can pre-fill the Log Ride date
+- `src/components/ActivityCalendar.jsx` — zone-coloured dots, week-TSS column, day-tap behaviour
+- `src/components/RideRow.jsx` — new (replaces `RideHistoryList.jsx`, removed)
+- `src/screens/RidesScreen.jsx` — filter chips, search, month-grouped lazy list
+- `src/screens/WorkoutDetailPage.jsx` — Ride page rebuild (stats grid, actions row, Phase 5 slots)
+- `src/screens/LogRideSheet.jsx` — Log Ride v2 (import/manual modes, inline attach card, RPE grid)
+- `src/screens/SettingsScreen.jsx` — zone table, LTHR, old imported rides, About
+- `package.json` — version `2.0.0-beta`
+- `tools/v2-check.mjs`, `tools/v2-baseline.json` — Log Ride sheet screenshots for both modes (no
+  baseline value changes)
+- `ARCHITECTURE.md` — Rides/Ride page/Log Ride/Settings sections rewritten for Phase 4; Google
+  Drive Sync section documents auto-sync; `historical` field documented
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 23 - V2 Phase 3: New Four-Tab Layout and Today Tab (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 3. The app gets a new layout: four tabs along the bottom of the screen, and a new **Today** tab that sums up where your training is. Everything else that was on the old long page is still there, moved into a tab. It mostly looks the same as before; Phases 4 and 6 redesign those parts.
