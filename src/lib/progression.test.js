@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  workoutLevelFromStructure, calculateNewLevel, applyDecay, rideFtpAtTime,
+  workoutLevelFromStructure, calculateNewLevel, applyDecay, advanceLastWorked, rideFtpAtTime,
 } from './progression.js';
 
 const FTP = 250;
@@ -172,6 +172,15 @@ describe('applyDecay asOf', () => {
     const lwd = { sweetspot: '2026-01-01' };
     expect(applyDecay(levels, lwd, '2026-01-10').sweetspot).toBe(5);
     expect(applyDecay(levels, lwd, '2026-01-22').sweetspot).toBeCloseTo(4.9, 5);
+  });
+});
+
+describe('advanceLastWorked', () => {
+  it('never moves a zone’s last-worked date backwards', () => {
+    const lwd = { tempo: '2026-05-10' };
+    expect(advanceLastWorked(lwd, 'tempo', '2026-03-01')).toBe(lwd);
+    expect(advanceLastWorked(lwd, 'tempo', '2026-06-01')).toEqual({ tempo: '2026-06-01' });
+    expect(advanceLastWorked(lwd, 'vo2max', '2026-01-01')).toEqual({ tempo: '2026-05-10', vo2max: '2026-01-01' });
   });
 });
 

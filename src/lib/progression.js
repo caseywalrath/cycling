@@ -255,3 +255,11 @@ export const calculateNewLevel = (currentLevel, workoutLevel, rpe, completed, zo
   return Math.min(10, P + Math.max(maintenance, progress));
 };
 
+// lastWorkedDates with `zone` moved to `date`, but never backwards: classifying or logging an
+// older ride must not rewind the decay clock (V2 Phase 7 fix). Returns the same object when
+// nothing changes.
+export const advanceLastWorked = (lastWorkedDates, zone, date) => {
+  const current = lastWorkedDates?.[zone];
+  if (!zone || !date || (current && current >= date)) return lastWorkedDates;
+  return { ...lastWorkedDates, [zone]: date };
+};

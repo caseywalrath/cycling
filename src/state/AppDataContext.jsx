@@ -5,7 +5,7 @@ import { toLocalDateStr, parseDuration } from '../lib/dates.js';
 import { parseFitFile, parseTcxFile, findMatchingRideForImport } from '../lib/rideFiles.js';
 import { EFTP_PROMPT_KEY, buildEftpTimeline } from '../lib/eftp.js';
 import { detectIntervals } from '../lib/intervals.js';
-import { applyDecay, calculateNewLevelLegacy as calculateNewLevel } from '../lib/progression.js';
+import { applyDecay, advanceLastWorked, calculateNewLevelLegacy as calculateNewLevel } from '../lib/progression.js';
 import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss, dailyLoadSeries, rampRate as computeRampRate } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
 import { MAXHR_PROMPT_KEY, readDismissals, writeDismissal } from '../lib/alerts.js';
@@ -469,8 +469,9 @@ export function AppDataProvider({ children }) {
           ...prev,
           [zone]: { change, date: formData.date },
         }));
-        // Update lastWorkedDates when zone is assigned/changed via edit
-        setLastWorkedDates(prev => ({ ...prev, [zone]: formData.date }));
+        // Update lastWorkedDates when zone is assigned/changed via edit (never backwards: an old
+        // imported ride must not rewind the decay clock — V2 Phase 7 fix)
+        setLastWorkedDates(prev => advanceLastWorked(prev, zone, formData.date));
       }
 
       // Reset form
@@ -548,7 +549,7 @@ export function AppDataProvider({ children }) {
 
       // Update lastWorkedDates for the primary zone only (trickle doesn't reset decay clock)
       if (affectsProgression) {
-        setLastWorkedDates(prev => ({ ...prev, [zone]: formData.date }));
+        setLastWorkedDates(prev => advanceLastWorked(prev, zone, formData.date));
       }
 
       // Set last logged workout for summary sheet
