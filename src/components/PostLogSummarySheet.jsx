@@ -75,11 +75,12 @@ export default function PostLogSummarySheet({ workout, onClose }) {
         <div className="grid grid-cols-3 gap-2 text-sm bg-gray-700/50 rounded-xl p-3 tabular-nums">
           <div>
             <div className="text-gray-400">TSS</div>
-            <div className="font-mono">{lastLoggedWorkout.tss}</div>
+            <div className="font-mono">{lastLoggedWorkout.tss}{lastLoggedWorkout.tssSource === 'hr' ? ' (HR)' : ''}</div>
           </div>
           <div>
             <div className="text-gray-400">IF</div>
-            <div className="font-mono">{lastLoggedWorkout.intensityFactor.toFixed(2)}</div>
+            {/* V2 Phase 5: an HR-only ride has no IF (§5.2) — show a dash instead of crashing. */}
+            <div className="font-mono">{lastLoggedWorkout.intensityFactor != null ? lastLoggedWorkout.intensityFactor.toFixed(2) : '—'}</div>
           </div>
           <div>
             <div className="text-gray-400">RPE</div>
