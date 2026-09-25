@@ -55,6 +55,8 @@ export const ZONE_BOUNDS = {
 
 // First zone (in ZONES order) whose [min, max) contains ratio.
 export const zoneForRatio = (ratio) => {
+  if (!Number.isFinite(ratio)) return ratio === Infinity ? 'anaerobic' : null;
+  if (ratio < 0) return 'recovery';
   for (const zone of ZONES) {
     const [min, max] = ZONE_BOUNDS[zone.id];
     if (ratio >= min && ratio < max) return zone.id;

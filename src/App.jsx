@@ -11,6 +11,13 @@ import { applyDecay } from './lib/progression.js';
 const STORAGE_KEY = 'cycling-progression-data-v2';
 const FTP = 235;
 
+// 1 → "1st", 22 → "22nd", 13 → "13th"
+const ordinal = (n) => {
+  const v = n % 100;
+  const suffix = (v >= 11 && v <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+  return `${n}${suffix}`;
+};
+
 export default function ProgressionTracker() {
   const [levels, setLevels] = useState(DEFAULT_LEVELS);
   const [displayLevels, setDisplayLevels] = useState(DEFAULT_LEVELS);
@@ -2254,7 +2261,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                     <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-lg">
                       <p style={{ color }} className="font-semibold text-sm">{d.label} — {d.skill}</p>
                       <p className="text-gray-300 text-sm">{d.watts}W</p>
-                      <p className="text-gray-400 text-xs">{d.percentile}th percentile</p>
+                      <p className="text-gray-400 text-xs">{ordinal(d.percentile)} percentile</p>
                     </div>
                   );
                 }
@@ -2375,7 +2382,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                               <div className="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 shadow-lg whitespace-nowrap">
                                 <p className="font-semibold text-xs" style={{ color }}>{d.label} — {d.skill}</p>
                                 <p className="text-gray-300 text-xs">{d.watts}W</p>
-                                <p className="text-gray-400 text-xs">{d.percentile}th percentile</p>
+                                <p className="text-gray-400 text-xs">{ordinal(d.percentile)} percentile</p>
                               </div>
                             </div>
                           </div>
