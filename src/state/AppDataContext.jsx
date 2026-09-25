@@ -417,15 +417,17 @@ export function AppDataProvider({ children }) {
   // ---------------- rides ----------------
 
   // V2 Phase 7: the level the model calculates for the ride in the Log Ride form, or null.
-  // Only for a ride with a file behind it (a fresh import, or an edited ride that has interval
-  // data or a stream); manual entries use the Workout level stepper instead.
+  // For a ride with a file behind it (a fresh import, or an edited ride that has interval data
+  // or a stream), and for any Endurance ride with a duration and NP: endurance is scored from
+  // duration at IF, so a manual 1 h Z2 ride earns the same as the imported one would. Other
+  // manual entries use the Workout level stepper instead.
   const formStructureLevel = (form = formData) => {
     const zone = form.zone;
     if (form.rideType === 'Outdoor' || !zone || zone === 'recovery' || !currentFTP) return null;
     const oldRide = editingRide ? history.find(w => w.id === editingRide) : null;
     const hasFile = !!pendingFitDetail || !!(oldRide && (oldRide.stream || oldRide.intervalData));
-    if (!hasFile) return null;
     const np = Number(form.normalizedPower) || 0;
+    if (!hasFile && !(zone === 'endurance' && np > 0 && parseDuration(form.duration) > 0)) return null;
     return workoutLevelFromStructure({
       rideType: form.rideType,
       zone,

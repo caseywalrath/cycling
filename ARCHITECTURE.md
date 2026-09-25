@@ -405,7 +405,7 @@ CHANGELOG).
   ride"/"Outdoor ride" at save time if left blank), Zone `Chip`s (indoor only, pre-selected by
   detection), **Workout level** (V2 Phase 7, indoor rides with a zone other than Recovery: a file
   import the model can score shows "This workout: Sweet Spot 5.8" read-only with a **Change**
-  link; manual entries, overrides and imports the model can't score get a − / + stepper, 1–10 in
+  link; manual entries (except Endurance, which is scored from duration and NP like an import), overrides and imports the model can't score get a − / + stepper, 1–10 in
   0.5 steps, pre-filled with 5 — `[data-workout-level]`), Completed all intervals (indoor only), Effort (RPE) as ten 44px tap targets (two
   rows of 5) with the zone's expected effort ringed, and Notes. Editing an existing ride always
   shows the full manual field set (attaching a file to an already-logged ride is done from the

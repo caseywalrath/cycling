@@ -86,9 +86,10 @@ Ride, the manual stepper, and the Recalculate preview (which it cancels, so noth
 
 ### Anything skipped?
 
-- Manual entries always use the stepper, including endurance rides, even though the app could
-  estimate an endurance level from duration and power alone. This follows the plan ("manual rides
-  get a stepper"), so you stay in control.
+- Manual entries use the stepper, **except Endurance**: a manual Endurance ride is scored from its
+  duration and power, just like an imported one, so an easy 1-hour Z2 ride earns about 3.8 either
+  way. (Changed in the orchestrator's review; before, manual Endurance rides defaulted to 5 and
+  out-scored imported ones.) "Change" still lets you set it yourself.
 - Very short efforts (under 90 seconds, like 30/30s) aren't picked up by interval detection, so
   those workouts show the stepper instead of a calculated level.
 - The Phase 6 leftovers (one hover-only tooltip on the Today 7-day dots, and the "Edit numbers"
