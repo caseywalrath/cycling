@@ -1,5 +1,99 @@
 # Changelog
 
+## Session 24 - V2 Phase 7: Progression Levels Rebuilt (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 7, the last phase of the 2.0 plan. It rebuilds
+how your **progression levels** (the 1–10 bars on the Progress tab) go up. The app version is
+now **2.0.0**.
+
+**The problem it fixes:** until now, every ride in a zone counted as the same fixed difficulty
+(for example, every Sweet Spot ride counted as a "6", whether it was 3x10 or 3x20). So a level
+mostly counted how many rides you'd logged, and once a zone got to about 2 above that fixed
+number, no workout could raise it any further.
+
+**What happens now:** every indoor ride earns its own **workout level** (1 = very easy, 10 =
+very hard, 5 = a typical session), worked out from what you actually rode:
+- **Interval workouts** are scored on how long the efforts were and how hard they were within
+  the zone. Long unbroken efforts count for more than the same minutes chopped into short
+  pieces. A short pause (a minute or less) in the middle of an effort doesn't split it.
+- **Endurance rides** are scored on the length of the whole ride and how steady-hard it was.
+- Your zone's level then moves toward that workout level. If the ride felt as hard as
+  expected (or easier), it moves further; if it felt harder than expected, it moves less. A ride
+  at or below your current level keeps it ticking over (+0.1) but doesn't push it up. The only
+  limit is 10.
+
+### What you'll see on your iPhone
+
+- **Log Ride, importing a file:** under the Zone buttons you'll see e.g. **"This workout:
+  Sweet Spot 6.6"** — the level the app calculated from the file. Tap **Change** if you think
+  it's wrong and set your own with the − / + buttons. "Use calculated level" puts it back.
+- **Log Ride, entering a ride by hand** (indoor, with a zone picked): a **Workout level** box
+  with − and + buttons (1 to 10, in half steps), starting at 5 = a typical session. Set it to
+  how hard the workout was. It's also shown if the app can't score an imported file.
+- **After saving**, the summary also shows "This workout: level X (from your intervals)" or
+  "(set by you)".
+- **Settings → Progression levels → "Recalculate levels from my rides"** (new): the app replays
+  all your indoor rides with a zone, oldest first, through the new scoring, starting every zone
+  at 1.0. You see a **Now → After** table for each zone *before* anything changes. Nothing
+  changes unless you tap **Use these levels**. Older rides that have no interval data count as
+  a typical session (level 5). Your rides themselves are never changed.
+- After recalculating, an **Undo recalculation** link puts your old levels back. It stays
+  until you log your next ride.
+
+**Examples of workout levels** (at an FTP of 231W):
+- An easy 1-hour endurance ride: about **3.9**. A 2-hour one: about **6**. A 3-hour one: about **7.5**.
+- A 3x12 sweet spot at 205W: about **5**. A 2x20 sweet spot at 206W: about **6.6**. A 3x20 at 206W: about **7.5**.
+- A 2x20 tempo at 176W: about **4**. A 2x30 tempo at 180W: about **6.4**.
+- A 5x3 VO2max at 261W: about **3.9**. A 5x5 at 254W: about **5.9**.
+
+These were tuned against your real ride history and agreed with you. At your request, endurance
+rides were set higher than the first draft.
+
+### Under the hood (for the curious)
+
+- The new math lives in `src/lib/progression.js`: `workoutLevelFromStructure()` (the workout
+  level), a new `calculateNewLevel()` (how far a level moves), and
+  `recalculateLevelsFromHistory()` (the replay behind "Recalculate"). Each constant has a
+  one-line comment, and the full model is described in `ARCHITECTURE.md` → "Progression model".
+- Rides now store `workoutLevel` and `workoutLevelSource` (`'structure'` = calculated from the
+  file, `'manual'` = set by you). Rides logged before this update aren't rewritten. A ride
+  without a source counts as `'legacy'`.
+- Decay (levels slowly drop after 2 weeks without training a zone), the trickle to neighbouring
+  zones, and "outdoor and recovery rides don't change levels" all work as before.
+- The Undo copy of your levels is kept only on this device (`levels-before-recalc`), like the
+  other "remember on this device" settings. It is removed when you log a ride, undo, reset
+  levels or restore a backup.
+- 25 new automated tests (109 in total). They cover the scoring rules: a longer, harder or extra
+  effort never lowers a workout's level, and levels always stay between 1 and 10. They also cover
+  the old "stuck" case: a Sweet Spot level of 7.5 plus a 3x20 at 92% at RPE 6 now goes up. And
+  they cover the replay (oldest first, decay, trickle, the FTP each ride was saved with, skipping
+  outdoor/recovery/hidden rides). All use made-up rides, never your data.
+
+### Bug fixed
+
+- **Assigning a zone to an old imported ride no longer moves that zone's "last trained" date
+  backwards.** Before, giving a zone to a ride from months ago made the app think you hadn't
+  trained that zone since then, so decay could kick in early. Logging a ride with a past date had
+  the same problem. The date now only ever moves forward. (This was carried over from Phase 5.)
+
+### Baseline change (the automated regression check)
+
+The synthetic "3x8 @ 250W" test file that the check imports now saves with a workout level of
+**6.7** and `workoutLevelSource: 'structure'`. These two new fields (`importedTcx.workoutLevel`,
+`importedTcx.workoutLevelSource`) are the only change to the baseline. Fitness, Fatigue, Form and
+every other number are unchanged. The check also now screenshots the calculated level on Log
+Ride, the manual stepper, and the Recalculate preview (which it cancels, so nothing changes).
+
+### Anything skipped?
+
+- Manual entries always use the stepper, including endurance rides, even though the app could
+  estimate an endurance level from duration and power alone. This follows the plan ("manual rides
+  get a stepper"), so you stay in control.
+- Very short efforts (under 90 seconds, like 30/30s) aren't picked up by interval detection, so
+  those workouts show the stepper instead of a calculated level.
+- The Phase 6 leftovers (one hover-only tooltip on the Today 7-day dots, and the "Edit numbers"
+  NP field on a heart-rate-only import) are unchanged.
+
 ## Session 24 - V2 Phase 6: Progress Tab and New Alerts (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 6. It redesigns the **Progress** tab around the

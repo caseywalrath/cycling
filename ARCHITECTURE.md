@@ -1,6 +1,6 @@
 # Architecture
 
-**As of V2 Phase 6 (Session 24).** A four-tab iPhone-first PWA: **Today, Rides, Progress,
+**As of V2 Phase 7 (Session 24) — version 2.0.0.** A four-tab iPhone-first PWA: **Today, Rides, Progress,
 Settings**. All data lives in one React context; screens are built from a small UI kit. Rides,
 the Ride page, Log Ride and Settings have their Phase 4 design (filters/search, a redesigned
 calendar, an import summary + manual-entry Log Ride, and Google Drive auto-sync). Phase 5 adds a
@@ -8,7 +8,9 @@ metrics engine — full-resolution power/HR data at import, heart-rate TSS, and 
 across-rides analysis. Phase 6 redesigns the Progress tab around that metrics engine (a Fitness
 chart, a training-volume "Zones" view, a power curve, an aerobic-fitness chart and a Records
 card) and adds four new Today alerts (new best, ramp rate, feels-harder-than-usual, max heart
-rate).
+rate). Phase 7 rebuilds progression levels on the real structure of each workout (a workout
+level from the ride's intervals, or a Log Ride stepper for manual entries) and adds Settings →
+"Recalculate levels from my rides" (see **Progression model** below).
 
 ## Testing (`npm test`)
 
@@ -74,7 +76,8 @@ src/
                              #   toOneHzSeries, bestsFromOneHz, hrStatsFromSeries, avgPowerFromSeries (Phase 5)
     eftp.js                  #   EFTP_* constants, bestAveragePower, estimateRideFtp, buildEftpTimeline
     intervals.js             #   interval-detection constants, detectIntervals and helpers
-    progression.js           #   applyDecay, calculateNewLevel
+    progression.js           #   applyDecay, workoutLevelFromStructure, calculateNewLevel,
+                             #   recalculateLevelsFromHistory (V2 Phase 7 — see Progression model)
     load.js                  #   calculateTSS, calculateIF, calculateTrainingLoads, getTrainingStatus,
                              #   estimateLthr, hrTss, dailyLoadSeries, rampRate (Phase 5)
     analysis.js              #   Phase 5: per-ride analysis — bestsForRide, timeInZones,
@@ -161,7 +164,8 @@ No router library. `useHashRoute()` parses `location.hash` into
 | `displayLevels`, `animatingZone` | Level-bar animation after the post-log summary closes (`animateLevel`) |
 | `recentChanges` | `{ zoneId: { change, date, trickle? } }` badges on the level bars; rebuilt from history on load |
 | `lastLoggedWorkout` | The ride just logged (post-log summary data; drives the animation) |
-| `formData`, `editingRide`, `pendingFitDetail` | The Log Ride form, the id being edited (null = new ride), and `{ stream, detection }` from a file import awaiting Save |
+| `formData`, `editingRide`, `pendingFitDetail` | The Log Ride form, the id being edited (null = new ride), and `{ stream, detection }` from a file import awaiting Save. V2 Phase 7: `formData.workoutLevel` (stepper value, null = not set) and `formData.workoutLevelSource` (`'manual'` once the user sets/overrides it) |
+| `recalcUndoAvailable` | V2 Phase 7: an "Undo recalculation" snapshot exists on this device (`levels-before-recalc`) |
 | `isDriveSyncing`, `driveSyncStatus` | Sync button state; status clears after 5 s |
 | `eftpPromptedValue` | Highest eFTP the user has answered (device-local `localStorage['eftp-prompted-value']`) |
 | `hasUnsyncedChanges` | V2 Phase 4: true once a data change hasn't auto-synced yet (no valid Google token when the 3s debounce fired). Shown as a badge on the Settings tab; cleared on the next successful sync (auto or manual) |
@@ -180,7 +184,11 @@ last90Days }`), `rideRecords` (`records()`), `maxHrObserved` (`observedMaxHr`).
 ### Actions
 | Action | Does | Returns |
 |---|---|---|
-| `saveRide()` | The old `handleLogWorkout`, logic unchanged: new ride (progression, trickle, `lastWorkedDates` for the primary zone, `recentChanges`, `lastLoggedWorkout`) or edit of `editingRide` (re-classification recalculates progression) | `{ kind: 'new' \| 'edit', entry }` |
+| `saveRide()` | The old `handleLogWorkout`: new ride (progression, trickle, `lastWorkedDates` for the primary zone — never moved backwards, `recentChanges`, `lastLoggedWorkout`) or edit of `editingRide` (re-classification recalculates progression). V2 Phase 7: the workout level comes from `resolveWorkoutLevel()` (manual level if set, else `formStructureLevel()`, else the stepper value / 5) and is stored as `workoutLevel` + `workoutLevelSource`; an edit that doesn't recalculate progression keeps the ride's stored values. A new ride also ends the recalculation Undo window | `{ kind: 'new' \| 'edit', entry }` |
+| `formStructureLevel(form?)` | V2 Phase 7: the level `workoutLevelFromStructure` gives the form's ride, only when a file is behind it (a fresh import, or an edited ride with `intervalData`/`stream`); else `null` | number \| null |
+| `previewRecalculation()` | V2 Phase 7 §7.4: `recalculateLevelsFromHistory(history, currentFTP)` plus `before` (current `effectiveLevels`) and `after` (the new levels with decay as of today). Changes nothing | `{ levels, lastWorkedDates, scored, typical, manual, before, after }` |
+| `applyRecalculation(preview)` | Snapshots `{ levels, lastWorkedDates }` into device-local `levels-before-recalc` (try/catch), then replaces `levels`/`lastWorkedDates`; rides are not touched; `markDataChanged()` | – |
+| `undoRecalculation()` | Restores the snapshot and removes it; `markDataChanged()` | `true/false` |
 | `startEditRide(id)` / `closeRideForm()` | Fill the form for editing / close without saving (edit: reset form; new: keep typing, drop `pendingFitDetail`) | `true/false` / – |
 | `deleteRide(id)` | Remove a ride (caller confirms first) | `true/false` |
 | `importRideFile(file)` | Parse .fit/.tcx, detect intervals, find a same-day match (`findMatchingRideForImport`) | Promise `{ parsed, detection, existingMatch }` |
@@ -189,7 +197,7 @@ last90Days }`), `rideRecords` (`records()`), `maxHrObserved` (`observedMaxHr`).
 | `redetectRide(id)`, `redetectCandidates()`, `redetectAll()` | Re-run interval detection on saved streams | `{ ok, message }` / rides / `{ ok, message }` |
 | `saveProfile({ ftp, profile, resetLevels })` | Save Settings → Profile (caller validates FTP 100–500 and asks about resetting levels) | – |
 | `saveEvent(data)`, `deleteEvent()` | Event | – |
-| `resetLevels()` | All zones to 1.0, clears `lastWorkedDates` | – |
+| `resetLevels()` | All zones to 1.0, clears `lastWorkedDates` (and any recalculation Undo snapshot) | – |
 | `oldImportedRideCount()` | Count of indoor, `source: 'imported'`, `zone == null`, not-yet-`historical` rides | number |
 | `hideOldImportedRides()` | Sets `historical: true` on those rides — V2 Phase 4's Settings "Stop asking" (caller confirms first) | – |
 | `showOldImportedRides()` | Clears `historical` on every ride that has it — "Show them again" | – |
@@ -358,7 +366,10 @@ backup** (Sync with Google Drive; status line shows a sync result, "Unsynced cha
 replaces all rides on this device (N) with M rides from the backup saved <date>"), **Old imported
 rides** (only shown when there are any: "Stop asking about N old imported rides", confirmed, sets
 `historical: true`; a "Show them again" link reverses it — see `ridesNeedingZone`), **Progression
-levels** (Reset, confirmed), **About** (app version from `package.json`, a link to the
+levels** (`#/settings/progression`; V2 Phase 7: **Recalculate levels from my rides** opens a
+ConfirmSheet with a Now → After table per zone (`[data-recalc-preview]`) and applies only on
+"Use these levels"; an **Undo recalculation** link shows while `recalcUndoAvailable`; then Reset,
+confirmed), **About** (app version from `package.json`, a link to the
 CHANGELOG).
 
 ### Pages and sheets
@@ -392,26 +403,87 @@ CHANGELOG).
   attaching runs the backfill and opens the Ride page with a toast; declining falls through to
   the normal import summary. Fields common to both modes: Ride name (defaults to "Indoor
   ride"/"Outdoor ride" at save time if left blank), Zone `Chip`s (indoor only, pre-selected by
-  detection), Completed all intervals (indoor only), Effort (RPE) as ten 44px tap targets (two
+  detection), **Workout level** (V2 Phase 7, indoor rides with a zone other than Recovery: a file
+  import the model can score shows "This workout: Sweet Spot 5.8" read-only with a **Change**
+  link; manual entries, overrides and imports the model can't score get a − / + stepper, 1–10 in
+  0.5 steps, pre-filled with 5 — `[data-workout-level]`), Completed all intervals (indoor only), Effort (RPE) as ten 44px tap targets (two
   rows of 5) with the zone's expected effort ringed, and Notes. Editing an existing ride always
   shows the full manual field set (attaching a file to an already-logged ride is done from the
   Ride page's "Attach ride file" instead); saving returns to wherever the sheet was opened from
   (Ride page or the Rides list), never to a fixed screen.
 - **Post-log summary** (`PostLogSummarySheet`): shown after a new ride is saved; Continue
-  closes it and animates the level bar.
+  closes it and animates the level bar. V2 Phase 7: also shows "This workout: level X (from your
+  intervals | set by you)".
 
 ## Key Constants
 ```javascript
 ZONES             // Training zone definitions (recovery → anaerobic), with colours
 DEFAULT_LEVELS    // Initial progression levels (all 1)
-ZONE_EXPECTED_RPE // Auto-assigned expected RPE / workout level by zone (3-9)
+ZONE_EXPECTED_RPE // Expected RPE by zone (3-9): rings the expected effort in Log Ride and sets how
+                  //   far a ride moves the level (V2 Phase 7). No longer used as a workout level.
 ZONE_ADJACENCY    // Zone neighbour map for the trickle effect (one hop, 20% each)
 STORAGE_KEY       // 'cycling-progression-data-v2' (state/AppDataContext.jsx)
 SCHEMA_VERSION    // 2 (state/AppDataContext.jsx), written to every saved object
 EFTP_PROMPT_KEY   // 'eftp-prompted-value' (device-local)
 ALERT_DISMISSALS_KEY // 'alert-dismissals' (device-local, V2 Phase 6 — lib/alerts.js)
 MAXHR_PROMPT_KEY  // 'maxhr-prompted-value' (device-local, V2 Phase 6 — lib/alerts.js)
+RECALC_UNDO_KEY   // 'levels-before-recalc' (device-local, V2 Phase 7 — state/AppDataContext.jsx)
 ```
+
+## Progression model (V2 Phase 7)
+
+Before Phase 7 every ride was treated as a fixed "workout level" per zone (`ZONE_EXPECTED_RPE`:
+Endurance 4, Sweet Spot 6, …), so levels mostly counted rides up to a ceiling about 2 above that
+constant. Now each ride earns a **workout level L** from what was actually ridden, and the zone's
+level moves toward it. Everything lives in `src/lib/progression.js` (pure functions, tested in
+`progression.test.js`); constants were calibrated against the user's real ride history and
+agreed with them (endurance retuned at their request).
+
+**Workout level — `workoutLevelFromStructure(ride, ftp)`** (null for outdoor, recovery,
+unclassified, or nothing scoreable):
+- **Endurance**: the whole ride, `L = 5 + 1.8·log2(minutes / 80) + 2·(IF − 0.65)/zoneWidth`
+  (1 h easy ≈ 3.8, 2 h ≈ 6, 3 h @ 0.68 ≈ 7.5, 5 h ≈ 8.4). Detected surges are ignored.
+- **Tempo / Sweet Spot / Threshold / VO2max / Anaerobic**: the ride's efforts at or above the
+  zone floor (−3% FTP tolerance). Each effort (from `intervalData.segments`, with pauses ≤ 60 s
+  merged so a dropout doesn't split a rep; else `sets`) scores `minutes² × 2^(intensity/1.7)`,
+  where intensity = 3 levels per zone-width above/below the zone's reference %FTP (capped ±2).
+  `L = 5 + 1.7·log2(score / referenceScore)`. Long unbroken efforts count for more than the same
+  minutes chopped up; doubling a session adds a fixed step. More reps, longer reps or more watts
+  never lower L.
+- Clamped to 1–10, one decimal. Returns null when there's no interval data for a non-endurance
+  zone, or no effort reached the zone — Log Ride then uses the stepper.
+
+| Reference (= level 5) | Session | Examples at FTP 231 |
+|---|---|---|
+| Endurance | 80 min @ IF 0.65 | 1 h @ 0.62 ≈ 3.9 · 2 h ≈ 6.1 · 3 h @ 0.68 ≈ 7.5 |
+| Tempo | 2x25 @ 76% | 2x20 @ 76% ≈ 4.0 · 2x30 @ 78% ≈ 6.4 |
+| Sweet Spot | 3x12 @ 89% | 2x20 @ 89% ≈ 6.6 · 3x20 @ 89% ≈ 7.5 · 3x20 @ 92% ≈ 8.2 |
+| Threshold | 3x10 @ 98% | 2x20 @ 97% ≈ 7.0 |
+| VO2max | 5x4 @ 111% | 5x3 @ 113% ≈ 3.9 · 5x5 @ 110% ≈ 5.9 |
+| Anaerobic | 8x1 @ 130% | — |
+
+**Level step — `calculateNewLevel(P, L, rpe, completed, zone)`**:
+- Completed and L > P: move a share of the gap toward L — 50% at or below the zone's expected
+  RPE, then 35% / 20% / 10% for 1 / 2 / 3+ points above — capped at +2 per ride.
+- Completed and L ≤ P: +0.1 if L is within 1 level of P and RPE ≤ expected, else no change.
+- Not completed: −0.5 if L ≤ P, else unchanged (the old rule).
+- No ceiling other than 10. A harder workout at the same RPE never gains less.
+
+Kept from before: decay (`applyDecay`) on the level before each ride, trickle (20% of a gain to
+lower neighbours, `trickleFor`), `lastWorkedDates` (now never moved backwards — `advanceLastWorked`),
+and D5 (outdoor and recovery rides never change levels).
+
+**Ride fields**: `workoutLevel` (number) and `workoutLevelSource` (`'structure'` — calculated
+from the file, `'manual'` — the Log Ride stepper or an override; missing = `'legacy'`, the old
+fixed value). Existing rides are never rewritten; an edit only writes these when it recalculates
+that ride's progression.
+
+**Recalculate levels from my rides** (Settings, §7.4): `recalculateLevelsFromHistory` replays
+every indoor ride with a zone (not recovery, not `historical`) oldest first, from 1.0, with decay
+between rides and trickle. Each ride is scored at the FTP it was saved with (NP ÷ IF, else the
+current FTP); a ride with a manual level keeps it; a ride the model can't score (old rides with no
+interval data) counts as a typical session, level 5. Preview first, apply on confirm, Undo
+until the next ride is logged.
 
 ## Zone Definitions (V2 Phase 2)
 
@@ -451,8 +523,13 @@ getDefaultFormData()     // Default Log Ride form values (state/AppDataContext.j
 bestAveragePower(stream, seconds) // Best average power over any window of `seconds` in a downsampled stream
 estimateRideFtp(ride)    // Best 20-min power x 0.95, or best 60-min power if higher; null if no stream/too short
 buildEftpTimeline(history, today) // { byRideId, current, firstStreamDate }
-applyDecay(levels, lastWorkedDates) // 14-day grace, -0.1/week (VO2max/Anaerobic 1.5x), floor max(1.0, level*0.5)
-calculateNewLevel(current, workoutLevel, rpe, completed) // progression step (Phase 7 replaces it)
+applyDecay(levels, lastWorkedDates, asOf?) // 14-day grace, -0.1/week (VO2max/Anaerobic 1.5x), floor max(1.0, level*0.5); asOf defaults to today
+workoutLevelFromStructure(ride, ftp)     // V2 Phase 7: 1.0-10.0 workout level, or null (see Progression model)
+calculateNewLevel(current, L, rpe, completed, zone) // V2 Phase 7 level step (see Progression model)
+recalculateLevelsFromHistory(history, fallbackFtp)  // V2 Phase 7 §7.4 replay → { levels, lastWorkedDates, scored, typical, manual }
+advanceLastWorked(lastWorkedDates, zone, date)       // move a zone's date forward only (never backwards)
+rideFtpAtTime(ride)                                   // NP ÷ IF: the FTP a ride was saved with, or null
+trickleFor(zone, change, newLevel, effectiveLevels)   // [{ zone, amount }] — 20% of a gain to lower neighbours
 downsampleRecords(records, binSeconds=10) // FIT records -> { binSeconds, power[]|null, hr[] }, null if no power AND no HR
 detectIntervals(stream, ftp, laps, { indoor }) // -> { segments, sets, category, label } or null
 calculateTrainingLoads(history, now) // { ctl, atl, tsb, weeklyTSS, twoWeekTSS, ctl14dAgo, atl14dAgo, tsb14dAgo }
@@ -631,7 +708,8 @@ needs, rather than a misleading number:
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 - `schemaVersion` (2, since V2 Phase 3), `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`, `lastWorkedDates`
 - The Export file and the Google Drive backup write the same fields (plus `syncVersion`; Export also `deviceId`). Files without `schemaVersion` (every backup made before Phase 3) load exactly as before — the loader never looks at it.
-- Device-local keys, not synced: `eftp-prompted-value`.
+- Device-local keys, not synced: `eftp-prompted-value`, `alert-dismissals`, `maxhr-prompted-value`,
+  `levels-before-recalc` (V2 Phase 7: the Undo snapshot for "Recalculate levels").
 
 **Load/save architecture** (in `AppDataProvider`): one load effect (runs once on mount with `try/catch`; also runs the Phase 2 outdoor-category migration and removes the old `intervals-icu-config` key) and one save effect (skips initial mount via the `isInitialMount` ref so defaults never overwrite saved data; the `setItem` call is wrapped in `try/catch` — a quota error shows the one remaining `alert()` asking the user to export a backup). Restoring a backup asks first (ConfirmSheet) and then applies the same field-by-field restore as before.
 
@@ -666,7 +744,9 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `calculateTSS(np, minutes, ftp)` | `lib/load.js` | Training Stress Score from NP and duration |
 | `calculateTrainingLoads(history)` | `lib/load.js` | CTL, ATL, TSB (+ 14-day-ago values) |
 | `getTrainingStatus(...)` | `lib/load.js` | The one training status (TSB% zones, low-fitness override, transition detection) |
-| `calculateNewLevel()` | `lib/progression.js` | Progression algorithm (expected vs actual RPE) |
+| `workoutLevelFromStructure()` | `lib/progression.js` | V2 Phase 7: workout level (1–10) from a ride's intervals, or endurance duration at IF |
+| `calculateNewLevel()` | `lib/progression.js` | V2 Phase 7: level step toward the workout level, scaled by RPE vs expected |
+| `recalculateLevelsFromHistory()` | `lib/progression.js` | V2 Phase 7: replay every classified indoor ride to rebuild levels |
 | `saveRide()` (was `handleLogWorkout`) | `AppDataContext` | Save new or edited ride — trickle to adjacent zones, `lastWorkedDates` |
 | `syncWithDrive()` (was `handleDriveSync`) | `AppDataContext` | Google Drive sync (push/pull based on `exportedAt`) |
 | `markDataChanged()` | `AppDataContext` | Update `exportedAt` on any data mutation |
