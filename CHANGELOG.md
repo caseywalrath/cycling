@@ -1,5 +1,33 @@
 # Changelog
 
+## Session 23 - V2 Phase 1: Remove intervals.icu and Tidy the Code (2026-09-25)
+
+### What you'll see on your iPhone
+- Almost nothing, on purpose. The only visible change: the links at the bottom of the page now read **Import · Export … Reset Levels**. "Paste CSV" and "Import Power" are gone.
+
+### Removed: everything intervals.icu
+- **Security fix:** the intervals.icu API key was written into the app's code and published with the live site. It's now deleted from the code, and the app also deletes the saved copy from your phone the next time it opens (`localStorage['intervals-icu-config']`).
+- **Action for you:** deleting the key from the code does **not** delete it from the project's history on GitHub, where anyone can still read it. Revoke it in intervals.icu (**Settings → Developer**) and create a new one if you ever need it. Do this even if you think you already have.
+- Also removed: the intervals.icu sync screen, the CSV paste import, the power-curve import, the VO2max estimator that relied on intervals.icu, the old "your FTP went up" pop-up, the cloud-sync help screen, and the intervals.icu ID tag in Ride History. None of these could still be reached in normal use.
+- **Nothing you saved is lost.** Rides imported from intervals.icu keep every field. The old `intervalsFTP`, `vo2maxEstimates` and `powerCurveData` values are still loaded, saved, exported and synced unchanged. The Power Skills card still reads the saved power curve (Phase 6 replaces it).
+- **Small fix:** Export was leaving out `vo2maxEstimates`, so a backup file didn't carry them. It now includes them.
+
+### Code tidy-up (no behaviour change)
+- 30 helper functions and constants moved out of `src/App.jsx` into six new files under `src/lib/` (`dates`, `zones`, `rideFiles`, `eftp`, `intervals`, `progression`). They were copied exactly, and a line-by-line comparison showed nothing changed.
+- `src/App.jsx`: 5,353 → 3,425 lines.
+
+### Checks
+- Build passes. Regression check (`tools/v2-check.mjs`): **no differences vs baseline**, no page errors.
+- A search for the API key and athlete ID in `src/` finds nothing.
+
+### Files Changed
+- `src/App.jsx` — intervals.icu code removed, helpers moved out, Export includes `vo2maxEstimates`
+- `src/lib/dates.js`, `zones.js`, `rideFiles.js`, `eftp.js`, `intervals.js`, `progression.js` — new
+- `ARCHITECTURE.md` — file structure, import sources, state, functions, layout
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 22 - V2 Review and Implementation Plan (2026-09-25)
 
 ### Planning only — no app code changed

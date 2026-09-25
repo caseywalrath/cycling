@@ -3,7 +3,14 @@
 ## File Structure
 ```
 src/
-  App.jsx              # Single-file application (~4900 lines)
+  App.jsx              # Main component, ProgressionTracker (~3,400 lines)
+  lib/                 # Pure helpers, no React (V2 Phase 1)
+    dates.js           #   toLocalDateStr, parseDateLocal, parseDuration, formatDateWithDay, DAYS_OF_WEEK
+    zones.js           #   ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, ZONE_POWER_RATIO_RANGES, categoryForRatio
+    rideFiles.js       #   parseFitFile, buildRideFromRecords, parseTcxFile, downsampleRecords, calculateNormalizedPower
+    eftp.js            #   EFTP_* constants, bestAveragePower, estimateRideFtp, buildEftpTimeline
+    intervals.js       #   interval-detection constants, meanOf, adaptiveWorkThreshold, mergeLapBlocks, buildIntervalLabel, detectIntervals
+    progression.js     #   applyDecay
   main.jsx             # React entry point
   index.css            # Tailwind directives
   google-drive-sync.js # Google Drive OAuth & sync module
@@ -16,11 +23,11 @@ vite.config.js         # Vite + PWA config (base: /cycling/)
 ```
 
 ## Component Architecture
-Single component (`ProgressionTracker`) with modal-based navigation. No component splitting - all UI in one file.
+Single component (`ProgressionTracker`, in `src/App.jsx`) with modal-based navigation. All UI is in that one component; pure helper functions and constants live in `src/lib/` and are imported.
 
 ### UI Sections (rendered conditionally)
 - **Main View**: Dashboard with metrics cards, progression levels, charts
-- **Modals**: Log Ride, History, Settings, Profile, Event, CSV Import, intervals.icu Sync, Workout Detail, Workout Progression
+- **Modals**: Log Ride, History, Post-Log Summary, Profile, Event, Rider Type, Workout Detail, Workout Progression
 
 ## State Management
 All state via `useState` hooks. No external state library.
@@ -34,13 +41,15 @@ All state via `useState` hooks. No external state library.
 | `lastWorkedDates` | `{ zoneId: 'YYYY-MM-DD' }` — when each zone was last directly trained (decay clock) |
 | `history` | Array of ride objects |
 | `currentFTP` | User's FTP setting |
-| `intervalsFTP` | Legacy eFTP from intervals.icu (unused by current eFTP calculation; kept only for old saved data / Drive sync round-tripping) |
+| `intervalsFTP` | Legacy eFTP from intervals.icu. Pass-through only: loaded, saved, exported and synced unchanged, never edited (V2 Phase 1) |
+| `vo2maxEstimates` | Legacy VO2max estimates. Pass-through only, same as `intervalsFTP` |
+| `powerCurveData` | Power curve imported from intervals.icu in the past. Nothing writes it any more; still read by the Power Skills card |
 | `eftpTimeline` | `useMemo` — `buildEftpTimeline(history, new Date())` (Session 20). `{ byRideId, current, firstStreamDate }` — see "eFTP Estimation" below |
 | `currentEftp` | `eftpTimeline.current`, i.e. `{ value, peakRideName, peakRideDate } \| null` — the live eFTP shown in the header and used by the FTP-update prompt |
 | `eftpPromptedValue` | The highest eFTP value already offered to the user via the FTP-update prompt (device-local, `localStorage['eftp-prompted-value']`) — prevents re-prompting for the same or a lower estimate |
 
 ### UI State
-Modal visibility: `showLogRideModal`, `showHistoryModal`, `showIntervalsSyncModal`, etc.
+Modal visibility: `showLogRideModal`, `showHistoryModal`, `showProfileModal`, `showEventModal`, etc.
 
 ### Form State
 | State | Purpose |
@@ -76,7 +85,7 @@ STORAGE_KEY     // localStorage key: 'cycling-progression-data-v2'
 DAYS_OF_WEEK    // Day name lookup array (Sunday → Saturday)
 ```
 
-## Utility Functions (module-level)
+## Utility Functions (`src/lib/`)
 ```javascript
 toLocalDateStr(date)     // YYYY-MM-DD using local timezone (replaces toISOString)
 parseDateLocal(dateStr)  // Parse "YYYY-MM-DD" as local midnight (avoids UTC off-by-one)
@@ -118,25 +127,25 @@ power streams (`ride.stream`). See `EFTP_ESTIMATE_PLAN.md` for the original desi
   — manually editing FTP never triggers it. Never prompts to lower FTP.
 - **Legacy `ride.eFTP`** (from CSV import or the old intervals.icu API sync) is never deleted
   or rewritten. It still feeds the eFTP Progress chart for months before the first FIT-based
-  estimate exists (see chart specifics below), and the CSV importer still writes it.
+  estimate exists (see chart specifics below), but nothing writes it any more (the CSV importer was removed in V2 Phase 1).
 - **Known limitation**: the estimate is only as good as the hardest effort in the last 90 days.
   ERG/sweet-spot/threshold work (e.g. 2x20 @ 95% FTP) produces an eFTP *below* true FTP
   (0.95 x 0.95 ~= 90%). A real 20-minute test or a long hard climb gives the most accurate
   reading. This is why the prompt only ever offers to raise FTP.
 
 ## Data Import Sources
-1. **intervals.icu API** - Direct sync via athlete ID + API key
-2. **CSV paste** - Manual paste from intervals.icu export
-3. **FIT file upload (Session 16)** - "Import FIT File" button inside the Log Ride modal only. Parses `.fit` files client-side via the `fit-file-parser` npm package (`parseFitFile()`). Pre-fills Date, Duration, Normalized Power, Distance, Elevation, and Ride Type (Indoor/Outdoor, detected from GPS presence) into `formData`. Unlike the two bulk import sources below, this is not a separate unclassified ride source — it never sets Zone, Ride Name, or RPE, so the ride is saved through the normal `handleLogWorkout` path as `source: 'manual'` once the user fills in the rest and hits Save.
+The intervals.icu API sync, CSV paste import and power-curve CSV import were removed in V2 Phase 1 (the API key had been hard-coded and published). Rides already imported from them keep all their fields. On load, the app deletes the old saved `intervals-icu-config` key from localStorage.
+
+1. **FIT file upload (Session 16)** - "Import FIT File" button inside the Log Ride modal only. Parses `.fit` files client-side via the `fit-file-parser` npm package (`parseFitFile()`). Pre-fills Date, Duration, Normalized Power, Distance, Elevation, and Ride Type (Indoor/Outdoor, detected from GPS presence) into `formData`. Unlike the old bulk imports, this is not a separate unclassified ride source — it never sets Zone, Ride Name, or RPE, so the ride is saved through the normal `handleLogWorkout` path as `source: 'manual'` once the user fills in the rest and hits Save.
    **TCX (Session 21)**: the same button (now "Import FIT/TCX File") also accepts `.tcx`. `parseTcxFile(text)` reads the XML with the browser's built-in `DOMParser` (no dependency), maps each `<Trackpoint>` to FIT record field names (`timestamp`, `power`, `heart_rate`, `altitude`, `position_lat/long`, `distance`) and laps to `{ total_timer_time, avg_power, avg_heart_rate }`, then goes through the same `buildRideFromRecords()` as FIT — so stream, interval detection, backfill, eFTP and charts are identical. A trackpoint with no `<Watts>` counts as **0W** (TrainerDay omits power while coasting rather than writing 0). TCX has no NP field, so NP is always calculated from the power samples.
 
-**Important (Session 5)**: CSV/API imports do NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts. FIT file upload (above) is exempt from this because it never attempts zone classification at all.
+**Important (Session 5)**: the old CSV/API imports did NOT classify rides into zones or update progression levels. Imported rides have `zone: null` and `source: 'imported'`. The user must edit each ride in Ride History to assign a zone, at which point progression is calculated. This is intentional — NP-based auto-classification was unreliable for interval workouts. FIT file upload (above) is exempt from this because it never attempts zone classification at all.
 
 **Interval detection exception (Session 18)**: FIT import now also pre-selects the Zone field to the category `detectIntervals()` derives from the ride's actual interval structure (power segments vs. FTP). This is a narrow, explicitly agreed exception to the Session 5 rule above — the user still confirms/adjusts the Zone before Save, and it's structural detection, not the rejected NP-based guessing.
 
 ## Ride Source Model
 Every ride entry has a `source` field:
-- `'imported'` — From CSV or intervals.icu API. Has `zone: null`, no progression data.
+- `'imported'` — From the old CSV or intervals.icu API imports (removed in V2 Phase 1). Has `zone: null`, no progression data.
 - `'manual'` — Logged or classified by user. Has a zone, progression levels calculated.
 - `null`/missing — Legacy rides from before Session 5. Treated as classified (they have zone data from the old auto-classification logic).
 
@@ -163,6 +172,7 @@ Both fields live inside the same `history` entries and round-trip through the ex
 ## Persistence
 Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 - `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`, `lastWorkedDates`
+- The Export file writes the same fields (plus `syncVersion`, `deviceId`). `vo2maxEstimates` was missing from Export before V2 Phase 1.
 
 **Load/save architecture**: One load effect (runs once on mount with `try/catch`) and one save effect (skips initial mount via `isInitialMount` ref to prevent overwriting localStorage with empty defaults before state is populated; the `setItem` call itself is wrapped in `try/catch` since Session 18 — a quota error alerts the user to export a backup instead of silently failing). FTP is included in the main save — no separate FTP effects.
 
@@ -184,8 +194,6 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `handleLogWorkout()` | Save new or edited ride — applies trickle to adjacent zones, updates `lastWorkedDates` |
 | `handleDriveSync()` | Google Drive sync (push/pull based on exportedAt) |
 | `markDataChanged()` | Update exportedAt timestamp on any data mutation |
-| `syncFromIntervals()` | Fetch rides from intervals.icu API |
-| `importCSVData()` | Parse and import CSV data |
 | `calculateEFTPHistory(history, eftpTimeline)` | eFTP monthly peaks (11-month rolling window). Per month, prefers the highest calculated (`eftpTimeline`) estimate; falls back to legacy `ride.eFTP` only for months before `firstStreamDate` (Session 20) |
 | `parseFitFile(arrayBuffer)` | Parses a `.fit` file into Log Ride form field values (date, duration, NP, distance, elevation, ride type) |
 | `parseTcxFile(text)` | Parses a `.tcx` file into the same shape as `parseFitFile()`; missing `<Watts>` = 0W (Session 21) |
@@ -253,21 +261,20 @@ All four charts use Recharts `<AreaChart>` inside `<ResponsiveContainer>` (heigh
 1. **Header bar**: App title, FTP/W·kg/eFTP display (eFTP now the calculated `currentEftp.value`, Session 20; hidden when null), Log Ride (green), Sync (blue), Event, Profile buttons. Sync status message shown below header when active.
 2. **Progression Level bars**: One per zone (excludes Recovery), with recent change badges
 3. **Charts**: Tabbed — Weekly Hours, Weekly TSS, Elevation, eFTP History
-4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width), requires power curve CSV import. **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.
+4. **Power Skills card**: Radar chart (3/5 width) + horizontal power bars (2/5 width). Shown only when saved `powerCurveData` exists (from an old intervals.icu import; the importer was removed in V2 Phase 1). **Rider Type** button (top-right) shows phenotype derived from Sprint/Attack/Climb percentile averages (6 types: Sprinter, Puncheur, Rouleur, Time Trialist, Climber, All-Rounder). Click opens explanation modal.
 5. **Training Load cards**: CTL / ATL / TSB in a 3-column grid
 6. **Training Summary + Training Status** (side-by-side, 2-column grid): Left: `TSS [7d] [14d] [28d]` and `Longest (30d)`. Right: Training Status badge (color-coded pill with TSB%) and, below it, the **Copy for Claude** button (moved here in Session 17). Uses TSB% zones: Transition >+25%, Fresh +5–25%, Grey Zone -10–+5%, Optimal -30–-10%, High Risk <-30%. Low fitness override (CTL<35) shows Building states instead.
 7. **Monthly Activity Calendar**: Strava-style month grid (Mon-start). Navigation arrows to scroll months. Ride days show solid blue circle with bike SVG icon; no-ride days show gray outline with day number. Today highlighted with blue border/ring. Adjacent-month days faded.
 8. **Fitness Progress bar**: CTL toward target 100. Shows `Days to Event: X | CTL Target: 80-100`
 9. **Ride History button**: Full-width, opens History modal
 10. **Workout Progression button** (Session 18): Full-width, directly below Ride History, opens the Interval Progression modal
-11. **Bottom action bar**: Import | Export | Paste CSV | Import Power (left) — Reset Levels (right, subtle text link)
+11. **Bottom action bar**: Import | Export (left) — Reset Levels (right, subtle text link)
 
 ### Modal system
 All secondary views are modals (`fixed inset-0 z-50`). Clicking the backdrop (outside the modal) closes it (via `onClick` on backdrop + `stopPropagation` on inner content). Key modals:
 - **Log Ride** (`showLogRideModal`): Also used for editing — `editingRide` state holds the ID. Outdoor rides grey out Zone/Completed; Indoor greys out Distance/Elevation. Form closes immediately on Save. Since Session 18, a FIT import that detects intervals shows a confirmation panel under the Import FIT File button (`pendingFitDetail`) before Save.
 - **Ride History** (`showHistoryModal`): Scrollable list with edit/delete per ride. Since Session 18, entries with `stream`/`intervalData` show a "📊" button (opens Workout Detail) and the detected interval label as a tag.
 - **Post-Log Summary** (`showPostLogSummary`): Shows progression change after logging
-- **CSV Import** (`showCSVImport`): Paste textarea for intervals.icu CSV
 - **Profile** (`showProfileModal`): Weight, HR, age settings
 - **Event** (`showEventModal`): Goal event configuration
 - **Workout Detail** (`showWorkoutDetail`, Session 18): Power/HR timeline chart (Recharts `ComposedChart`) with detected intervals shaded via `ReferenceArea`, plus an interval table. Opened from Ride History's 📊 button, the Progression modal's session list, or automatically after a FIT backfill. Header carries a **🔍 Re-detect** button (Session 19) that re-runs detection on the ride's saved stream.
