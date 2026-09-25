@@ -1,4 +1,6 @@
 import { parseDateLocal, toLocalDateStr } from './dates.js';
+import { ZONES } from './zones.js';
+import { timeInZones } from './analysis.js';
 
 // Chart data builders for the Progress tab's Hours / TSS / Elevation / eFTP charts.
 // Moved verbatim from App.jsx in V2 Phase 3 (only the indentation and `export` changed).
@@ -207,4 +209,50 @@ export const calculateEFTPHistory = (history, eftpTimeline) => {
   });
 
   return eftpData;
+};
+
+// V2 Phase 6 §6.1.3 — weekly time-in-zones for the Progress tab's "Zones" training-volume
+// chart: minutes per zone, summed per Monday-start week, over the last `weeks` weeks.
+// Rides with power data only (timeInZones needs a stream + FTP); a ride without one is
+// silently skipped, exactly like the note shown under the chart.
+export const weeklyTimeInZones = (history, ftp, weeks = 12) => {
+  if (!history || history.length === 0 || !ftp) return [];
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const startMonday = new Date(today);
+  startMonday.setDate(startMonday.getDate() - ((startMonday.getDay() + 6) % 7) - (weeks - 1) * 7);
+
+  const buckets = {};
+  for (let i = 0; i < weeks; i++) {
+    const monday = new Date(startMonday);
+    monday.setDate(monday.getDate() + i * 7);
+    const key = toLocalDateStr(monday);
+    const totals = {};
+    ZONES.forEach(z => { totals[z.id] = 0; });
+    buckets[key] = { weekStart: key, label: monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), ...totals, rides: 0 };
+  }
+
+  history.forEach(w => {
+    if (!w.stream || !w.stream.power) return;
+    const rideDate = parseDateLocal(w.date);
+    if (rideDate < startMonday || rideDate > today) return;
+    const monday = new Date(rideDate);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const key = toLocalDateStr(monday);
+    const bucket = buckets[key];
+    if (!bucket) return;
+    const zoneSeconds = timeInZones(w, ftp);
+    if (!zoneSeconds) return;
+    let any = false;
+    Object.entries(zoneSeconds).forEach(([zoneId, seconds]) => {
+      if (seconds > 0) {
+        bucket[zoneId] += Math.round((seconds / 60) * 10) / 10;
+        any = true;
+      }
+    });
+    if (any) bucket.rides += 1;
+  });
+
+  return Object.keys(buckets).sort().map(k => buckets[k]);
 };

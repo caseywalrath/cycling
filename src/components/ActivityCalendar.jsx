@@ -1,26 +1,37 @@
 import React, { useMemo, useState } from 'react';
-import { ZONES } from '../lib/zones.js';
+import { ZONES, getZoneColor, getZoneName } from '../lib/zones.js';
 import { toLocalDateStr, formatDateWithDay } from '../lib/dates.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
+import { navigate } from '../state/useHashRoute.js';
+import { Sheet, Button } from './ui/index.js';
 
-// Monthly activity calendar (Monday start). Re-homed from the old main page to the top of the
-// Rides tab in V2 Phase 3, without redesign (Phase 4 redesigns it). Day cells and arrows are
-// now 44px tap targets.
+// Monthly activity calendar (Monday start) — V2 Phase 4 redesign.
+//   - each ride day is a dot coloured by zone (outdoor = teal, unclassified indoor = grey);
+//     a day with more than one ride is a two-tone dot;
+//   - an 8th column shows that week's total TSS;
+//   - tapping a single-ride day opens the Ride page; a multi-ride day opens a small sheet
+//     listing that day's rides; tapping an empty past/today date opens Log Ride with that
+//     date filled in.
 
-// Calendar: generate day objects for a month grid (Monday-start)
-const getCalendarDays = (year, month) => {
+const OUTDOOR_DOT = '#14B8A6';       // teal — outdoor rides aren't filed under a zone (D5)
+const UNCLASSIFIED_DOT = '#6B7280';  // grey — indoor ride still waiting for a zone
+
+const rideDotColor = (ride) => {
+  if (ride.rideType === 'Outdoor') return OUTDOOR_DOT;
+  return ride.zone ? getZoneColor(ride.zone) : UNCLASSIFIED_DOT;
+};
+
+// Generate day objects for a month grid (Monday-start), grouped into weeks of 7.
+const getCalendarWeeks = (year, month) => {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const daysInMonth = lastDay.getDate();
 
-  // Convert to Monday-start: JS getDay() 0=Sun → we want 0=Mon
   let startDow = firstDay.getDay() - 1;
   if (startDow < 0) startDow = 6;
 
   const days = [];
-
-  // Previous month trailing days
   const prevLastDay = new Date(year, month, 0).getDate();
   for (let i = startDow - 1; i >= 0; i--) {
     const d = prevLastDay - i;
@@ -28,13 +39,9 @@ const getCalendarDays = (year, month) => {
     const py = month === 0 ? year - 1 : year;
     days.push({ day: d, dateStr: `${py}-${String(pm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: false });
   }
-
-  // Current month days
   for (let d = 1; d <= daysInMonth; d++) {
     days.push({ day: d, dateStr: `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: true });
   }
-
-  // Next month leading days
   const totalCells = days.length <= 35 ? 35 : 42;
   let nextDay = 1;
   const nm = month === 11 ? 0 : month + 1;
@@ -44,27 +51,33 @@ const getCalendarDays = (year, month) => {
     nextDay++;
   }
 
-  return days;
+  const weeks = [];
+  for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+  return weeks;
 };
+
+// Dot for a day: solid for 0 or 1 colour, a two-tone split for more than one.
+function DayDot({ colors }) {
+  if (colors.length === 0) return null;
+  if (colors.length === 1) {
+    return <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors[0] }} />;
+  }
+  return (
+    <div
+      className="w-4 h-4 rounded-full"
+      style={{ background: `linear-gradient(90deg, ${colors[0]} 50%, ${colors[1]} 50%)` }}
+    />
+  );
+}
 
 export default function ActivityCalendar() {
   const { history } = useAppData();
-  const { openEditRide } = useShell();
-  const handleEditRide = openEditRide;
+  const { openLogRide } = useShell();
 
-  // Calendar state
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
-  const [calendarPopup, setCalendarPopup] = useState(null); // { dateStr } or null
+  const [daySheet, setDaySheet] = useState(null); // { dateStr } or null
 
-  // Calendar: set of dates with rides for O(1) lookup
-  const rideDatesSet = useMemo(() => {
-    const set = new Set();
-    history.forEach(ride => { if (ride.date) set.add(ride.date); });
-    return set;
-  }, [history]);
-
-  // Calendar: rides grouped by date for popup display
   const ridesByDate = useMemo(() => {
     const map = {};
     history.forEach(ride => {
@@ -76,13 +89,37 @@ export default function ActivityCalendar() {
     return map;
   }, [history]);
 
+  const tssByDate = useMemo(() => {
+    const map = {};
+    history.forEach(ride => {
+      if (ride.date) map[ride.date] = (map[ride.date] || 0) + (ride.tss || 0);
+    });
+    return map;
+  }, [history]);
+
+  const weeks = getCalendarWeeks(calendarYear, calendarMonth);
+  const todayStr = toLocalDateStr(new Date());
+
+  const handleDayTap = (dateStr) => {
+    const rides = ridesByDate[dateStr];
+    if (rides && rides.length === 1) {
+      navigate(`#/ride/${rides[0].id}`);
+    } else if (rides && rides.length > 1) {
+      setDaySheet({ dateStr });
+    } else if (dateStr <= todayStr) {
+      // Empty past or today date: "Log a ride on <date>".
+      openLogRide(dateStr);
+    }
+  };
+
+  const sheetRides = daySheet ? (ridesByDate[daySheet.dateStr] || []) : [];
+
   return (
-    <div className="bg-gray-800 rounded-2xl p-4">
+    <div className="bg-gray-800 rounded-2xl py-4 px-2">
       {/* Header: nav arrows + month/year */}
       <div className="flex items-center justify-between mb-3">
         <button
           onClick={() => {
-            setCalendarPopup(null);
             if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(calendarYear - 1); }
             else { setCalendarMonth(calendarMonth - 1); }
           }}
@@ -96,7 +133,6 @@ export default function ActivityCalendar() {
         </h3>
         <button
           onClick={() => {
-            setCalendarPopup(null);
             if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(calendarYear + 1); }
             else { setCalendarMonth(calendarMonth + 1); }
           }}
@@ -107,93 +143,82 @@ export default function ActivityCalendar() {
         </button>
       </div>
 
-      {/* Day-of-week headers */}
-      <div className="grid grid-cols-7 text-center text-xs text-gray-500 mb-2">
+      {/* Day-of-week headers, plus the week-TSS column */}
+      <div className="grid text-center text-xs text-gray-500 mb-1" style={{ gridTemplateColumns: 'repeat(7, 1fr) 28px' }}>
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
           <div key={i} className="py-1">{d}</div>
         ))}
+        <div className="py-1 text-gray-600" aria-hidden="true">TSS</div>
       </div>
 
-      {/* Day grid */}
-      <div className="grid grid-cols-7">
-        {getCalendarDays(calendarYear, calendarMonth).map((dayObj, i) => {
-          const hasRide = rideDatesSet.has(dayObj.dateStr);
-          const todayStr = toLocalDateStr(new Date());
-          const isToday = dayObj.dateStr === todayStr;
-
+      {/* Week rows: 7 day cells + 1 week-TSS cell */}
+      <div>
+        {weeks.map((week, wi) => {
+          const weekTss = week.reduce((sum, day) => sum + (tssByDate[day.dateStr] || 0), 0);
           return (
-            <div
-              key={i}
-              className={`flex items-center justify-center h-11 ${hasRide ? 'cursor-pointer' : ''}`}
-              onClick={hasRide ? () => setCalendarPopup(calendarPopup?.dateStr === dayObj.dateStr ? null : { dateStr: dayObj.dateStr }) : undefined}
-              role={hasRide ? 'button' : undefined}
-              aria-label={hasRide ? `Rides on ${dayObj.dateStr}` : undefined}
-            >
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors ${hasRide ? 'cursor-pointer' : ''} ${
-                  hasRide && dayObj.isCurrentMonth
-                    ? 'bg-blue-500 text-white font-bold hover:bg-blue-400'
-                    : hasRide && !dayObj.isCurrentMonth
-                    ? 'bg-blue-500/40 text-gray-400 hover:bg-blue-500/60'
-                    : !hasRide && dayObj.isCurrentMonth
-                    ? 'border border-gray-600 text-gray-400'
-                    : 'text-gray-700'
-                } ${
-                  isToday && !hasRide
-                    ? 'border-2 border-blue-400 text-blue-400'
-                    : isToday && hasRide
-                    ? 'ring-2 ring-blue-300'
-                    : ''
-                } ${
-                  calendarPopup?.dateStr === dayObj.dateStr ? 'ring-2 ring-white' : ''
-                }`}
-              >
-                {hasRide ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
-                    <circle cx="6" cy="17" r="3" />
-                    <circle cx="18" cy="17" r="3" />
-                    <path d="M6 17L9 7h4l3 10M9 7l3 10 2-6" />
-                  </svg>
-                ) : (
-                  dayObj.day
-                )}
+            <div key={wi} className="grid items-center" style={{ gridTemplateColumns: 'repeat(7, 1fr) 28px' }}>
+              {week.map((dayObj) => {
+                const rides = ridesByDate[dayObj.dateStr];
+                const hasRide = !!rides;
+                const isToday = dayObj.dateStr === todayStr;
+                const colors = hasRide ? [...new Set(rides.map(rideDotColor))].slice(0, 2) : [];
+                const isPastOrToday = dayObj.dateStr <= todayStr;
+                const tappable = hasRide || isPastOrToday;
+                return (
+                  <div
+                    key={dayObj.dateStr}
+                    className={`flex items-center justify-center h-11 ${tappable ? 'cursor-pointer' : ''}`}
+                    onClick={tappable ? () => handleDayTap(dayObj.dateStr) : undefined}
+                    role={tappable ? 'button' : undefined}
+                    aria-label={hasRide
+                      ? `${rides.length} ride${rides.length === 1 ? '' : 's'} on ${dayObj.dateStr}`
+                      : tappable ? `Log a ride on ${dayObj.dateStr}` : undefined}
+                  >
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors ${
+                        !hasRide && dayObj.isCurrentMonth ? 'border border-gray-600 text-gray-400' : ''
+                      } ${!hasRide && !dayObj.isCurrentMonth ? 'text-gray-700' : ''} ${
+                        isToday && !hasRide ? 'border-2 border-blue-400 text-blue-400' : ''
+                      } ${isToday && hasRide ? 'ring-2 ring-blue-300' : ''} ${!dayObj.isCurrentMonth && hasRide ? 'opacity-50' : ''}`}
+                    >
+                      {hasRide ? <DayDot colors={colors} /> : dayObj.day}
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="text-center text-xs text-gray-500 tabular-nums" data-week-tss>
+                {weekTss > 0 ? weekTss : ''}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Ride popup — shown when a ride day is clicked */}
-      {calendarPopup && ridesByDate[calendarPopup.dateStr] && (
-        <div className="mt-3 border-t border-gray-700 pt-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">{formatDateWithDay(calendarPopup.dateStr)}</span>
+      {/* Day sheet — shown when a multi-ride day is tapped */}
+      <Sheet open={!!daySheet} onClose={() => setDaySheet(null)} title={daySheet ? formatDateWithDay(daySheet.dateStr) : ''}>
+        {sheetRides.map(ride => {
+          const zone = ZONES.find(z => z.id === ride.zone);
+          return (
             <button
-              onClick={() => setCalendarPopup(null)}
-              className="text-gray-500 hover:text-gray-300 text-sm min-h-[44px] min-w-[44px] -my-3 -mr-3"
-              aria-label="Close"
-            >✕</button>
-          </div>
-          {ridesByDate[calendarPopup.dateStr].map(ride => {
-            const zone = ZONES.find(z => z.id === ride.zone);
-            return (
-              <div key={ride.id} className="flex items-center justify-between py-1.5 border-b border-gray-700/50 last:border-0">
-                <div className="min-w-0 pr-2">
-                  <div className="text-sm text-white truncate">{ride.name || 'Untitled Ride'}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {ride.rideType || 'Indoor'}
-                    {zone ? <span> · <span style={{ color: zone.color }}>{zone.name}</span></span> : <span className="text-yellow-500"> · Unclassified</span>}
-                  </div>
+              key={ride.id}
+              type="button"
+              onClick={() => { setDaySheet(null); navigate(`#/ride/${ride.id}`); }}
+              className="w-full flex items-center justify-between py-2.5 border-b border-gray-700/50 last:border-0 text-left min-h-[44px]"
+            >
+              <div className="min-w-0 pr-2">
+                <div className="text-base text-white truncate">{ride.name || 'Untitled Ride'}</div>
+                <div className="text-sm text-gray-400 mt-0.5">
+                  {ride.rideType || 'Indoor'}
+                  {ride.rideType === 'Outdoor' ? null : zone
+                    ? <span> · <span style={{ color: zone.color }}>{getZoneName(ride.zone)}</span></span>
+                    : <span className="text-yellow-500"> · Needs a zone</span>}
                 </div>
-                <button
-                  onClick={() => { setCalendarPopup(null); handleEditRide(ride.id); }}
-                  className="flex-shrink-0 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white px-3 min-h-[44px] rounded-xl transition"
-                >Edit Ride →</button>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <Button variant="ghost" size="sm" className="shrink-0">View →</Button>
+            </button>
+          );
+        })}
+      </Sheet>
     </div>
   );
 }

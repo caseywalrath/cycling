@@ -1,13 +1,18 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import GoogleDriveSync from '../google-drive-sync.js';
-import { ZONES, DEFAULT_LEVELS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY } from '../lib/zones.js';
+import { ZONES, DEFAULT_LEVELS } from '../lib/zones.js';
 import { toLocalDateStr, parseDuration } from '../lib/dates.js';
 import { parseFitFile, parseTcxFile, findMatchingRideForImport } from '../lib/rideFiles.js';
 import { EFTP_PROMPT_KEY, buildEftpTimeline } from '../lib/eftp.js';
 import { detectIntervals } from '../lib/intervals.js';
-import { applyDecay, calculateNewLevel } from '../lib/progression.js';
-import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus } from '../lib/load.js';
+import {
+  applyDecay, advanceLastWorked, calculateNewLevel, workoutLevelFromStructure, trickleFor,
+  recalculateLevelsFromHistory, LEVEL_AT_REFERENCE,
+} from '../lib/progression.js';
+import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss, dailyLoadSeries, rampRate as computeRampRate } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
+import { MAXHR_PROMPT_KEY, readDismissals, writeDismissal } from '../lib/alerts.js';
+import { personalBests, records as computeRecords, observedMaxHr } from '../lib/records.js';
 
 // All persisted app data and every action that changes it (V2 Phase 3).
 //
@@ -21,22 +26,48 @@ export const STORAGE_KEY = 'cycling-progression-data-v2';
 // V2 Phase 3: written to localStorage, Export files and the Drive backup. Files without it
 // (every backup made before Phase 3) load exactly as before.
 export const SCHEMA_VERSION = 2;
+// V2 Phase 7 §7.4: device-local snapshot of { levels, lastWorkedDates } taken just before
+// "Recalculate levels from my rides" is applied, for its Undo link. Removed when the next ride
+// is logged (Undo is no longer offered), on Undo, on reset and on restore.
+export const RECALC_UNDO_KEY = 'levels-before-recalc';
+const readRecalcSnapshot = () => {
+  try {
+    const raw = localStorage.getItem(RECALC_UNDO_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+const clearRecalcSnapshot = () => {
+  try { localStorage.removeItem(RECALC_UNDO_KEY); } catch { /* storage unavailable */ }
+};
 const FTP = 235;
 
+// V2 Phase 4: no invented defaults for a fresh manual entry — duration, NP and zone start
+// empty/unset, and the Log Ride sheet's Save button stays disabled until they're filled in.
+// A file import overwrites duration/normalizedPower from the file, and pre-selects a zone
+// for indoor rides when interval detection found one (unchanged from Phase 2/3).
 export const getDefaultFormData = () => {
   return {
     name: '',
     date: toLocalDateStr(new Date()),
-    zone: 'endurance',
-    workoutLevel: ZONE_EXPECTED_RPE['endurance'],
+    zone: null,
+    // V2 Phase 7: the Log Ride "Workout level" (1–10). null = not set (the stepper shows
+    // LEVEL_AT_REFERENCE). workoutLevelSource 'manual' means the user set or overrode it; null
+    // lets a file import's calculated level apply.
+    workoutLevel: null,
+    workoutLevelSource: null,
     rpe: 5,
     completed: true,
-    duration: 60,
-    normalizedPower: 150,
+    duration: '',
+    normalizedPower: '',
     rideType: 'Indoor',
     distance: 0,
     elevation: 0,
     notes: '',
+    // V2 Phase 5: full-resolution bests/HR stats/true avg power, carried through from an
+    // imported file (see rideFiles.js toOneHzSeries()). null for a manual entry.
+    bests: null,
+    hrStats: null,
+    avgPower: null,
   };
 };
 
@@ -101,10 +132,16 @@ export function AppDataProvider({ children }) {
   const [userProfile, setUserProfile] = useState({
     maxHR: null,
     restingHR: null,
+    lthr: null, // Threshold HR (bpm), optional — V2 Phase 4, used by Phase 5's heart-rate TSS
     weight: null, // lb
     age: null,
     sex: 'male', // 'male' or 'female'
   });
+
+  // V2 Phase 4: true once a data change hasn't been auto-synced yet (no valid Google token at
+  // the time the 3s debounce fired). Shown as a badge on the Settings tab.
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
+  const autoSyncTimer = useRef(null);
 
   // VO2max estimates storage (pass-through from old intervals.icu imports)
   const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
@@ -115,6 +152,8 @@ export function AppDataProvider({ children }) {
   const [editingRide, setEditingRide] = useState(null);
   // Interval tracking state (see INTERVAL_TRACKING_PLAN.md)
   const [pendingFitDetail, setPendingFitDetail] = useState(null); // { stream, detection } from FIT import, awaiting save
+  // V2 Phase 7: whether Settings offers "Undo recalculation" (a snapshot is stored on this device)
+  const [recalcUndoAvailable, setRecalcUndoAvailable] = useState(() => !!readRecalcSnapshot());
 
   // ---------------- derived ----------------
   const todayKey = useTodayKey();
@@ -131,6 +170,16 @@ export function AppDataProvider({ children }) {
     () => getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo),
     [loads]
   );
+
+  // V2 Phase 6: shared inputs for the Progress tab's charts and alerts, memoised so the
+  // tab switch stays fast (§6.4 — under 300ms with 158 seeded rides) even though several of
+  // these walk the whole history. Keyed on history and currentFTP per the plan, even where a
+  // given value (e.g. dailyLoadSeries) doesn't itself depend on FTP.
+  const fitnessSeries = useMemo(() => dailyLoadSeries(history, new Date()), [history, currentFTP, todayKey]);
+  const rampRate = useMemo(() => computeRampRate(fitnessSeries), [fitnessSeries]);
+  const bestCurves = useMemo(() => personalBests(history, new Date()), [history, currentFTP, todayKey]);
+  const rideRecords = useMemo(() => computeRecords(history, new Date()), [history, currentFTP, todayKey]);
+  const maxHrObserved = useMemo(() => observedMaxHr(history), [history, currentFTP]);
 
   // ---------------- load / save ----------------
   useEffect(() => {
@@ -246,6 +295,39 @@ export function AppDataProvider({ children }) {
     }
   }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
 
+  // ---------------- Google Drive auto-sync (V2 Phase 4, D3) ----------------
+  // After any data change, wait 3s so a burst of edits (e.g. typing in a form, or an import
+  // followed by a save) triggers one sync, not one per change. Then, only if a Google
+  // sign-in is still valid, push silently — this never opens a sign-in popup on its own.
+  // Without a valid token, mark the change as unsynced; the Settings tab shows a badge and
+  // its Sync button (a user tap) can start a new sign-in.
+  // "Unsynced" is derived from the data, not from effect runs: every data action calls
+  // markDataChanged() (bumps exportedAt), and every successful sync records lastSyncedAt. So
+  // simply opening the app (which loads state) never looks like an unsynced change, while
+  // edits made last time without a valid sign-in still show the badge after a reload.
+  useEffect(() => {
+    clearTimeout(autoSyncTimer.current);
+    const dirty = !!exportedAt && (!lastSyncedAt || exportedAt > lastSyncedAt);
+    if (!dirty) {
+      setHasUnsyncedChanges(false);
+      return undefined;
+    }
+    autoSyncTimer.current = setTimeout(() => {
+      if (GoogleDriveSync.hasValidToken()) {
+        // handleDriveSync() itself calls GoogleDriveSync.sync(), which calls authenticate()
+        // internally — but since we've just confirmed a valid token is present, that call
+        // resolves immediately from the cached token and never opens a popup.
+        handleDriveSync().then((result) => {
+          if (result?.status === 'error') setHasUnsyncedChanges(true);
+        });
+      } else {
+        setHasUnsyncedChanges(true);
+      }
+    }, 3000);
+    return () => clearTimeout(autoSyncTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportedAt, lastSyncedAt]);
+
   // ---------------- eFTP alert (replaces the old window.confirm prompt) ----------------
   // The highest eFTP value the user has already answered (device-local). The Today tab shows
   // the "raise your FTP?" alert only for a higher estimate; the value is stored when the
@@ -257,6 +339,23 @@ export function AppDataProvider({ children }) {
   const resolveEftpAlert = (value) => {
     setEftpPromptedValue(value);
     try { localStorage.setItem(EFTP_PROMPT_KEY, String(value)); } catch { /* ignore */ }
+  };
+
+  // V2 Phase 6 §6.2: the highest observed max HR the user has already answered — same
+  // device-local pattern as eFTP above.
+  const [maxhrPromptedValue, setMaxhrPromptedValue] = useState(() => {
+    try { return parseInt(localStorage.getItem(MAXHR_PROMPT_KEY), 10) || 0; } catch { return 0; }
+  });
+  const resolveMaxHrAlert = (value) => {
+    setMaxhrPromptedValue(value);
+    try { localStorage.setItem(MAXHR_PROMPT_KEY, String(value)); } catch { /* ignore */ }
+  };
+
+  // V2 Phase 6 §6.2: one device-local JSON map for the newer alerts' dismiss state (new
+  // best per ride id, ramp rate's 7-day snooze, feels-harder's "until a new ride" marker).
+  const [alertDismissals, setAlertDismissals] = useState(() => readDismissals());
+  const dismissAlert = (key, value = true) => {
+    setAlertDismissals(writeDismissal(key, value));
   };
 
   // Mark data as changed (updates exportedAt timestamp for sync conflict resolution)
@@ -295,7 +394,65 @@ export function AppDataProvider({ children }) {
   const calculateTSS = (normalizedPower, durationMinutes) => tssFor(normalizedPower, durationMinutes, currentFTP);
   const calculateIF = (normalizedPower) => ifFor(normalizedPower, currentFTP);
 
+  // V2 Phase 5 §5.2: a ride imported from a file with heart rate but no power gets
+  // heart-rate-based TSS instead of the usual power-based TSS. Manual entry is unchanged
+  // (power only, per §5.2). `isHrOnly` is true only for the file-import path, using
+  // pendingFitDetail (the just-imported stream), not a previously-saved ride's own tssSource
+  // — editing an already-saved HR-only ride without re-importing keeps its stored tss/source.
+  const computeRideMetrics = (duration, normalizedPower, hrStats) => {
+    const isHrOnly = !!pendingFitDetail && pendingFitDetail.stream && pendingFitDetail.stream.power == null;
+    if (isHrOnly) {
+      const lthr = estimateLthr(userProfile);
+      const tss = hrTss(duration, hrStats?.avg ?? null, userProfile.restingHR, lthr);
+      return { normalizedPower: null, tss, intensityFactor: null, tssSource: 'hr' };
+    }
+    return {
+      normalizedPower,
+      tss: calculateTSS(normalizedPower, duration),
+      intensityFactor: calculateIF(normalizedPower),
+      tssSource: undefined, // absent means 'power' (§0.5)
+    };
+  };
+
   // ---------------- rides ----------------
+
+  // V2 Phase 7: the level the model calculates for the ride in the Log Ride form, or null.
+  // For a ride with a file behind it (a fresh import, or an edited ride that has interval data
+  // or a stream), and for any Endurance ride with a duration and NP: endurance is scored from
+  // duration at IF, so a manual 1 h Z2 ride earns the same as the imported one would. Other
+  // manual entries use the Workout level stepper instead.
+  const formStructureLevel = (form = formData) => {
+    const zone = form.zone;
+    if (form.rideType === 'Outdoor' || !zone || zone === 'recovery' || !currentFTP) return null;
+    const oldRide = editingRide ? history.find(w => w.id === editingRide) : null;
+    const hasFile = !!pendingFitDetail || !!(oldRide && (oldRide.stream || oldRide.intervalData));
+    const np = Number(form.normalizedPower) || 0;
+    if (!hasFile && !(zone === 'endurance' && np > 0 && parseDuration(form.duration) > 0)) return null;
+    return workoutLevelFromStructure({
+      rideType: form.rideType,
+      zone,
+      duration: parseDuration(form.duration),
+      normalizedPower: np,
+      intensityFactor: np > 0 ? np / currentFTP : null,
+      intervalData: pendingFitDetail ? pendingFitDetail.detection : oldRide?.intervalData,
+    }, currentFTP);
+  };
+
+  // { workoutLevel, workoutLevelSource } to use for the form's ride in `zone`: the user's own
+  // level if they set/overrode it, else the calculated one, else the stepper's value (default
+  // LEVEL_AT_REFERENCE) as a manual level.
+  const resolveWorkoutLevel = (zone) => {
+    const manual = Number(formData.workoutLevel);
+    if (formData.workoutLevelSource === 'manual' && Number.isFinite(manual) && formData.workoutLevel != null) {
+      return { workoutLevel: manual, workoutLevelSource: 'manual' };
+    }
+    const structure = formStructureLevel({ ...formData, zone });
+    if (structure != null) return { workoutLevel: structure, workoutLevelSource: 'structure' };
+    return {
+      workoutLevel: formData.workoutLevel != null && Number.isFinite(manual) ? manual : LEVEL_AT_REFERENCE,
+      workoutLevelSource: 'manual',
+    };
+  };
 
   // Save the Log Ride form as a new ride, or as the edit of `editingRide`.
   // Logic moved verbatim from handleLogWorkout(). Returns { kind: 'new' | 'edit', entry }.
@@ -306,8 +463,13 @@ export function AppDataProvider({ children }) {
     const distance = isOutdoor ? formData.distance : 0;
     const elevation = isOutdoor ? formData.elevation : 0;
     const duration = parseDuration(formData.duration);
-    const tss = calculateTSS(formData.normalizedPower, duration);
-    const intensityFactor = calculateIF(formData.normalizedPower);
+    // V2 Phase 4: normalizedPower can be a string while the user is typing in a manual-entry
+    // field with no invented default; coerce once here for TSS/IF and the saved value.
+    const rawNormalizedPower = Number(formData.normalizedPower) || 0;
+    // V2 Phase 5: HR-only imports get heart-rate TSS instead, and no NP/IF (§5.2).
+    const { normalizedPower, tss, intensityFactor, tssSource } = computeRideMetrics(duration, rawNormalizedPower, formData.hrStats);
+    // V2 Phase 4: "Name" defaults to "Indoor ride" / "Outdoor ride" when left blank.
+    const name = formData.name || (isOutdoor ? 'Outdoor ride' : 'Indoor ride');
 
     if (editingRide) {
       // Editing existing workout
@@ -319,11 +481,17 @@ export function AppDataProvider({ children }) {
       let previousLevel = oldWorkout.previousLevel;
       let newLevel = oldWorkout.newLevel;
       let change = oldWorkout.change;
+      // V2 Phase 7: a ride's workout level is only (re)written when its progression is
+      // recalculated below; otherwise the stored values (or their absence = 'legacy') stay.
+      let workoutLevel = oldWorkout.workoutLevel;
+      let workoutLevelSource = oldWorkout.workoutLevelSource;
+      const recalculates = isNowClassified && (wasUnclassified || zone !== oldWorkout.zone) && !isOutdoor;
 
-      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+      if (recalculates) {
         // Recalculate progression for the newly assigned zone using effective (decayed) level
+        ({ workoutLevel, workoutLevelSource } = resolveWorkoutLevel(zone));
         previousLevel = effectiveLevels[zone];
-        newLevel = calculateNewLevel(previousLevel, formData.workoutLevel, formData.rpe, completed);
+        newLevel = calculateNewLevel(previousLevel, workoutLevel, formData.rpe, completed, zone);
         change = newLevel - previousLevel;
       }
 
@@ -335,12 +503,16 @@ export function AppDataProvider({ children }) {
         distance,
         elevation,
         duration,
-        name: formData.name,
+        normalizedPower,
+        name,
         id: editingRide,
         previousLevel,
         newLevel,
         change,
+        workoutLevel,
+        workoutLevelSource,
         tss,
+        tssSource,
         intensityFactor,
         source: 'manual', // Editing always marks as manually classified
         ...(pendingFitDetail ? {
@@ -358,15 +530,16 @@ export function AppDataProvider({ children }) {
       setPendingFitDetail(null);
 
       // Update progression levels if zone was assigned/changed
-      if (isNowClassified && (wasUnclassified || zone !== oldWorkout.zone)) {
+      if (recalculates) {
         setLevels(prev => ({ ...prev, [zone]: newLevel }));
         setDisplayLevels(prev => ({ ...prev, [zone]: newLevel }));
         setRecentChanges(prev => ({
           ...prev,
           [zone]: { change, date: formData.date },
         }));
-        // Update lastWorkedDates when zone is assigned/changed via edit
-        setLastWorkedDates(prev => ({ ...prev, [zone]: formData.date }));
+        // Update lastWorkedDates when zone is assigned/changed via edit (never backwards: an old
+        // imported ride must not rewind the decay clock — V2 Phase 7 fix)
+        setLastWorkedDates(prev => advanceLastWorked(prev, zone, formData.date));
       }
 
       // Reset form
@@ -377,23 +550,21 @@ export function AppDataProvider({ children }) {
       // Creating new workout
       // Recovery zone and outdoor rides do not affect progression levels
       const affectsProgression = zone !== null && zone !== 'recovery';
+      // V2 Phase 7: the workout level comes from the ride's structure (file import) or the
+      // Log Ride stepper (manual entry / override).
+      const { workoutLevel, workoutLevelSource } = affectsProgression
+        ? resolveWorkoutLevel(zone)
+        : { workoutLevel: null, workoutLevelSource: undefined };
       // Use effectiveLevels (decay-adjusted) as the starting point for progression
       const currentLevel = affectsProgression ? effectiveLevels[zone] : null;
       const newLevel = affectsProgression
-        ? calculateNewLevel(currentLevel, formData.workoutLevel, formData.rpe, completed)
+        ? calculateNewLevel(currentLevel, workoutLevel, formData.rpe, completed, zone)
         : null;
       const primaryChange = affectsProgression ? newLevel - currentLevel : 0;
 
-      // Compute trickle effects for adjacent zones (only when primary change is positive)
-      const trickleEffects = [];
-      if (affectsProgression && primaryChange > 0 && ZONE_ADJACENCY[zone]) {
-        ZONE_ADJACENCY[zone].forEach(({ zone: adjZone, factor }) => {
-          // Don't trickle if adjacent zone is already at or above the primary zone's new level
-          if (effectiveLevels[adjZone] >= newLevel) return;
-          const trickleAmount = primaryChange * factor;
-          trickleEffects.push({ zone: adjZone, amount: trickleAmount });
-        });
-      }
+      // Trickle to adjacent zones (only when the primary change is positive, and not to a
+      // neighbour already at or above the primary zone's new level)
+      const trickleEffects = affectsProgression ? trickleFor(zone, primaryChange, newLevel, effectiveLevels) : [];
 
       const entry = {
         ...formData,
@@ -402,12 +573,16 @@ export function AppDataProvider({ children }) {
         distance,
         elevation,
         duration,
-        name: formData.name,
+        normalizedPower,
+        name,
         id: Date.now(),
         previousLevel: currentLevel,
         newLevel: newLevel,
         change: primaryChange,
+        workoutLevel,
+        workoutLevelSource,
         tss,
+        tssSource,
         intensityFactor,
         source: 'manual',
         trickleEffects, // Stored for post-log summary display
@@ -442,11 +617,17 @@ export function AppDataProvider({ children }) {
 
       // Update lastWorkedDates for the primary zone only (trickle doesn't reset decay clock)
       if (affectsProgression) {
-        setLastWorkedDates(prev => ({ ...prev, [zone]: formData.date }));
+        setLastWorkedDates(prev => advanceLastWorked(prev, zone, formData.date));
       }
 
       // Set last logged workout for summary sheet
       setLastLoggedWorkout(entry);
+
+      // A new ride ends the "Undo recalculation" window (V2 Phase 7 §7.4)
+      if (recalcUndoAvailable) {
+        clearRecalcSnapshot();
+        setRecalcUndoAvailable(false);
+      }
 
       // Update history and levels
       setHistory([entry, ...history]);
@@ -486,7 +667,9 @@ export function AppDataProvider({ children }) {
       name: workout.name || workout.notes || '',
       date: workout.date,
       zone: editZone,
-      workoutLevel: workout.workoutLevel || ZONE_EXPECTED_RPE[editZone],
+      // V2 Phase 7: legacy rides stored an RPE-like constant here; only a real level pre-fills.
+      workoutLevel: workout.workoutLevelSource ? workout.workoutLevel : null,
+      workoutLevelSource: workout.workoutLevelSource === 'manual' ? 'manual' : null,
       rpe: workout.rpe != null ? workout.rpe : 5,
       completed: workout.completed !== false,
       duration: workout.duration,
@@ -550,6 +733,8 @@ export function AppDataProvider({ children }) {
     setFormData(prev => ({
       ...prev,
       ...parsed,
+      workoutLevel: null,
+      workoutLevelSource: null,
       // Only pre-select a zone for indoor rides; outdoor rides are never filed under one (D5).
       ...(detection && parsed.rideType !== 'Outdoor' ? { zone: detection.category } : {}),
     }));
@@ -557,11 +742,16 @@ export function AppDataProvider({ children }) {
   };
 
   // FIT backfill: attach a parsed file's stream + detected intervals to an existing ride.
-  // TSS, zone and progression fields are untouched. Returns { rideId, detection }.
+  // TSS, zone and progression fields are untouched. V2 Phase 5: also saves the file's
+  // full-resolution bests/hrStats/avgPower onto the ride (§5.1), same as a fresh import.
+  // Returns { rideId, detection }.
   const attachRideFile = (existing, { parsed, detection }) => {
     setHistory(prev => prev.map(w => w.id === existing.id ? {
       ...w,
       stream: parsed.stream,
+      bests: parsed.bests,
+      hrStats: parsed.hrStats,
+      avgPower: parsed.avgPower,
       intervalData: detection
         ? { ...detection, source: 'auto', category: existing.rideType === 'Outdoor' ? null : detection.category }
         : null,
@@ -680,6 +870,69 @@ export function AppDataProvider({ children }) {
     setLevels(resetLevelsObj);
     setDisplayLevels(resetLevelsObj);
     setLastWorkedDates({});
+    clearRecalcSnapshot();
+    setRecalcUndoAvailable(false);
+    markDataChanged();
+  };
+
+  // V2 Phase 7 §7.4: Settings → "Recalculate levels from my rides". previewRecalculation()
+  // changes nothing; it returns { before, after } per zone (both with decay applied as of
+  // today, as the level bars show them) plus the raw result to pass to applyRecalculation().
+  const previewRecalculation = () => {
+    const result = recalculateLevelsFromHistory(history, currentFTP);
+    return {
+      ...result,
+      before: effectiveLevels,
+      after: applyDecay(result.levels, result.lastWorkedDates),
+    };
+  };
+
+  // Apply a preview: snapshot the current levels/lastWorkedDates on this device for Undo,
+  // then replace them. Rides are never rewritten.
+  const applyRecalculation = (preview) => {
+    try {
+      localStorage.setItem(RECALC_UNDO_KEY, JSON.stringify({ levels, lastWorkedDates, savedAt: new Date().toISOString() }));
+      setRecalcUndoAvailable(true);
+    } catch { setRecalcUndoAvailable(false); /* storage unavailable: apply without Undo */ }
+    const next = { ...levels, ...preview.levels };
+    setLevels(next);
+    setDisplayLevels(next);
+    setLastWorkedDates(preview.lastWorkedDates);
+    markDataChanged();
+  };
+
+  // Restore the snapshot taken by applyRecalculation(). Returns true if it was restored.
+  const undoRecalculation = () => {
+    const snap = readRecalcSnapshot();
+    clearRecalcSnapshot();
+    setRecalcUndoAvailable(false);
+    if (!snap || !snap.levels) return false;
+    setLevels(snap.levels);
+    setDisplayLevels(snap.levels);
+    setLastWorkedDates(snap.lastWorkedDates || {});
+    markDataChanged();
+    return true;
+  };
+
+  // Settings → "Old imported rides" (V2 Phase 4). Old CSV/API imports that were never given a
+  // zone clutter the "needs zone" alert and list forever if the user genuinely doesn't have
+  // the data to classify them. This sets `historical: true` on them so they're excluded from
+  // ridesNeedingZone() and the Today alert count, without deleting anything. "Show them again"
+  // reverses it. The caller confirms before calling hideOldImportedRides.
+  const oldImportedRideCount = () =>
+    history.filter(w => w.rideType !== 'Outdoor' && w.zone == null && w.source === 'imported' && !w.historical).length;
+
+  const hideOldImportedRides = () => {
+    setHistory(prev => prev.map(w =>
+      (w.rideType !== 'Outdoor' && w.zone == null && w.source === 'imported' && !w.historical)
+        ? { ...w, historical: true }
+        : w
+    ));
+    markDataChanged();
+  };
+
+  const showOldImportedRides = () => {
+    setHistory(prev => prev.map(w => w.historical ? { ...w, historical: false } : w));
     markDataChanged();
   };
 
@@ -750,6 +1003,8 @@ export function AppDataProvider({ children }) {
     if (parsed.vo2maxEstimates) setVo2maxEstimates(parsed.vo2maxEstimates);
     if (parsed.powerCurveData) setPowerCurveData(parsed.powerCurveData);
     if (parsed.lastWorkedDates) setLastWorkedDates(parsed.lastWorkedDates);
+    clearRecalcSnapshot();
+    setRecalcUndoAvailable(false);
     markDataChanged();
     return parsed.history?.length || 0;
   };
@@ -803,12 +1058,13 @@ export function AppDataProvider({ children }) {
 
       setDriveSyncStatus(result);
 
-      // If we pushed data, update sync timestamps
-      if (result.action === 'push') {
+      // Any successful sync (push, pull or already up to date) means this device now matches
+      // Drive, so record it — the "Unsynced changes" state compares exportedAt against this.
+      if (result.status !== 'error') {
         const now = new Date().toISOString();
         setLastSyncedAt(now);
         // If exportedAt was null (first-ever sync), set it so future syncs compare correctly
-        if (!exportedAt) {
+        if (result.action === 'push' && !exportedAt) {
           setExportedAt(now);
         }
       }
@@ -830,18 +1086,19 @@ export function AppDataProvider({ children }) {
   };
 
   // "Copy for Claude" text (the Today screen copies it to the clipboard).
-  const buildCopyText = () => buildAnalysisText({ history, currentFTP, currentEftp, event, loads });
+  const buildCopyText = () => buildAnalysisText({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves });
 
   const value = {
     // state
     levels, displayLevels, animatingZone, history, recentChanges, lastWorkedDates,
     currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData,
     exportedAt, lastSyncedAt, isDriveSyncing, driveSyncStatus, eftpPromptedValue,
-    lastLoggedWorkout,
+    lastLoggedWorkout, hasUnsyncedChanges, maxhrPromptedValue, alertDismissals, recalcUndoAvailable,
     // Log Ride form
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     // derived
     effectiveLevels, eftpTimeline, currentEftp, loads, trainingStatus,
+    fitnessSeries, rampRate, bestCurves, rideRecords, maxHrObserved,
     calculateTSS, calculateIF,
     // actions
     saveRide: handleLogWorkout,
@@ -853,9 +1110,11 @@ export function AppDataProvider({ children }) {
     redetectRide: handleRedetectRide, redetectCandidates, redetectAll: handleRedetectAll,
     saveEvent: handleSaveEvent, deleteEvent: handleDeleteEvent,
     saveProfile, resetLevels,
+    previewRecalculation, applyRecalculation, undoRecalculation, formStructureLevel,
+    oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
     exportData, readBackupFile, restoreBackup,
     syncWithDrive: handleDriveSync,
-    resolveEftpAlert,
+    resolveEftpAlert, resolveMaxHrAlert, dismissAlert,
     buildCopyText,
     markDataChanged,
   };

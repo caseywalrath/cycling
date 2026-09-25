@@ -20,6 +20,111 @@ export const calculateNormalizedPower = (powerSamples) => {
   return Math.round((fourthPowerSum / rollingCount) ** 0.25);
 };
 
+// Bests are computed at these durations (seconds). V2 Phase 5 §0.5/§5.1.
+export const BEST_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400, 7200];
+
+// Cap any single ride's 1Hz series at 8 hours — a corrupt/very long file shouldn't build an
+// unbounded array.
+const MAX_ONE_HZ_SECONDS = 8 * 60 * 60;
+
+// Build a 1-second-resolution power/HR series from raw records, indexed by second from the
+// first record. FIT "smart recording" only writes a new record every few seconds when
+// nothing changes, so short gaps (<=10s) are forward-filled from the previous record. A
+// longer gap is treated as a stop: power 0, HR null (whatever the rider was doing, we don't
+// know their heart rate, but they weren't producing power).
+// Returns { power: number[] | null, hr: (number|null)[] }. `power` is null when no record in
+// the ride has a power value at all (HR-only file).
+export const toOneHzSeries = (records) => {
+  if (!records || records.length === 0) return { power: null, hr: [] };
+  const withTime = records.filter(r => r.timestamp != null);
+  if (withTime.length === 0) return { power: null, hr: [] };
+
+  const hasPower = withTime.some(r => r.power != null);
+  const t0 = new Date(withTime[0].timestamp).getTime();
+
+  // Place each record at its rounded offset from t0, keeping only the last record seen for
+  // a given second (matches the source data's own ordering).
+  const bySecond = new Map();
+  withTime.forEach(r => {
+    const t = new Date(r.timestamp).getTime();
+    const sec = Math.round((t - t0) / 1000);
+    if (sec < 0 || sec > MAX_ONE_HZ_SECONDS) return;
+    bySecond.set(sec, r);
+  });
+
+  const secs = [...bySecond.keys()].sort((a, b) => a - b);
+  const lastSec = secs[secs.length - 1];
+  // Zero/null-initialized: a gap longer than the forward-fill window (>10s) is a stop, and
+  // arrays start that way by default.
+  const power = hasPower ? new Array(lastSec + 1).fill(0) : null;
+  const hr = new Array(lastSec + 1).fill(null);
+
+  secs.forEach((s, idx) => {
+    const rec = bySecond.get(s);
+    const recPower = rec.power != null ? rec.power : 0;
+    const recHr = rec.heart_rate != null ? rec.heart_rate : null;
+    if (power) power[s] = recPower;
+    hr[s] = recHr;
+
+    const nextS = idx + 1 < secs.length ? secs[idx + 1] : null;
+    if (nextS != null && nextS - s <= 10) {
+      // Gap of <=10s to the next record: forward-fill this record's value across it.
+      for (let t = s + 1; t < nextS; t++) {
+        if (power) power[t] = recPower;
+        hr[t] = recHr;
+      }
+    }
+    // A gap of >10s is a stop: the zero/null the arrays already start with is correct.
+  });
+
+  return { power, hr };
+};
+
+// Best average power over any window of `seconds`, from a 1Hz power array (a plain sliding-
+// window sum, same approach as bestAveragePower() at 10s bins). Returns null if there aren't
+// enough seconds to fill one window, or if there's no power at all.
+const bestAverageOneHz = (power, seconds) => {
+  if (!power || power.length < seconds) return null;
+  let windowSum = 0;
+  let best = -Infinity;
+  for (let i = 0; i < power.length; i++) {
+    windowSum += power[i] || 0;
+    if (i >= seconds) windowSum -= power[i - seconds] || 0;
+    if (i >= seconds - 1) best = Math.max(best, windowSum / seconds);
+  }
+  return best === -Infinity ? null : Math.round(best);
+};
+
+// For each duration in BEST_DURATIONS that fits inside the ride, the best average power over
+// any window of that length, from the 1Hz series. Durations longer than the ride are omitted.
+export const bestsFromOneHz = (power) => {
+  if (!power || power.length === 0) return {};
+  const bests = {};
+  BEST_DURATIONS.forEach(d => {
+    const b = bestAverageOneHz(power, d);
+    if (b != null) bests[String(d)] = b;
+  });
+  return bests;
+};
+
+// { avg, max } in bpm from a 1Hz (or any) HR array, or null if there's no HR data at all.
+export const hrStatsFromSeries = (hr) => {
+  if (!hr || hr.length === 0) return null;
+  const vals = hr.filter(v => v != null);
+  if (vals.length === 0) return null;
+  return {
+    avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length),
+    max: Math.max(...vals),
+  };
+};
+
+// Mean of the 1Hz power series including zeros (coasting/stopped counts against the average,
+// same as a head unit's "avg power"). Null when there's no power at all.
+export const avgPowerFromSeries = (power) => {
+  if (!power || power.length === 0) return null;
+  return Math.round(power.reduce((a, b) => a + (b || 0), 0) / power.length);
+};
+
 // Parse a .FIT file (ArrayBuffer) into Log Ride form field values.
 // Only pre-fills the fields a FIT file can actually tell us (date, duration,
 // power, distance, elevation, indoor/outdoor) — Zone, Ride Name, and RPE are
@@ -86,6 +191,10 @@ export const buildRideFromRecords = ({ records, startTime, timerSeconds, distanc
     || avgPower
     || 0;
 
+  // V2 Phase 5: full-resolution (1Hz) bests, HR stats and true average power, computed once
+  // at import time and saved onto the ride (§0.5, §5.1).
+  const oneHz = toOneHzSeries(records);
+
   return {
     date: toLocalDateStr(startTime),
     duration: Math.round((timerSeconds || 0) / 60),
@@ -95,6 +204,9 @@ export const buildRideFromRecords = ({ records, startTime, timerSeconds, distanc
     normalizedPower: Math.round(np),
     stream: downsampleRecords(records),
     laps,
+    bests: bestsFromOneHz(oneHz.power),
+    hrStats: hrStatsFromSeries(oneHz.hr),
+    avgPower: avgPowerFromSeries(oneHz.power),
   };
 };
 
@@ -175,11 +287,15 @@ export const parseTcxFile = (text) => {
 
 // Downsample a FIT records array into fixed-width time bins for the Workout Detail
 // chart. Each bin holds the average of the non-null power/HR samples inside it.
-// Returns null when there's no usable power data (nothing to chart or detect).
+// Returns null when there's no usable power OR heart-rate data (nothing to chart).
+// V2 Phase 5: a ride with heart rate but no power (e.g. an outdoor ride with a HR strap and
+// no power meter) still gets a stream, with `power: null` rather than an all-zero array — see
+// V2_PLAN.md §5.1. Every reader of `stream.power` must be null-safe.
 export const downsampleRecords = (records, binSeconds = 10) => {
   if (!records || records.length === 0) return null;
   const withPower = records.some(r => r.power != null);
-  if (!withPower) return null;
+  const withHR = records.some(r => r.heart_rate != null);
+  if (!withPower && !withHR) return null;
 
   const t0 = records[0].timestamp ? new Date(records[0].timestamp).getTime() : null;
   if (t0 == null) return null;
@@ -204,11 +320,11 @@ export const downsampleRecords = (records, binSeconds = 10) => {
     }
   });
 
-  const binCount = powerSums.length;
-  const power = [];
+  const binCount = Math.max(powerSums.length, hrSums.length);
+  const power = withPower ? [] : null;
   const hr = [];
   for (let i = 0; i < binCount; i++) {
-    power.push(powerCounts[i] ? Math.round(powerSums[i] / powerCounts[i]) : null);
+    if (power) power.push(powerCounts[i] ? Math.round(powerSums[i] / powerCounts[i]) : null);
     hr.push(hrCounts[i] ? Math.round(hrSums[i] / hrCounts[i]) : null);
   }
 

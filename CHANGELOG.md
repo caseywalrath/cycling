@@ -1,5 +1,398 @@
 # Changelog
 
+## Session 24 - V2 Phase 7: Progression Levels Rebuilt (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 7, the last phase of the 2.0 plan. It rebuilds
+how your **progression levels** (the 1–10 bars on the Progress tab) go up. The app version is
+now **2.0.0**.
+
+**The problem it fixes:** until now, every ride in a zone counted as the same fixed difficulty
+(for example, every Sweet Spot ride counted as a "6", whether it was 3x10 or 3x20). So a level
+mostly counted how many rides you'd logged, and once a zone got to about 2 above that fixed
+number, no workout could raise it any further.
+
+**What happens now:** every indoor ride earns its own **workout level** (1 = very easy, 10 =
+very hard, 5 = a typical session), worked out from what you actually rode:
+- **Interval workouts** are scored on how long the efforts were and how hard they were within
+  the zone. Long unbroken efforts count for more than the same minutes chopped into short
+  pieces. A short pause (a minute or less) in the middle of an effort doesn't split it.
+- **Endurance rides** are scored on the length of the whole ride and how steady-hard it was.
+- Your zone's level then moves toward that workout level. If the ride felt as hard as
+  expected (or easier), it moves further; if it felt harder than expected, it moves less. A ride
+  at or below your current level keeps it ticking over (+0.1) but doesn't push it up. The only
+  limit is 10.
+
+### What you'll see on your iPhone
+
+- **Log Ride, importing a file:** under the Zone buttons you'll see e.g. **"This workout:
+  Sweet Spot 6.6"** — the level the app calculated from the file. Tap **Change** if you think
+  it's wrong and set your own with the − / + buttons. "Use calculated level" puts it back.
+- **Log Ride, entering a ride by hand** (indoor, with a zone picked): a **Workout level** box
+  with − and + buttons (1 to 10, in half steps), starting at 5 = a typical session. Set it to
+  how hard the workout was. It's also shown if the app can't score an imported file.
+- **After saving**, the summary also shows "This workout: level X (from your intervals)" or
+  "(set by you)".
+- **Settings → Progression levels → "Recalculate levels from my rides"** (new): the app replays
+  all your indoor rides with a zone, oldest first, through the new scoring, starting every zone
+  at 1.0. You see a **Now → After** table for each zone *before* anything changes. Nothing
+  changes unless you tap **Use these levels**. Older rides that have no interval data count as
+  a typical session (level 5). Your rides themselves are never changed.
+- After recalculating, an **Undo recalculation** link puts your old levels back. It stays
+  until you log your next ride.
+
+**Examples of workout levels** (at an FTP of 231W):
+- An easy 1-hour endurance ride: about **3.9**. A 2-hour one: about **6**. A 3-hour one: about **7.5**.
+- A 3x12 sweet spot at 205W: about **5**. A 2x20 sweet spot at 206W: about **6.6**. A 3x20 at 206W: about **7.5**.
+- A 2x20 tempo at 176W: about **4**. A 2x30 tempo at 180W: about **6.4**.
+- A 5x3 VO2max at 261W: about **3.9**. A 5x5 at 254W: about **5.9**.
+
+These were tuned against your real ride history and agreed with you. At your request, endurance
+rides were set higher than the first draft.
+
+### Under the hood (for the curious)
+
+- The new math lives in `src/lib/progression.js`: `workoutLevelFromStructure()` (the workout
+  level), a new `calculateNewLevel()` (how far a level moves), and
+  `recalculateLevelsFromHistory()` (the replay behind "Recalculate"). Each constant has a
+  one-line comment, and the full model is described in `ARCHITECTURE.md` → "Progression model".
+- Rides now store `workoutLevel` and `workoutLevelSource` (`'structure'` = calculated from the
+  file, `'manual'` = set by you). Rides logged before this update aren't rewritten. A ride
+  without a source counts as `'legacy'`.
+- Decay (levels slowly drop after 2 weeks without training a zone), the trickle to neighbouring
+  zones, and "outdoor and recovery rides don't change levels" all work as before.
+- The Undo copy of your levels is kept only on this device (`levels-before-recalc`), like the
+  other "remember on this device" settings. It is removed when you log a ride, undo, reset
+  levels or restore a backup.
+- 25 new automated tests (109 in total). They cover the scoring rules: a longer, harder or extra
+  effort never lowers a workout's level, and levels always stay between 1 and 10. They also cover
+  the old "stuck" case: a Sweet Spot level of 7.5 plus a 3x20 at 92% at RPE 6 now goes up. And
+  they cover the replay (oldest first, decay, trickle, the FTP each ride was saved with, skipping
+  outdoor/recovery/hidden rides). All use made-up rides, never your data.
+
+### Bug fixed
+
+- **Assigning a zone to an old imported ride no longer moves that zone's "last trained" date
+  backwards.** Before, giving a zone to a ride from months ago made the app think you hadn't
+  trained that zone since then, so decay could kick in early. Logging a ride with a past date had
+  the same problem. The date now only ever moves forward. (This was carried over from Phase 5.)
+
+### Baseline change (the automated regression check)
+
+The synthetic "3x8 @ 250W" test file that the check imports now saves with a workout level of
+**6.7** and `workoutLevelSource: 'structure'`. These two new fields (`importedTcx.workoutLevel`,
+`importedTcx.workoutLevelSource`) are the only change to the baseline. Fitness, Fatigue, Form and
+every other number are unchanged. The check also now screenshots the calculated level on Log
+Ride, the manual stepper, and the Recalculate preview (which it cancels, so nothing changes).
+
+### Anything skipped?
+
+- Manual entries use the stepper, **except Endurance**: a manual Endurance ride is scored from its
+  duration and power, just like an imported one, so an easy 1-hour Z2 ride earns about 3.8 either
+  way. (Changed in the orchestrator's review; before, manual Endurance rides defaulted to 5 and
+  out-scored imported ones.) "Change" still lets you set it yourself.
+- Very short efforts (under 90 seconds, like 30/30s) aren't picked up by interval detection, so
+  those workouts show the stepper instead of a calculated level.
+- The Phase 6 leftovers (one hover-only tooltip on the Today 7-day dots, and the "Edit numbers"
+  NP field on a heart-rate-only import) are unchanged.
+
+## Session 24 - V2 Phase 6: Progress Tab and New Alerts (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 6. It redesigns the **Progress** tab around the
+metrics engine Phase 5 built underneath the app, and adds four new alerts to the **Today** tab.
+Nothing about Rides, Log Ride, Settings or the Ride page changes.
+
+### What you'll see on your iPhone
+
+**Progress tab — new charts, top to bottom:**
+
+- **Progression levels** look the same, but the small "+0.3" and "↓ 12d idle" badges under each
+  zone now work by **tapping** them (they show a short explanation), instead of only on a
+  hover that a phone can never do.
+- **Fitness** — a new chart: your Fitness (blue line) and Fatigue (orange line) over the last
+  90/180/365 days (pick with the buttons), with your Form shown as green/red bars around the
+  middle. The heading shows how fast your fitness is climbing or falling per week.
+- **Training volume** now has a fourth tab, **Zones**, next to Hours/TSS/Elevation — a
+  12-week bar chart of how many minutes you spent in each training zone (only counts rides
+  with a power file attached).
+- **Power Curve** — a new chart showing your best power for every effort length from 5 seconds
+  to 2 hours, from your last 90 days (solid line) plus your all-time bests (faint line). Tap
+  any point to see the watts, watts-per-kilogram, and which ride set it.
+- **Power Skills** now uses your own last-90-days data instead of the one-time file imported
+  from intervals.icu years ago — that old import is only used to fill in a gap if one of the
+  nine effort lengths hasn't been ridden recently, and it's labelled when that happens. If
+  several are missing, "Rider Type" is replaced with a note asking for a ride with a sprint in
+  it.
+- **eFTP Progress** moved to its own card (it used to be a tab inside the Hours/TSS/Elevation
+  chart; now that spot is Zones instead).
+- **Aerobic Fitness** — a new chart: a dot for every long, steady ride showing how efficiently
+  you were riding (power per heartbeat), plus a smoothed trend line. Below it, your average
+  heart-rate drift over your last 30 days of steady rides, in plain words ("Solid aerobic
+  base" / "Some drift" / "Drifting: base needs work").
+- **Records** — a new card: your best-ever and best-in-90-days power at five effort lengths
+  (with watts-per-kilogram), your longest ride, biggest climb and highest-effort ride (tap any
+  to open it), and this year's totals compared with the same point last year.
+
+**Today tab — four new alerts** (each has a Dismiss button; the app remembers you dismissed it):
+
+- **New best** — when your latest ride sets a new best at a meaningful effort length.
+- **Fitness is climbing fast** — a heads-up when your Fitness (CTL) is rising quickly, so you
+  can watch for fatigue. Dismissing hides it for a week.
+- **Feels harder than usual** — shows up when several of your last few rides felt tougher than
+  their power/heart-rate numbers would suggest (could be fatigue, heat, life stress). Stays
+  dismissed until you log a new ride.
+- **Highest heart rate seen** — if a ride recorded a heart rate above what's saved in your
+  profile (or you haven't set a Max HR yet), this offers to update it for you, the same way
+  the "raise your FTP?" alert already worked.
+
+### Under the hood (for the curious)
+
+- The Progress tab's new charts are all built from the Phase 5 metrics engine
+  (`dailyLoadSeries`, `personalBests`, `records()`, `observedMaxHr`, `timeInZones`,
+  `efficiencyFactor`, `aerobicDecoupling`) — nothing new is computed that wasn't already
+  possible from your saved ride data.
+- Those computations are memoised (cached) in the app's shared data layer, keyed to your ride
+  history and FTP, so switching to the Progress tab stays fast even with 150+ rides — measured
+  at 130–170ms in the automated check, well under the 300ms target.
+- The four new alerts' "don't show me this again" state lives in one small, on-this-device-only
+  file (not part of your backup or Google Drive sync), the same way the existing "eFTP above
+  FTP" alert already worked.
+- "Copy for Claude" now also includes your ramp rate, your 90-day best efforts, your recent
+  heart-rate drift, and how your last 4 weeks split across training zones — appended after
+  everything that was already there, so nothing about the existing text changed.
+- 15 new automated tests cover the four new alert rules (84 tests total, up from 69).
+
+### Anything skipped?
+
+- One more hover-only "title" tooltip remains, on the Today tab's 7-day dot row (Session 3's
+  original work) — it wasn't part of this phase's task list (only the Progress level-bar
+  badges were), so it's left for a later cleanup pass rather than fixed here.
+- Assigning a zone to an imported ride can still move `lastWorkedDates[zone]` backwards — a
+  known Phase 5 carryover, unrelated to this phase, still slated for Phase 7.
+- The "Edit numbers" cosmetic issue on an HR-only import (still shows an NP field defaulting to
+  0) from Phase 5 is also unchanged — out of scope for this phase.
+
+### Baseline change (the automated regression check)
+
+`tools/v2-check.mjs` now also seeds two of the synthetic history's most recent rides with a
+high reported effort (RPE) and a high heart rate, records which Today alerts are showing, times
+the Progress tab switch, and taps every new chart's tooltip for a screenshot. Only one thing
+changed in the baseline: a new `numbers.todayAlerts` field lists the alerts the seeded data
+produces — no existing number (Fitness/Fatigue/Form, the imported test ride's numbers, etc.)
+changed at all.
+
+### Fix found during the orchestrator's review
+- The Power Curve chart's left-hand labels were cut off at iPhone width ("280W" showed as "80W"). The axis is wider now.
+- The regression check now waits 3.5 seconds (was 1.8) before each tab screenshot, so charts have finished drawing. Screenshots taken mid-animation had made some lines look cut off.
+
+## Session 24 - V2 Phase 5: Metrics Engine (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 5. It doesn't change how any screen looks or
+works — it adds a "metrics engine" underneath: better numbers computed from your ride files, and
+a few new sections on the Ride page that show them. It also adds the project's first automated
+tests, so future changes are less likely to quietly break something.
+
+### What you'll see on your iPhone
+
+- **Ride pages** (tap any ride that has a power file attached) now show, when there's enough
+  data for them:
+  - A **Best efforts** table — your best 5-second, 1-minute, 5-minute, 20-minute and 60-minute
+    power for that ride, with a gold **★ New best** badge next to any that beat your all-time or
+    last-90-days record.
+  - A **Time in zones** bar — a coloured strip showing how many minutes of the ride were spent
+    in each training zone.
+  - **Heart-rate drift** — how much your heart rate crept up relative to your power over a long,
+    steady ride (only shown for rides that qualify — a genuinely steady effort of an hour or
+    more), with a plain-language note: "Solid aerobic base", "Some drift", or "Drifting: base
+    needs work".
+  - **Efficiency** — your power-to-heart-rate ratio for an easy, longer ride, with "Higher over
+    time = fitter" underneath. This is the kind of number that's only useful to watch trend over
+    months, not any single ride.
+  - These are re-computed from the ride file itself, so **older rides need their file
+    re-attached** (Ride page → "Attach ride file") to get the new Best efforts/Time in zones —
+    everything else on the page works with what's already saved.
+- **Rides with a heart-rate monitor but no power meter** (for example, an outdoor ride recorded
+  with just a chest strap) now work properly for the first time:
+  - Importing one now shows an estimated **Training Stress Score based on your heart rate**
+    instead of showing nothing or a wrong number — the Log Ride summary says something like
+    "TSS 64 (from heart rate)".
+  - Its Ride page now draws a heart-rate chart (there's just no power line, since there's no
+    power to show).
+  - This heart-rate-based TSS estimate needs your **Resting HR** and either your **Max HR** or
+    your **Threshold HR (LTHR)** filled in under Settings → Profile — if either is missing, the
+    ride still saves, just without an estimated TSS.
+- Everything else — your Fitness/Fatigue/Form numbers, your FTP, your progression levels — is
+  unchanged. This phase is purely additive.
+
+### Under the hood (for the curious)
+
+- Every imported ride file is now also processed at full, one-second resolution to compute
+  precise best-power numbers (`bests`), heart-rate stats (`hrStats`) and true average power
+  (`avgPower`) — previously the app only had 10-second-averaged data, which understates short,
+  sharp efforts like a 5-second sprint.
+- Added the project's first automated tests (`npm test`, using a small new tool called
+  **vitest** — the only new dependency this whole project plan allows). 69 tests check the new
+  math (and some of the existing math it builds on) behaves correctly, including tricky edge
+  cases like a heart-rate-only file or a gap in the recording.
+- New files: `src/lib/analysis.js` (per-ride numbers) and `src/lib/records.js` (best-ever and
+  year-to-date numbers across all your rides). These aren't used anywhere else yet — Phase 6
+  wires them into the Progress tab's charts and a few new "New best!" style alerts on Today.
+
+### Baseline change (the automated regression check)
+
+The check that compares the app's behavior against a fixed baseline (`tools/v2-check.mjs`) now
+also records the imported test ride's best 5-minute power and heart-rate stats. Since these are
+brand-new fields that didn't exist before, the baseline file (`tools/v2-baseline.json`) was
+re-written once to include them — nothing about your Fitness/Fatigue/Form numbers changed; only
+two new pieces of data were added to what the check watches for.
+
+### Anything skipped?
+
+- The Ride page's new sections don't show up for rides saved before this update, because the
+  detailed numbers they need weren't computed at the time — you'd need to use "Attach ride file"
+  on an older ride to get them (see above). This is expected, not a bug: old data is never
+  guessed at or invented.
+- These new numbers aren't shown anywhere except the Ride page yet. Phase 6 (next) adds them to
+  the Progress tab's charts (a power curve, a "time in zones" chart, an efficiency trend) and to
+  Today's alerts (e.g. "New best!", "Your heart rate hit a new high — update your profile?").
+
+## Session 24 - V2 Phase 4: Rides, Ride Page, Log Ride, Settings and Auto-Sync (2026-09-25)
+
+This session followed **`V2_PLAN.md`**'s Phase 4. It redesigns the three tabs Phase 3 moved but
+didn't restyle — Rides, Settings, and the Ride page — and rewrites Log Ride from the ground up.
+It also turns on automatic Google Drive backups.
+
+### What you'll see on your iPhone
+
+- **Rides tab**:
+  - The monthly calendar now shows a coloured dot on every ride day — the colour matches the
+    training zone you rode (or teal for an outdoor ride, grey for an indoor ride still waiting
+    for a zone). A day with two rides shows a two-tone dot. A new column on the right of the
+    calendar shows each week's total TSS.
+  - Tap a ride day to open its chart. Tap a day with more than one ride to see a short list and
+    pick one. Tap an empty day in the past (or today) to log a ride on that date.
+  - New filter chips — **All · Indoor · Outdoor · Needs zone** — plus a search box that matches
+    a ride's name or notes.
+  - Your ride history below the calendar is grouped by month with the month name stuck to the
+    top as you scroll, and loads a few months at a time with a **Show older rides** button, so
+    it stays fast even with hundreds of rides.
+- **Ride pages** (tap any ride): a cleaner layout — the ride's name, date, type/zone and any
+  detected interval label at the top; a grid of Duration, Distance, Elevation, NP, TSS, IF (and
+  Avg HR when known); the same power/heart-rate chart and interval table as before; your notes;
+  and three buttons at the bottom: **Edit ride**, **Attach ride file** (add a FIT/TCX file's
+  chart to this exact ride — no more guessing which ride it belongs to), and **Delete ride**.
+- **Log Ride** is rebuilt:
+  - You now choose **Import file** or **Enter manually** at the top.
+  - Importing a file shows a short summary (date, duration, power, estimated TSS, detected
+    intervals) instead of a form full of numbers. Tap **Edit numbers** if you need to correct
+    anything.
+  - If you already logged a ride that day, you'll see "You already logged … — **Attach this
+    file to it** / **Save as a new ride**" right there in the sheet.
+  - Entering a ride by hand now starts with everything blank — no more surprise "60 minutes,
+    150 watts" left over from a previous ride. **Save** stays greyed out until you've filled in
+    a duration, a power number, and (for an indoor ride) picked a zone.
+  - Effort (RPE) is now ten tappable numbers instead of a slider, with the effort your zone
+    normally expects circled for you.
+- **Settings tab**:
+  - Your **Profile** now shows a table of your six training zones and their watt ranges right
+    under the FTP box, updating live as you type a new FTP. There's also a new optional
+    **Threshold HR / LTHR** field — leave it blank and the app estimates it from your Max HR.
+  - **Sync & backup** now says **"Unsynced changes"** if a change hasn't made it to Google Drive
+    yet (see auto-sync below).
+  - A new **Old imported rides** section lets you say "stop asking" about old rides from the
+    original import that never got a training zone — they'll stop showing up in "Needs zone"
+    and in the Today alert. Changed your mind? Tap "Show them again."
+  - A new **About** section shows the app's version number and a link to this changelog.
+  - The **Settings** tab in the bottom bar shows a small red badge when you have changes that
+    haven't synced yet.
+- **Google Drive auto-sync**: once you've signed in once (Settings → Sync with Google Drive),
+  the app now backs up automatically a few seconds after you make a change — log a ride, edit
+  one, change your profile — with no extra taps. If your sign-in has expired, nothing pops up
+  on its own; the Settings badge just lets you know there's something to sync next time you
+  open Settings and tap Sync.
+- The **＋ Log Ride** button is now a proper rounded pill (a small cosmetic bug left over from
+  the last update).
+
+### Small behaviour changes (on purpose)
+
+- A brand-new manual ride entry starts completely blank (no default 60 minutes / 150 watts / a
+  pre-picked zone), so you can't accidentally save a ride with numbers you never actually typed.
+- Attaching a FIT/TCX file to an *existing* ride is now done from that ride's own page
+  ("Attach ride file"), not by re-opening Log Ride and hoping it finds the right day.
+- A Google sign-in that's expired is now treated as signed-out (it used to be reused forever and
+  quietly fail on the next sync); the Sync button will ask you to sign in again when that happens.
+
+### Fix found during the orchestrator's review
+- The "Unsynced changes" badge showed on the Settings tab every time the app opened, even with no edits, because loading saved data counted as a change. Now "unsynced" means your data was changed after the last successful sync (`exportedAt` later than `lastSyncedAt`), and any successful sync, including a pull or an "already up to date", records the sync time. Checked: a fresh open shows no badge; edits made while signed out still show it after a reload; with a (stubbed) valid sign-in a burst of edits syncs once.
+
+### Checks
+
+- Build passes.
+- **Regression check** (`tools/v2-check.mjs`): **no differences vs baseline** — same CTL 45,
+  ATL 33, TSB +12, "Transition", and the same imported test ride (54 min, NP 208, TSS 73,
+  zone `vo2max`, "3x8 @ 250W"), even though the Log Ride sheet and the Rides tab both changed
+  underneath it. The script now opens Log Ride and screenshots both entry modes (Import file,
+  Enter manually) before importing the test file — the file input is found the same way, since
+  Import file is still the sheet's first, default mode. No tap targets under 44px, no sideways
+  scrolling, no page errors.
+- `grep -rn "window.confirm\|alert(" src/`: only the one storage-full `alert()` remains (it must
+  stay one, by design — it fires when the app itself may be broken). No `window.confirm` anywhere.
+- **By-hand checks**, each confirmed against the saved data:
+  - Manual entry: Save stayed disabled with everything blank, with only a duration, and with a
+    duration + power but no zone (indoor); it enabled once all three were filled in. Switching to
+    Outdoor removed the zone requirement (and hid the zone chips) as expected.
+  - Importing an outdoor file also hid the zone chips.
+  - The "attach to an existing ride" card: choosing **Save as a new ride** fell through to the
+    normal import summary; choosing **Attach this file to it** added the file's chart to the
+    existing ride without changing its TSS or zone, created no duplicate, and opened its Ride
+    page.
+  - A test week with a 50-TSS ride and a 70-TSS ride showed **120** in that week's calendar
+    column.
+  - "Stop asking about old imported rides" removed them from the "Needs zone" filter and from
+    the Today alert count; "Show them again" brought both back.
+  - Editing a ride from its Ride page saved and returned to that same Ride page; editing a ride
+    opened from the Rides list did the same.
+  - Auto-sync logic, checked with a temporary test stub (removed before committing): a burst of
+    three quick profile edits produced exactly **one** sync call when a Google sign-in was
+    valid; with no valid sign-in, the Settings tab showed the unsynced-changes badge and no sync
+    was attempted.
+
+### Deferred to later phases (not changed here, on purpose)
+
+- Best efforts, time in zones, heart-rate drift and efficiency factor on the Ride page: Phase 5
+  (the page has marked slots waiting for them).
+- The Progress tab's look, and the new Today alerts (new best, ramp rate, "feels harder than
+  usual", max heart rate): Phase 6.
+- The progression-level ceiling, and the "assigning a zone to an old imported ride can move its
+  decay clock backwards" quirk noted in Session 23: Phase 7.
+- Google Drive auto-sync can't be tested against the real Google sign-in in this environment
+  (no network access to Google's servers); it was checked with a stub that stands in for
+  `GoogleDriveSync.hasValidToken()`/`sync()`, as the plan asks for. Please try a real sign-in and
+  a few edits on your phone and confirm Settings shows "Last synced …" afterward.
+
+### Files Changed
+- `src/components/ui/Button.jsx`, `src/Shell.jsx` — `Button` takes a `rounded` prop; the ＋ Log
+  Ride button is a real pill
+- `src/google-drive-sync.js` — `tokenExpiresAt`, `hasValidToken()`, `authenticate()` no longer
+  reuses an expired token
+- `src/state/AppDataContext.jsx` — `userProfile.lthr`; `hasUnsyncedChanges` + the 3s auto-sync
+  debounce; `hideOldImportedRides()`/`showOldImportedRides()`/`oldImportedRideCount()`;
+  `getDefaultFormData()` starts duration/NP/zone empty; ride name defaults at save time
+- `src/state/ShellContext.js` — `openLogRide(date)` can pre-fill the Log Ride date
+- `src/components/ActivityCalendar.jsx` — zone-coloured dots, week-TSS column, day-tap behaviour
+- `src/components/RideRow.jsx` — new (replaces `RideHistoryList.jsx`, removed)
+- `src/screens/RidesScreen.jsx` — filter chips, search, month-grouped lazy list
+- `src/screens/WorkoutDetailPage.jsx` — Ride page rebuild (stats grid, actions row, Phase 5 slots)
+- `src/screens/LogRideSheet.jsx` — Log Ride v2 (import/manual modes, inline attach card, RPE grid)
+- `src/screens/SettingsScreen.jsx` — zone table, LTHR, old imported rides, About
+- `package.json` — version `2.0.0-beta`
+- `tools/v2-check.mjs`, `tools/v2-baseline.json` — Log Ride sheet screenshots for both modes (no
+  baseline value changes)
+- `ARCHITECTURE.md` — Rides/Ride page/Log Ride/Settings sections rewritten for Phase 4; Google
+  Drive Sync section documents auto-sync; `historical` field documented
+- `CHANGELOG.md` — this entry
+
+---
+
 ## Session 23 - V2 Phase 3: New Four-Tab Layout and Today Tab (2026-09-25)
 
 This session followed **`V2_PLAN.md`**'s Phase 3. The app gets a new layout: four tabs along the bottom of the screen, and a new **Today** tab that sums up where your training is. Everything else that was on the old long page is still there, moved into a tab. It mostly looks the same as before; Phases 4 and 6 redesign those parts.

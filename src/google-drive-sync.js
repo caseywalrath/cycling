@@ -10,7 +10,17 @@ const GoogleDriveSync = {
   // State
   tokenClient: null,
   accessToken: null,
+  tokenExpiresAt: null, // ms epoch; V2 Phase 4 — a token used to be treated as valid forever
   isInitialized: false,
+
+  /**
+   * True when there's an access token with more than 60s left before it expires.
+   * V2 Phase 4 (D3): auto-sync checks this before syncing, so it never has to call
+   * authenticate() (and risk a popup) from anything but a user tap.
+   */
+  hasValidToken() {
+    return !!this.accessToken && !!this.tokenExpiresAt && Date.now() < this.tokenExpiresAt - 60000;
+  },
 
   /**
    * Initialize the Google Identity Services client
@@ -33,6 +43,7 @@ const GoogleDriveSync = {
           return;
         }
         this.accessToken = response.access_token;
+        this.tokenExpiresAt = Date.now() + (response.expires_in || 0) * 1000;
       }
     });
 
@@ -61,14 +72,19 @@ const GoogleDriveSync = {
           return;
         }
         this.accessToken = response.access_token;
+        this.tokenExpiresAt = Date.now() + (response.expires_in || 0) * 1000;
         resolve(response.access_token);
       };
 
-      // Check if we already have a valid token
-      if (this.accessToken) {
+      // Check if we already have a valid (unexpired) token. V2 Phase 4: a stale token used to
+      // be reused forever here and fail on the next Drive API call — an expired token is now
+      // treated as absent, so a fresh one gets requested instead.
+      if (this.hasValidToken()) {
         resolve(this.accessToken);
         return;
       }
+      this.accessToken = null;
+      this.tokenExpiresAt = null;
 
       // Request new token (will show consent popup if needed)
       this.tokenClient.requestAccessToken({ prompt: '' });
@@ -91,6 +107,7 @@ const GoogleDriveSync = {
 
     if (response.status === 401) {
       this.accessToken = null;
+      this.tokenExpiresAt = null;
       throw new Error('Session expired. Please try again.');
     }
 
@@ -122,6 +139,7 @@ const GoogleDriveSync = {
 
     if (response.status === 401) {
       this.accessToken = null;
+      this.tokenExpiresAt = null;
       throw new Error('Session expired. Please try again.');
     }
 
@@ -156,6 +174,7 @@ const GoogleDriveSync = {
 
     if (response.status === 401) {
       this.accessToken = null;
+      this.tokenExpiresAt = null;
       throw new Error('Session expired. Please try again.');
     }
 
@@ -186,6 +205,7 @@ const GoogleDriveSync = {
 
     if (response.status === 401) {
       this.accessToken = null;
+      this.tokenExpiresAt = null;
       throw new Error('Session expired. Please try again.');
     }
 
@@ -333,6 +353,7 @@ const GoogleDriveSync = {
     if (this.accessToken) {
       google.accounts.oauth2.revoke(this.accessToken);
       this.accessToken = null;
+      this.tokenExpiresAt = null;
     }
   }
 };

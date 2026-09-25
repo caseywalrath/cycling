@@ -27,6 +27,13 @@ export default function PostLogSummarySheet({ workout, onClose }) {
 
         {lastLoggedWorkout.previousLevel != null && lastLoggedWorkout.newLevel != null ? (
           <>
+            {/* V2 Phase 7: the workout level this ride earned credit for */}
+            {lastLoggedWorkout.workoutLevelSource && lastLoggedWorkout.workoutLevel != null && (
+              <p className="text-sm text-gray-400 mb-3 tabular-nums">
+                This workout: level {Number(lastLoggedWorkout.workoutLevel).toFixed(1)}
+                {lastLoggedWorkout.workoutLevelSource === 'structure' ? ' (from your intervals)' : ' (set by you)'}
+              </p>
+            )}
             <div className="flex items-center justify-center gap-4 mb-4">
               <div className="text-right">
                 <div className="text-2xl font-mono text-gray-400 tabular-nums">{lastLoggedWorkout.previousLevel.toFixed(1)}</div>
@@ -75,11 +82,12 @@ export default function PostLogSummarySheet({ workout, onClose }) {
         <div className="grid grid-cols-3 gap-2 text-sm bg-gray-700/50 rounded-xl p-3 tabular-nums">
           <div>
             <div className="text-gray-400">TSS</div>
-            <div className="font-mono">{lastLoggedWorkout.tss}</div>
+            <div className="font-mono">{lastLoggedWorkout.tss}{lastLoggedWorkout.tssSource === 'hr' ? ' (HR)' : ''}</div>
           </div>
           <div>
             <div className="text-gray-400">IF</div>
-            <div className="font-mono">{lastLoggedWorkout.intensityFactor.toFixed(2)}</div>
+            {/* V2 Phase 5: an HR-only ride has no IF (§5.2) — show a dash instead of crashing. */}
+            <div className="font-mono">{lastLoggedWorkout.intensityFactor != null ? lastLoggedWorkout.intensityFactor.toFixed(2) : '—'}</div>
           </div>
           <div>
             <div className="text-gray-400">RPE</div>
