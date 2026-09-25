@@ -68,6 +68,10 @@ export default function ProgressionTracker() {
   });
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileModalOriginalFTP, setProfileModalOriginalFTP] = useState(null);
+  // v2 Phase 2: local text value for the FTP box while typing, so clearing the field to
+  // retype doesn't snap currentFTP to a default. Only committed to currentFTP on Save.
+  const [ftpInputValue, setFtpInputValue] = useState('');
+  const [ftpInputError, setFtpInputError] = useState('');
 
   // VO2max estimates storage (pass-through from old intervals.icu imports)
   const [vo2maxEstimates, setVo2maxEstimates] = useState([]);
@@ -242,6 +246,8 @@ export default function ProgressionTracker() {
     );
     if (shouldUpdate) {
       setProfileModalOriginalFTP(currentFTP);
+      setFtpInputValue(String(currentFTP));
+      setFtpInputError('');
       setShowProfileModal(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1438,6 +1444,8 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
             <button
               onClick={() => {
                 setProfileModalOriginalFTP(currentFTP);
+                setFtpInputValue(String(currentFTP));
+                setFtpInputError('');
                 setShowProfileModal(true);
               }}
               className="text-sm px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 transition"
@@ -1646,13 +1654,16 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                   <label className="block text-sm text-gray-400 mb-1">FTP (watts)</label>
                   <input
                     type="number"
-                    value={currentFTP}
-                    onChange={(e) => setCurrentFTP(parseInt(e.target.value) || 235)}
+                    value={ftpInputValue}
+                    onChange={(e) => { setFtpInputValue(e.target.value); setFtpInputError(''); }}
                     className="w-full bg-gray-700 rounded px-3 py-2 text-sm"
                     placeholder="235"
                     min="100"
                     max="500"
                   />
+                  {ftpInputError && (
+                    <p className="text-xs text-red-400 mt-1">{ftpInputError}</p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1726,27 +1737,30 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
               <div className="flex gap-3">
                 <button
                   onClick={() => {
+                    // v2 Phase 2: validate the typed FTP (100-500). An empty or out-of-range
+                    // box no longer silently snaps to a default — it keeps the previous FTP
+                    // and shows an inline error, and the modal stays open.
+                    const parsedFTP = parseInt(ftpInputValue, 10);
+                    if (!Number.isFinite(parsedFTP) || parsedFTP < 100 || parsedFTP > 500) {
+                      setFtpInputError('Enter an FTP between 100 and 500 watts.');
+                      return;
+                    }
+
                     // Check if FTP changed
-                    if (profileModalOriginalFTP !== null && currentFTP !== profileModalOriginalFTP) {
+                    if (profileModalOriginalFTP !== null && parsedFTP !== profileModalOriginalFTP) {
                       const shouldReset = window.confirm(
-                        `Your FTP changed from ${profileModalOriginalFTP}W to ${currentFTP}W.\n\n` +
+                        `Your FTP changed from ${profileModalOriginalFTP}W to ${parsedFTP}W.\n\n` +
                         `Would you like to reset your progression levels to 1.0?\n\n` +
                         `This is recommended when your FTP changes significantly.`
                       );
                       if (shouldReset) {
-                        const resetLevels = {
-                          endurance: 1.0,
-                          tempo: 1.0,
-                          sweetspot: 1.0,
-                          threshold: 1.0,
-                          vo2max: 1.0,
-                          anaerobic: 1.0,
-                        };
+                        const resetLevels = { ...DEFAULT_LEVELS };
                         setLevels(resetLevels);
                         setDisplayLevels(resetLevels);
                         setLastWorkedDates({});
                       }
                     }
+                    setCurrentFTP(parsedFTP);
                     markDataChanged();
                     setShowProfileModal(false);
                   }}
@@ -1756,10 +1770,6 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
                 </button>
                 <button
                   onClick={() => {
-                    // Revert FTP change on cancel
-                    if (profileModalOriginalFTP !== null) {
-                      setCurrentFTP(profileModalOriginalFTP);
-                    }
                     setShowProfileModal(false);
                   }}
                   className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-medium transition"
@@ -3422,14 +3432,7 @@ ${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indo
           <button
             onClick={() => {
               if (window.confirm('Reset all progression levels to 1.0?\n\nThis will NOT delete your workout history.\n\nThis action cannot be undone.')) {
-                const resetLevels = {
-                  endurance: 1.0,
-                  tempo: 1.0,
-                  sweetspot: 1.0,
-                  threshold: 1.0,
-                  vo2max: 1.0,
-                  anaerobic: 1.0,
-                };
+                const resetLevels = { ...DEFAULT_LEVELS };
                 setLevels(resetLevels);
                 setDisplayLevels(resetLevels);
                 setLastWorkedDates({});
