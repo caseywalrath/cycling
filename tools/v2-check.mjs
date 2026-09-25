@@ -1,9 +1,11 @@
 // V2 regression check — see V2_PLAN.md §0.4.
 //
 // Seeds the app with a fixed, synthetic 12-month ride history, freezes the clock at
-// 2026-09-25 12:00, imports a synthetic .tcx file through the Log Ride screen, then
-// records the numbers that must not change by accident and screenshots the page at
-// iPhone width (390px). Compares against tools/v2-baseline.json and prints any diffs.
+// 2026-09-25 12:00, imports a synthetic .tcx file through the Log Ride sheet, then
+// records the numbers that must not change by accident and screenshots every tab and one
+// Ride page at iPhone width (390px). Compares against tools/v2-baseline.json and prints
+// any diffs. Since V2 Phase 3 it also lists tap targets under 44px and checks for
+// horizontal scrolling on each tab (printed and saved to .out/extras.json, not diffed).
 //
 // Usage (dev server must already be running: `npx vite --port 3000`):
 //   node tools/v2-check.mjs                 # compare against baseline
@@ -123,26 +125,90 @@ await page.evaluate(d => {
 await page.reload();
 await page.waitForTimeout(1500);
 
-const bodyText = await page.evaluate(() => document.body.innerText);
-const grab = re => { const m = bodyText.match(re); return m ? m[1] : null; };
-const fullHeight = await page.evaluate(() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
-await page.setViewportSize({ width: 390, height: Math.min(fullHeight, 8000) });
-await page.waitForTimeout(600);
-await page.screenshot({ path: path.join(OUT, 'home.png') });
-await page.setViewportSize({ width: 390, height: 844 });
+// ---------- helpers (V2 Phase 3: four tabs, hash routing) ----------
+const text = sel => page.evaluate(s => {
+  const el = document.querySelector(s);
+  return el ? el.textContent.replace(/ /g, ' ').replace(/\s+/g, ' ').trim() : null;
+}, sel);
 
-// Import the synthetic TCX through the Log Ride screen and save it.
+// Tap targets smaller than 44px (visible buttons, links, file-picker labels, form fields).
+const smallTapTargets = () => page.evaluate(() => {
+  const els = [...document.querySelectorAll('button, a[href], [role="button"], label:has(input[type=file]), input:not([type=hidden]):not([type=file]), select, textarea')];
+  const out = [];
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    if (r.width === 0 || r.height === 0 || style.visibility === 'hidden' || style.display === 'none') continue;
+    if (el.type === 'checkbox' && el.closest('label')) continue; // the whole label is the target
+    if (r.height < 43.5 || r.width < 43.5) {
+      const name = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('placeholder') || el.tagName).replace(/\s+/g, ' ').trim().slice(0, 40);
+      out.push(`${el.tagName.toLowerCase()} "${name}" ${Math.round(r.width)}x${Math.round(r.height)}`);
+    }
+  }
+  return [...new Set(out)];
+});
+
+const hasHorizontalScroll = () => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+
+// Full-length screenshot, plus one at phone height scrolled to the bottom (to check the tab
+// bar and the ＋ Log Ride button don't cover the last content).
+const shootTab = async (name) => {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(300);
+  const h = await page.evaluate(() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
+  await page.setViewportSize({ width: 390, height: Math.min(h, 8000) });
+  await page.waitForTimeout(1800); // let Recharts finish its draw-in animation
+  await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(OUT, `${name}-bottom.png`) });
+  await page.evaluate(() => window.scrollTo(0, 0));
+};
+
+const extras = { tapTargetsUnder44: {}, horizontalScroll: {} };
+const goTab = async (tab) => {
+  await page.evaluate(h => { window.location.hash = h; }, `#/${tab}`);
+  await page.waitForTimeout(700);
+};
+
+// ---------- numbers (read from the Today tab) ----------
+await goTab('today');
+const numbers = {
+  ftpLine: await text('[data-ftp-line]'),
+  ctl: await text('[data-stat="ctl"] [data-value]'),
+  atl: await text('[data-stat="atl"] [data-value]'),
+  tsb: await text('[data-stat="tsb"] [data-value]'),
+  trainingStatus: await text('[data-training-status]'),
+  rideCount: history.length,
+};
+
+// ---------- each tab: screenshots, tap targets, horizontal scroll ----------
+for (const tab of ['today', 'rides', 'progress', 'settings']) {
+  await goTab(tab);
+  extras.tapTargetsUnder44[tab] = await smallTapTargets();
+  extras.horizontalScroll[tab] = await hasHorizontalScroll();
+  await shootTab(tab);
+}
+await goTab('today');
+
+// Import the synthetic TCX through the Log Ride sheet (＋ Log Ride on Today) and save it.
 let imported = null;
+let importedId = null;
 try {
   await page.getByRole('button', { name: /log ride/i }).first().click();
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(500);
   await page.locator('input[type=file][accept*=".tcx"]').first().setInputFiles(tcxPath);
   await page.waitForTimeout(1500);
+  extras.tapTargetsUnder44.logRideSheet = await smallTapTargets();
   await page.screenshot({ path: path.join(OUT, 'log-ride-after-import.png') });
   await page.getByRole('button', { name: /^(save|update)( workout| ride)?$/i }).first().click();
   await page.waitForTimeout(800);
+  await page.screenshot({ path: path.join(OUT, 'post-log-summary.png') });
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('cycling-progression-data-v2')).history);
   const r = saved.find(w => w.date === '2026-09-23');
+  importedId = r ? r.id : null;
   imported = r ? {
     duration: r.duration, normalizedPower: r.normalizedPower, tss: r.tss, rideType: r.rideType, zone: r.zone,
     streamBins: r.stream?.power?.length ?? null, hrBins: r.stream?.hr?.filter(v => v != null).length ?? null,
@@ -152,23 +218,30 @@ try {
   imported = `IMPORT FLOW FAILED: ${e.message.split('\n')[0]}`;
 }
 
+// One Ride page: the ride just imported.
+if (importedId != null) {
+  await page.getByRole('button', { name: /^continue$/i }).first().click().catch(() => {});
+  await page.waitForTimeout(400);
+  await page.evaluate(h => { window.location.hash = h; }, `#/ride/${importedId}`);
+  await page.waitForTimeout(1200);
+  extras.tapTargetsUnder44.ridePage = await smallTapTargets();
+  extras.horizontalScroll.ridePage = await hasHorizontalScroll();
+  await shootTab('ride-page');
+}
+
 const result = {
-  numbers: {
-    ftpLine: grab(/(FTP:\s*\d+W[^\n]*)/),
-    ctl: grab(/CTL[^\d\n]*\n?\s*(\d+)/),
-    atl: grab(/ATL[^\d\n]*\n?\s*(\d+)/),
-    tsb: grab(/TSB[^\d+-]*\n?\s*([+-]?\d+)/),
-    trainingStatus: grab(/Training Status\s*\n\s*([A-Za-z ()]+)/),
-    rideCount: history.length,
-  },
+  numbers,
   importedTcx: imported,
   pageErrors: errors,
   dialogs,
 };
+fs.writeFileSync(path.join(OUT, 'extras.json'), JSON.stringify(extras, null, 2));
 fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(result, null, 2));
 await browser.close();
 
 console.log(JSON.stringify(result, null, 2));
+console.log('\nLayout checks (not part of the baseline):');
+console.log(JSON.stringify(extras, null, 2));
 if (WRITE) {
   fs.writeFileSync(BASELINE, JSON.stringify(result, null, 2) + '\n');
   console.log(`\nBaseline written to ${BASELINE}`);
