@@ -8,8 +8,14 @@
   box-sizing: border-box;
 }
 
-html, body {
+/* V2 Phase 3: overflow-x only on <body> (it propagates to the viewport), so the window,
+   not <body>, is the scroll container. That's what lets each tab remember its scroll
+   position and keeps sticky page headers working. */
+html {
   height: 100%;
+}
+body {
+  min-height: 100%;
   width: 100%;
   overflow-x: hidden;
 }
@@ -23,13 +29,26 @@ body {
   background-color: #111827;
 }
 
-/* iOS specific fixes */
-@supports (-webkit-touch-callout: none) {
-  body {
-    /* Fix for iOS bottom bar */
-    padding-bottom: env(safe-area-inset-bottom);
-  }
+/* V2 Phase 3: the old iOS bottom padding on <body> is gone. With viewport-fit=cover
+   (index.html), Screen, Page, Sheet and TabBar handle the safe areas themselves. */
+
+/* Sheet / toast entrance animations */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-sheet-up { animation: sheet-up 0.22s ease-out; }
+.animate-fade-in { animation: fade-in 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet-up, .animate-fade-in { animation: none; }
+}
+
+/* No grey flash when tapping on iOS */
+button, a, label { -webkit-tap-highlight-color: transparent; }
 
 /* Prevent pull-to-refresh on mobile */
 body {
