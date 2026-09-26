@@ -168,7 +168,17 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
                 {isOutdoor && (
                   <>
                     <div className="flex justify-between"><span className="text-gray-400">Distance</span><span className="tabular-nums">{formData.distance} mi</span></div>
-                    <div className="flex justify-between"><span className="text-gray-400">Elevation</span><span className="tabular-nums">{formData.elevation} ft</span></div>
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="ride-elevation-import" className="text-gray-400">Elevation</label>
+                      <span className="flex items-center gap-1">
+                        <input id="ride-elevation-import" type="number" inputMode="numeric"
+                          value={formData.elevation || ''}
+                          onChange={(e) => setFormData({ ...formData, elevation: parseInt(e.target.value) || 0 })}
+                          min="0" max="30000" placeholder="0"
+                          className="w-20 bg-gray-600 rounded-md px-2 text-right text-base tabular-nums min-h-[44px]" />
+                        <span className="tabular-nums">ft</span>
+                      </span>
+                    </div>
                   </>
                 )}
                 {isHrOnlyImport ? (
@@ -220,20 +230,21 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
       {/* Manual numeric fields — manual mode, edit mode, or "Edit numbers" on an import */}
       {showManualFields && !pendingImport && (
         <div className="mb-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass} htmlFor="ride-date">Date</label>
-              <input id="ride-date" type="date" value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })} className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="ride-type">Ride type</label>
-              <select id="ride-type" value={formData.rideType}
-                onChange={(e) => setFormData({ ...formData, rideType: e.target.value })} className={inputClass}>
-                <option value="Indoor">Indoor</option>
-                <option value="Outdoor">Outdoor</option>
-              </select>
-            </div>
+          {/* Date gets its own full-width row — iOS renders the native date input's text at
+              a larger, non-adjustable size that overflows a half-width grid cell into its
+              neighbor. */}
+          <div>
+            <label className={labelClass} htmlFor="ride-date">Date</label>
+            <input id="ride-date" type="date" value={formData.date}
+              onChange={(e) => setFormData({ ...formData, date: e.target.value })} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="ride-type">Ride type</label>
+            <select id="ride-type" value={formData.rideType}
+              onChange={(e) => setFormData({ ...formData, rideType: e.target.value })} className={inputClass}>
+              <option value="Indoor">Indoor</option>
+              <option value="Outdoor">Outdoor</option>
+            </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

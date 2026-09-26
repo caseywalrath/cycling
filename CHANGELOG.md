@@ -1,5 +1,18 @@
 # Changelog
 
+## Session 25 - Settings Badge, Date Field, Elevation Fix (2026-09-26)
+
+### What you'll see on your iPhone
+- **Settings badge**: the red dot on the Settings tab was showing up for everyone, even if you've never connected Google Drive backup — in that case there's nothing to "sync," so it wasn't a useful warning. Now it only appears once you've connected Google Drive at least once, and it means what it says: you have changes that haven't reached Drive yet.
+- **Date field on Log/Edit ride**: the Date box used to sit side-by-side with Ride type, and on iPhone its text rendered oversized and spilled into the Ride type box next to it. Date and Ride type now each get their own full-width row, so nothing overlaps.
+- **Elevation for imported outdoor rides**: some ride files (especially `.tcx` exports) don't include elevation data, so it showed as a fixed "0 ft" with no way to fix it short of switching to "Edit numbers." The Elevation line on the import summary is now a direct input you can type into, right where you review the ride before saving.
+
+### Files Changed
+- `src/state/AppDataContext.jsx` — unsynced-changes badge now requires `lastSyncedAt` (i.e. you've connected Drive before)
+- `src/screens/LogRideSheet.jsx` — Date/Ride type moved to their own rows; imported-ride Elevation is now an editable field
+
+---
+
 ## Session 24 - Tighter Progression Levels Card (2026-09-25)
 
 ### What you'll see on your iPhone

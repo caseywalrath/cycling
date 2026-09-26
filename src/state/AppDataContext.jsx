@@ -305,9 +305,12 @@ export function AppDataProvider({ children }) {
   // markDataChanged() (bumps exportedAt), and every successful sync records lastSyncedAt. So
   // simply opening the app (which loads state) never looks like an unsynced change, while
   // edits made last time without a valid sign-in still show the badge after a reload.
+  // Gated on lastSyncedAt: someone who has never connected Google Drive has no "unsynced"
+  // changes to report — the badge would otherwise show permanently for anyone not using
+  // cloud sync at all.
   useEffect(() => {
     clearTimeout(autoSyncTimer.current);
-    const dirty = !!exportedAt && (!lastSyncedAt || exportedAt > lastSyncedAt);
+    const dirty = !!lastSyncedAt && !!exportedAt && exportedAt > lastSyncedAt;
     if (!dirty) {
       setHasUnsyncedChanges(false);
       return undefined;
