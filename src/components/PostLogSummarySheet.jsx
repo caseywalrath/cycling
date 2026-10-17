@@ -91,7 +91,7 @@ export default function PostLogSummarySheet({ workout, onClose }) {
           </div>
           <div>
             <div className="text-gray-400">RPE</div>
-            <div className="font-mono">{lastLoggedWorkout.rpe}/10</div>
+            <div className="font-mono">{lastLoggedWorkout.rpe != null ? `${lastLoggedWorkout.rpe}/10` : 'Not rated'}</div>
           </div>
         </div>
       </div>

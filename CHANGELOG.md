@@ -1,5 +1,41 @@
 # Changelog
 
+## Session 29 - Honest Effort Ratings (2026-10-17)
+
+Based on a literature review of RPE in cycling (rate the whole session, 0–10 "CR10" scale; effort rises with ride length and sustained climbing, not just power), checked against what the app actually did.
+
+### What you'll see on your iPhone
+- **Effort starts blank.** The Log Ride sheet no longer fills in a 5. It says "Not rated" until you tap a number, and tapping the chosen number again clears it. A ride can be saved without a rating, and the post-log summary then says "Not rated". Before this, every imported ride was quietly saved as a 5.
+- **A clearer scale.** Under the numbers: "3 moderate · 5 hard · 7 very hard · 10 maximal. Rate the whole ride, not the hardest moment." The ringed number is what's typical for that ride, and it now also appears for outdoor rides.
+- **Effort card on the Ride page.** It shows your rating (or "Not rated"), what's typical for a ride like this, and how far off you were. **Rate** or **Change** opens the numbers, and picking one saves it straight away. This is also how you rate a ride you skipped at logging time.
+- **One idea of "typical effort" everywhere.** The ring, the Ride page, the "Feels harder than usual" alert and Copy for Claude all use the same rule now:
+  - an indoor ride filed under a zone: that zone's usual effort (Sweet Spot 6, VO2max 8, ...). A VO2 session with a gentle warm-up no longer looks "easy" to the alert.
+  - any other ride (outdoor, or no zone yet): from its Intensity Factor, with the old cliff at 0.85 (5 jumping to 7) smoothed into steps.
+  - rides of 2+ hours add 1, and 3.5+ hours add 2, when the effort would otherwise be 6 or less. So an honest 6 on a 3-hour endurance ride is no longer a "+2".
+- **The alert skips unrated rides,** so forgotten ratings can't set it off.
+- **Copy for Claude** writes each ride as `RPE 8 (expected 7, +1)` (or `RPE not rated`), and adds one line under Recent rides: `RPE vs expected, last 5 rated rides: +0.4 avg, 1 ride +2 or more`.
+
+### Not changed
+- **Progression levels.** They still use their own per-zone table, so no level moves because of this.
+- **Past rides.** Saved ratings are not rewritten. Old rides that were saved as a 5 without you choosing it still count as a 5. New ones are blank, so this corrects itself as you log. Because "typical effort" is worked out when needed, past rides are judged by the new rule immediately, so today's "feels harder" alert could appear or disappear.
+- Rating a ride later on its Ride page changes the rating only. It does not re-run levels.
+
+### Under the hood
+- `src/lib/analysis.js`: `expectedRpe(ride)` replaces `expectedRpe(intensityFactor)`; new `expectedRpeFromIf`, `recentRpeGaps`. `src/lib/alerts.js` and `src/lib/summary.js` use them.
+- New `src/components/RpeButtons.jsx`; used by `src/screens/LogRideSheet.jsx` and `src/screens/WorkoutDetailPage.jsx`.
+- `src/state/AppDataContext.jsx`: `rpe` starts `null`, the edit form keeps a missing rating missing, new `rateRide(id, rpe)`.
+- `src/components/PostLogSummarySheet.jsx`: "Not rated".
+
+### Checks
+- 173 unit tests pass (was 163). New: the zone/IF/duration rules, the cliff gone, `recentRpeGaps`, the alert (zone-judged VO2 ride, unrated rides ignored), and the export wording.
+- `tools/v2-check.mjs`: no differences vs baseline; `tools/ftp-history-check.mjs` and `tools/ride-chart-check.mjs` still pass.
+- New `tools/rpe-check.mjs` drives the real app (all checks pass): blank start, scale hint, ring, clear by tapping again, saving unrated stores `null`, editing keeps it unrated, Ride page Rate / Change / clear, and the export lines.
+
+### Anything skipped?
+- A "review past ratings" screen for old default 5s (you chose to let it self-correct).
+- The "what limited you" chips (legs, breathing, heat, sleep, head) and RPE × minutes session load.
+- Climbing or altitude are not in the expected-effort rule yet.
+
 ## Session 28 - Smoother Ride Charts and Best-Effort Bars (2026-10-17)
 
 ### What you'll see on your iPhone

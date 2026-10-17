@@ -87,15 +87,32 @@ describe('buildAlerts — ramp rate', () => {
 });
 
 describe('buildAlerts — feels harder than usual', () => {
+  // Outdoor rides are judged from IF: IF 0.60 expects 3, IF 0.90 expects 7.
+  const out = (over) => ride({ rideType: 'Outdoor', zone: null, ...over });
   const mismatchHistory = () => [
-    ride({ id: 5, date: '2026-09-24', intensityFactor: 0.60, rpe: 9 }), // expected 3, mismatch 6
-    ride({ id: 4, date: '2026-09-22', intensityFactor: 0.60, rpe: 8 }), // mismatch 5
-    ride({ id: 3, date: '2026-09-20', intensityFactor: 0.90, rpe: 8 }), // expected 8, mismatch 0
+    out({ id: 5, date: '2026-09-24', intensityFactor: 0.60, rpe: 9 }), // expected 3, mismatch 6
+    out({ id: 4, date: '2026-09-22', intensityFactor: 0.60, rpe: 8 }), // mismatch 5
+    out({ id: 3, date: '2026-09-20', intensityFactor: 0.90, rpe: 7 }), // expected 7, mismatch 0
   ];
 
   it('fires when 2+ of the last 5 power rides feel harder than expected', () => {
     const alerts = buildAlerts(baseState({ history: mismatchHistory() }), {}, today);
     expect(alerts.find(a => a.id === 'feels-harder')).toBeTruthy();
+  });
+
+  it('judges an indoor ride by its zone: a hard VO2 session is not a surprise', () => {
+    const vo2 = (id, date) => ride({ id, date, zone: 'vo2max', intensityFactor: 0.80, rpe: 8 });
+    const alerts = buildAlerts(baseState({ history: [vo2(3, '2026-09-24'), vo2(2, '2026-09-22'), vo2(1, '2026-09-20')] }), {}, today);
+    expect(alerts.find(a => a.id === 'feels-harder')).toBeUndefined();
+  });
+
+  it('ignores rides that were never rated', () => {
+    const hist = [
+      out({ id: 5, date: '2026-09-24', intensityFactor: 0.60, rpe: null }),
+      out({ id: 4, date: '2026-09-22', intensityFactor: 0.60, rpe: null }),
+      out({ id: 3, date: '2026-09-20', intensityFactor: 0.60, rpe: 4 }),
+    ];
+    expect(buildAlerts(baseState({ history: hist }), {}, today).find(a => a.id === 'feels-harder')).toBeUndefined();
   });
 
   it('does not fire with only one mismatched ride', () => {

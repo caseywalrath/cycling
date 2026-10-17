@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { ZONES, ZONE_EXPECTED_RPE, getZoneColor, getZoneName } from '../lib/zones.js';
+import { ZONES, getZoneColor, getZoneName } from '../lib/zones.js';
+import { expectedRpe } from '../lib/analysis.js';
 import { parseDuration } from '../lib/dates.js';
 import { LEVEL_AT_REFERENCE } from '../lib/progression.js';
 import { shortDayDate } from '../lib/format.js';
 import { estimateLthr, hrTss } from '../lib/load.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { Sheet, Button, Chip, SegmentedControl, useToast } from '../components/ui/index.js';
+import RpeButtons from '../components/RpeButtons.jsx';
 
 // Log Ride v2 (V2 Plan §4.3). Two entry modes for a new ride — Import file (default) and
 // Enter manually — chosen at the top; editing an existing ride always shows the full manual
@@ -14,8 +16,6 @@ import { Sheet, Button, Chip, SegmentedControl, useToast } from '../components/u
 // valid: duration > 0, NP > 0, and an indoor ride has a zone. No invented defaults.
 const inputClass = 'w-full bg-gray-700 rounded-lg px-3 py-2 text-base min-h-[44px]';
 const labelClass = 'block text-sm text-gray-400 mb-1';
-
-const RPE_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const {
@@ -362,31 +362,16 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
 
           <div>
             <label className={labelClass}>
-              Effort (RPE): <span className="tabular-nums text-gray-300">{formData.rpe}</span>
+              Effort (RPE): <span data-rpe-value className="tabular-nums text-gray-300">{formData.rpe ?? 'Not rated'}</span>
             </label>
-            <div className="grid grid-cols-5 gap-2" role="group" aria-label="Rate of perceived exertion">
-              {RPE_VALUES.map((v) => {
-                const expected = isIndoor && formData.zone && ZONE_EXPECTED_RPE[formData.zone] === v;
-                const selected = formData.rpe === v;
-                return (
-                  <button
-                    key={v}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setFormData({ ...formData, rpe: v })}
-                    className={`min-h-[44px] rounded-lg text-base font-semibold tabular-nums border-2 transition-colors ${
-                      selected ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-transparent text-gray-200 hover:bg-gray-600'
-                    } ${expected && !selected ? 'ring-2 ring-blue-400' : ''}`}
-                  >
-                    {v}
-                  </button>
-                );
+            <RpeButtons
+              value={formData.rpe}
+              expected={expectedRpe({
+                rideType: formData.rideType, zone: formData.zone, duration,
+                intensityFactor: currentIF > 0 ? currentIF : null,
               })}
-            </div>
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>Easy</span>
-              <span>Hard</span>
-            </div>
+              onChange={(rpe) => setFormData({ ...formData, rpe })}
+            />
           </div>
 
           {/* Calculated values preview (manual mode; the import summary already shows these) */}

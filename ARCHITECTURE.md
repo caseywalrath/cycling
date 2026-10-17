@@ -56,7 +56,8 @@ src/
     ActivityCalendar.jsx     # monthly calendar (Rides tab): zone-coloured ride dots, week-TSS
                              #   column, day taps (V2 Phase 4)
     RideRow.jsx              # one ride row in the Rides list (V2 Phase 4; replaces RideHistoryList)
-    PostLogSummarySheet.jsx  # level before → after, trickle, TSS/IF/RPE
+    PostLogSummarySheet.jsx  # level before → after, trickle, TSS/IF/RPE ("Not rated" when blank)
+    RpeButtons.jsx           # Session 29: the 1–10 effort picker (Log Ride sheet + Ride page)
   screens/
     TodayScreen.jsx          # Today tab (the house style: later phases copy it)
     RidesScreen.jsx          # calendar, filter chips + search, ride list grouped by month
@@ -82,7 +83,8 @@ src/
     load.js                  #   calculateTSS, calculateIF, calculateTrainingLoads, getTrainingStatus,
                              #   estimateLthr, hrTss, dailyLoadSeries, rampRate (Phase 5)
     analysis.js              #   Phase 5: per-ride analysis — bestsForRide, timeInZones,
-                             #   aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, rpeMismatch
+                             #   aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, expectedRpeFromIf,
+                             #   rpeMismatch, recentRpeGaps (Session 29)
     records.js                #   Phase 5: across-rides analysis — powerCurve, personalBests,
                              #   newBestsForRide, bestEffortComparison (Session 28), records, observedMaxHr
     rideChart.js             #   Session 28: Ride page chart smoothing — smoothingSeconds, smoothSeries,
@@ -100,6 +102,7 @@ tools/
   v2-check.mjs               # regression check (see V2_PLAN.md §0.4); v2-baseline.json
   ftp-history-check.mjs      # Session 27: drives Settings → FTP history, re-score + undo, ride-page note
   ride-chart-check.mjs       # Session 28: drives the Ride page — chart smoothing choices, best-effort bars
+  rpe-check.mjs              # Session 29: drives RPE — unrated start, clear, ring, Ride page rating, export lines
 public/                      # PWA icons, apple-touch-icon.png
 .github/workflows/deploy.yml # GitHub Actions → GitHub Pages
 vite.config.js               # Vite + PWA config (base: /cycling/)
@@ -289,7 +292,8 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
      - *Ramp rate* — `rampRate(dailyLoadSeries(...)) > 7`: "Fitness is climbing fast
        (+X/week). Watch for fatigue." **Dismiss** hides it for 7 days (`ramp-rate`: dismissal
        date), then it can return if still true.
-     - *Feels harder than usual* — 2+ of the last 5 power rides have `rpeMismatch(ride) >= 2`.
+     - *Feels harder than usual* — 2+ of the last 5 **rated** rides have `rpeMismatch(ride) >= 2`
+       (`recentRpeGaps`, Session 29: unrated rides are skipped; expected comes from `expectedRpe`).
        **Dismiss** stores the current latest ride's id (`feels-harder`); it stays hidden until a
        newer ride is logged.
      - *Max heart rate* — `observedMaxHr(history)` is above the profile's Max HR (or Max HR is
@@ -395,7 +399,10 @@ CHANGELOG).
   === null`, draw the HR line alone with no power axis). Session 28: a **smoothing selector**
   above it (Auto / Raw / 30s / 1 min / 5 min, `SegmentedControl`) draws a centered rolling average
   of power and HR (display only — see "Ride chart smoothing" below), with a note
-  (`[data-smoothing-note]`) saying which average is shown; the interval table; notes; and an
+  (`[data-smoothing-note]`) saying which average is shown; Session 29: an **Effort (RPE)** card under
+  the stats (`[data-ride-rpe]`) showing the rating (or "Not rated"), what's typical for a ride like
+  this, and a Rate / Change button that opens `RpeButtons` — picking saves straight away via
+  `rateRide(id, rpe)` (tap the same number to clear). Levels are not re-run by this; the interval table; notes; and an
   action row — **Edit ride**, **Attach ride file** (runs the FIT/TCX backfill for *this* ride
   directly, no date guessing — calls `importRideFile` then `attachRideFile`), and **Delete**
   (destructive ConfirmSheet, then back to Rides). Header right action: **Re-detect** (rides with
@@ -428,8 +435,10 @@ CHANGELOG).
   detection), **Workout level** (V2 Phase 7, indoor rides with a zone other than Recovery: a file
   import the model can score shows "This workout: Sweet Spot 5.8" read-only with a **Change**
   link; manual entries (except Endurance, which is scored from duration and NP like an import), overrides and imports the model can't score get a − / + stepper, 1–10 in
-  0.5 steps, pre-filled with 5 — `[data-workout-level]`), Completed all intervals (indoor only), Effort (RPE) as ten 44px tap targets (two
-  rows of 5) with the zone's expected effort ringed, and Notes. Editing an existing ride always
+  0.5 steps, pre-filled with 5 — `[data-workout-level]`), Completed all intervals (indoor only), Effort (RPE) via `RpeButtons` (Session 29: ten 44px
+  tap targets in two rows of 5, **starts unrated** — "Not rated", nothing selected; tapping the chosen
+  number again clears it; the number typical for this ride from `expectedRpe` is ringed; CR10
+  anchors and "rate the whole ride" under it), and Notes. Editing an existing ride always
   shows the full manual field set (attaching a file to an already-logged ride is done from the
   Ride page's "Attach ride file" instead); saving returns to wherever the sheet was opened from
   (Ride page or the Rides list), never to a fixed screen.
@@ -441,7 +450,7 @@ CHANGELOG).
 ```javascript
 ZONES             // Training zone definitions (recovery → anaerobic), with colours
 DEFAULT_LEVELS    // Initial progression levels (all 1)
-ZONE_EXPECTED_RPE // Expected RPE by zone (3-9): rings the expected effort in Log Ride and sets how
+ZONE_EXPECTED_RPE // Expected RPE by zone (3-9): the base of `expectedRpe` for indoor rides, and sets how
                   //   far a ride moves the level (V2 Phase 7). No longer used as a workout level.
 ZONE_ADJACENCY    // Zone neighbour map for the trickle effect (one hop, 20% each)
 STORAGE_KEY       // 'cycling-progression-data-v2' (state/AppDataContext.jsx)
@@ -736,9 +745,12 @@ needs, rather than a misleading number:
   `decouplingBand(pct)` gives the sentence + color: <5% "Solid aerobic base" (green), 5–8% "Some
   drift" (amber), >8% "Drifting: base needs work" (red).
 - `efficiencyFactor(ride)` → NP / avg HR, only for an easy, long ride (IF ≤0.80, ≥45 min).
-- `expectedRpe(intensityFactor)` / `rpeMismatch(ride)` → the RPE a rider would be expected to
-  report at a given IF, and how far the ride's actual RPE was from it (drives the Today "feels
-  harder than usual" alert, V2 Phase 6).
+- `expectedRpe(ride)` (Session 29: one model for the Log Ride ring, the Ride page, the "feels harder"
+  alert and Copy for Claude) → an indoor ride filed under a zone uses that zone's `ZONE_EXPECTED_RPE`;
+  any other ride uses `expectedRpeFromIf(IF)` (3 / 4 / 5 / 6 / 7 / 8 / 9 at IF 0.65, 0.75, 0.82, 0.90,
+  0.95, 1.05 — no cliff at 0.85). Then +1 from 120 min and +2 from 210 min, only when the base is 6 or
+  less. `rpeMismatch(ride)` = rating − expected (null if unrated). `recentRpeGaps(history, 5)` → the
+  newest rated rides with `{ expected, gap }`. RPE is `null` for a ride that was never rated.
 
 **Across-rides analysis** (`lib/records.js`):
 - `powerCurve(history, { from, to })` → per duration, the best power across the (optionally
@@ -932,7 +944,9 @@ to help pick the next workout, so it is organised around that. Sections, in orde
 5. **Weekly load** — the last 6 Monday-start weeks, *including weeks with no rides*, with the
    current week marked partial (the chart helper `calculateWeeklyHours` skips empty weeks and is
    left alone).
-6. **Recent rides** (21 days, max 10) — name, zone, duration, NP, IF, TSS, average HR, RPE,
+6. **Recent rides** (21 days, max 10) — name, zone, duration, NP, IF, TSS, average HR, RPE (written
+   `RPE 8 (expected 7, +1)`, or `RPE not rated`; one line under the list gives the average gap and how
+   many of the last 5 rated rides were +2 or more),
    completed. With an FTP history, IF is NP ÷ the FTP of the ride's own day, with "(FTP then NNNW)"
    when that isn't today's; without one, IF is as stored, with "(scored at FTP NNNW)" when that
    differs. Indoor rides in tempo-or-above add a **Main set** line: only in-zone reps (`workReps`
@@ -1000,3 +1014,17 @@ detection keep reading the raw bins. Logic is in `lib/rideChart.js`:
 - With smoothing on, the power area is drawn `monotone`; raw keeps the `stepAfter` stairs. The note
   under the chart ("Power and heart rate shown as a 2-min average. Peaks are higher in the raw
   data.") appears only when a window is applied.
+
+## Effort rating (RPE) (Session 29)
+- A ride's `rpe` is 1–10, or `null` = not rated. New rides start unrated (`getDefaultFormData` →
+  `rpe: null`) and the edit form no longer turns a missing rating into 5. Older rides keep whatever
+  was saved. Every reader tolerates `null`: the alert and the export skip it, `calculateNewLevel`
+  treats it as "exactly as expected" (`Number(rpe) || expected`), the post-log sheet says "Not rated".
+- One expected-RPE model, `expectedRpe(ride)` in `src/lib/analysis.js` (rules under "Metrics engine"),
+  feeds the Log Ride ring, the Ride page card, the "Feels harder than usual" alert and Copy for Claude,
+  so they always agree. It is computed when needed and never stored, so changing the rules re-judges old
+  rides without touching saved data.
+- **Progression levels are deliberately separate:** `calculateNewLevel` and the levels replay still use
+  `ZONE_EXPECTED_RPE` directly, so this model change moves no level. Rating a ride later from its Ride page
+  changes the stored `rpe` only; "Recalculate levels" in Settings would pick it up.
+- `RpeButtons` (`src/components/RpeButtons.jsx`) is the one picker. Checked by `tools/rpe-check.mjs`.

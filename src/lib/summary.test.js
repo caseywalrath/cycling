@@ -92,6 +92,21 @@ describe('buildAnalysisText', () => {
     expect(text).toContain('TrainerDay has no sweet-spot level');
   });
 
+  it('writes each ride\'s RPE against what was expected, and says when it was not rated', () => {
+    const text = build();
+    expect(text).toContain('RPE 7 (expected 8, -1)'); // VO2 session: zone says 8
+    const unrated = build({ history: [{ ...vo2Session, rpe: null }] });
+    expect(unrated).toContain('RPE not rated');
+    expect(unrated).not.toContain('RPE vs expected');
+  });
+
+  it('adds one line comparing the last rated rides with what was expected', () => {
+    const text = build();
+    expect(text).toMatch(/RPE vs expected, last \d+ rated rides: [+-]?[\d.]+ avg, (none|\d+ rides?) \+2 or more/);
+    const one = build({ history: [{ ...vo2Session, rpe: 10 }] });
+    expect(one).toContain('RPE vs expected, last 1 rated ride: +2 avg, 1 ride +2 or more');
+  });
+
   it('shows days since each zone was last trained', () => {
     const text = build();
     expect(text).toContain('Sweet Spot 9');

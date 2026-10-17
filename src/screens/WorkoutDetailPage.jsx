@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Area, Line, ReferenceArea, Legend } from 'recharts';
 import { formatDateWithDay, parseDateLocal } from '../lib/dates.js';
 import { ZONES, getZoneColor, getZoneName } from '../lib/zones.js';
-import { bestsForRide, timeInZones, aerobicDecoupling, decouplingBand, efficiencyFactor } from '../lib/analysis.js';
+import { bestsForRide, timeInZones, aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe } from '../lib/analysis.js';
 import { bestEffortComparison } from '../lib/records.js';
 import {
   smoothingSeconds, describeSmoothing, rideChartPoints, readSmoothingChoice, writeSmoothingChoice,
@@ -11,6 +11,7 @@ import { formatMinutes } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
 import { goBack } from '../state/useHashRoute.js';
+import RpeButtons from '../components/RpeButtons.jsx';
 import { Page, Button, Card, StatTile, SegmentedControl, EmptyState, useToast, useConfirm } from '../components/ui/index.js';
 
 // Best-effort durations shown on the Ride page, with their display labels (V2_PLAN.md §5.6).
@@ -44,13 +45,14 @@ const shortDate = (dateStr) => parseDateLocal(dateStr).toLocaleDateString('en-US
 // shaded intervals, the interval table, notes, and the action row (Edit / Re-detect / Attach
 // ride file / Delete).
 export default function WorkoutDetailPage({ rideId }) {
-  const { history, currentFTP, ftpOn, redetectRide, importRideFile, attachRideFile, deleteRide } = useAppData();
+  const { history, currentFTP, ftpOn, redetectRide, rateRide, importRideFile, attachRideFile, deleteRide } = useAppData();
   const { openEditRide } = useShell();
   const toast = useToast();
   const confirm = useConfirm();
   const attachInputRef = useRef(null);
   const [smoothingChoice, setSmoothingChoice] = useState(readSmoothingChoice);
   const [bestDetail, setBestDetail] = useState(null);
+  const [rpeOpen, setRpeOpen] = useState(false);
   const detailRide = history.find(w => String(w.id) === String(rideId));
 
   if (!detailRide) {
@@ -62,6 +64,7 @@ export default function WorkoutDetailPage({ rideId }) {
   }
 
   const isOutdoor = detailRide.rideType === 'Outdoor';
+  const rideExpectedRpe = expectedRpe(detailRide);
   const avgHr = detailRide.stream?.hr?.length
     ? (() => {
         const vals = detailRide.stream.hr.filter(v => v != null);
@@ -178,6 +181,32 @@ export default function WorkoutDetailPage({ rideId }) {
         <StatTile label="TSS" value={detailRide.tss ?? '—'} />
         <StatTile label="IF" value={detailRide.intensityFactor != null ? detailRide.intensityFactor.toFixed(2) : '—'} />
         {avgHr != null && <StatTile label="Avg HR" value={avgHr} unit="bpm" />}
+      </div>
+
+      {/* Effort (RPE): shown against what's typical for a ride like this; tap to rate or change */}
+      <div className="bg-gray-800 rounded-xl p-3 mb-4" data-ride-rpe>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-gray-400">Effort (RPE)</div>
+            <div className="text-lg font-semibold tabular-nums" data-ride-rpe-value>
+              {detailRide.rpe != null ? `${detailRide.rpe}/10` : <span className="text-gray-400 font-normal">Not rated</span>}
+            </div>
+            {rideExpectedRpe != null && (
+              <div className="text-xs text-gray-400" data-ride-rpe-expected>
+                Typical for a ride like this: {rideExpectedRpe}
+                {detailRide.rpe != null && detailRide.rpe !== rideExpectedRpe ? ` (you rated ${detailRide.rpe > rideExpectedRpe ? '+' : ''}${detailRide.rpe - rideExpectedRpe})` : ''}
+              </div>
+            )}
+          </div>
+          <Button variant="secondary" onClick={() => setRpeOpen(o => !o)} data-ride-rpe-toggle>
+            {rpeOpen ? 'Done' : detailRide.rpe != null ? 'Change' : 'Rate'}
+          </Button>
+        </div>
+        {rpeOpen && (
+          <div className="mt-3">
+            <RpeButtons value={detailRide.rpe ?? null} expected={rideExpectedRpe} onChange={(rpe) => rateRide(detailRide.id, rpe)} />
+          </div>
+        )}
       </div>
 
       {/* Power/HR chart */}

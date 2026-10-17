@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bestsForRide, timeInZones, aerobicDecoupling, efficiencyFactor, expectedRpe, rpeMismatch } from './analysis.js';
+import { bestsForRide, timeInZones, aerobicDecoupling, efficiencyFactor, expectedRpe, expectedRpeFromIf, rpeMismatch, recentRpeGaps } from './analysis.js';
 
 describe('bestsForRide', () => {
   it('prefers ride.bests (1s) when present', () => {
@@ -80,19 +80,69 @@ describe('efficiencyFactor', () => {
   });
 });
 
+describe('expectedRpeFromIf', () => {
+  it('maps IF to an expected RPE with no cliff at 0.85', () => {
+    expect(expectedRpeFromIf(0.5)).toBe(3);
+    expect(expectedRpeFromIf(0.7)).toBe(4);
+    expect(expectedRpeFromIf(0.8)).toBe(5);
+    expect(expectedRpeFromIf(0.84)).toBe(6);
+    expect(expectedRpeFromIf(0.86)).toBe(6);
+    expect(expectedRpeFromIf(0.92)).toBe(7);
+    expect(expectedRpeFromIf(1.0)).toBe(8);
+    expect(expectedRpeFromIf(1.1)).toBe(9);
+    expect(expectedRpeFromIf(null)).toBeNull();
+  });
+});
+
 describe('expectedRpe / rpeMismatch', () => {
-  it('maps IF bands to an expected RPE', () => {
-    expect(expectedRpe(0.5)).toBe(3);
-    expect(expectedRpe(0.7)).toBe(4);
-    expect(expectedRpe(0.8)).toBe(5);
-    expect(expectedRpe(0.9)).toBe(7);
-    expect(expectedRpe(1.0)).toBe(8);
-    expect(expectedRpe(1.1)).toBe(9);
+  const indoor = (over) => ({ rideType: 'Indoor', zone: 'vo2max', intensityFactor: 0.8, duration: 75, ...over });
+  const outdoor = (over) => ({ rideType: 'Outdoor', zone: null, intensityFactor: 0.7, duration: 60, ...over });
+
+  it('uses the zone for an indoor ride, whatever the whole-ride IF says', () => {
+    expect(expectedRpe(indoor())).toBe(8);
+    expect(expectedRpe(indoor({ zone: 'sweetspot', intensityFactor: 0.9 }))).toBe(6);
+  });
+  it('uses IF for outdoor rides and rides with no zone', () => {
+    expect(expectedRpe(outdoor())).toBe(4);
+    expect(expectedRpe(outdoor({ zone: 'vo2max' }))).toBe(4); // an outdoor ride ignores a stray zone
+    expect(expectedRpe(indoor({ zone: null, intensityFactor: 0.9 }))).toBe(7);
+  });
+  it('adds a point from 2 h and two from 3.5 h, but only to easier rides', () => {
+    expect(expectedRpe(outdoor({ duration: 119 }))).toBe(4);
+    expect(expectedRpe(outdoor({ duration: 120 }))).toBe(5);
+    expect(expectedRpe(outdoor({ duration: 210 }))).toBe(6);
+    expect(expectedRpe(indoor({ zone: 'endurance', duration: 150 }))).toBe(5);
+    expect(expectedRpe(indoor({ zone: 'sweetspot', duration: 150 }))).toBe(7);
+    expect(expectedRpe(indoor({ zone: 'threshold', duration: 240 }))).toBe(7); // already hard: no bump
+    expect(expectedRpe(outdoor({ intensityFactor: 1.0, duration: 240 }))).toBe(8);
+  });
+  it('is null when the ride gives nothing to go on', () => {
+    expect(expectedRpe(null)).toBeNull();
+    expect(expectedRpe({ rideType: 'Outdoor', duration: 60 })).toBeNull();
   });
   it('is reported RPE minus expected', () => {
-    expect(rpeMismatch({ rpe: 9, intensityFactor: 0.7 })).toBe(9 - 4);
+    expect(rpeMismatch({ ...outdoor(), rpe: 9 })).toBe(9 - 4);
+    expect(rpeMismatch({ ...indoor(), rpe: 8 })).toBe(0);
   });
   it('is null without an rpe', () => {
-    expect(rpeMismatch({ intensityFactor: 0.7 })).toBeNull();
+    expect(rpeMismatch(outdoor())).toBeNull();
+    expect(rpeMismatch({ ...outdoor(), rpe: null })).toBeNull();
+  });
+});
+
+describe('recentRpeGaps', () => {
+  const r = (id, date, rpe, over = {}) => ({ id, date, rpe, rideType: 'Outdoor', intensityFactor: 0.7, duration: 60, ...over });
+
+  it('lists the newest rated rides with their gap, skipping unrated ones', () => {
+    const history = [r(1, '2026-09-01', 4), r(2, '2026-09-03', null), r(3, '2026-09-05', 7), r(4, '2026-09-04', undefined)];
+    const gaps = recentRpeGaps(history);
+    expect(gaps.map(g => g.ride.id)).toEqual([3, 1]);
+    expect(gaps.map(g => g.gap)).toEqual([3, 0]);
+    expect(gaps[0].expected).toBe(4);
+  });
+  it('keeps only the last 5', () => {
+    const history = Array.from({ length: 8 }, (_, i) => r(i, `2026-09-0${i + 1}`, 4));
+    expect(recentRpeGaps(history)).toHaveLength(5);
+    expect(recentRpeGaps(history, 2).map(g => g.ride.id)).toEqual([7, 6]);
   });
 });
