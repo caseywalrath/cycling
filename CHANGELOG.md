@@ -1,5 +1,30 @@
 # Changelog
 
+## Session 26 - Copy for Claude, Rebuilt for Picking Workouts (2026-10-17)
+
+### What you'll see on your iPhone
+- **Today → Copy for Claude** now gives a different, more useful text. Nothing else in the app changed.
+- It starts with how long since your **last ride** and your **last hard ride**.
+- **Every week is listed, including weeks with no riding** (before, a week off simply vanished, so a gap looked like steady riding). The current week is marked "partial".
+- Each recent ride shows its **name**, **IF**, **average heart rate** and whether you finished the intervals. If a ride was scored at a different FTP than today's, it says so (for example "IF 0.73 @ FTP 240W then").
+- Interval work is shown as **only the efforts that were really in the zone**, with the % of FTP next to the watts, so a "Sweet Spot" label can no longer hide tempo-level blocks.
+- A **zone table** (% of FTP and watts) is included, plus **days since each zone was last trained**.
+- **eFTP is explained**: "215W (95% of best 20-min 226W; a floor, not a max-effort test)". It is a lower bound from your best 20 minutes in any ride, not a test result, so it can be below FTP while your best 20 minutes is above it.
+- Time in zone is in minutes, and coasting (Recovery) is no longer counted in the percentages. Heart-rate drift and other numbers the app can't work out say "n/a" instead of disappearing. The ended Gran Fondo event is no longer mentioned.
+
+### Anything skipped?
+- The **"current goal"** field and the **"note for Claude"** box from the recommendations need new screens and weren't built.
+- The **zone table itself was not changed.** The app's zones (Sweet Spot 81–94%) differ from TrainerDay's (Sweet Spot 88–94%). Moving the app onto TrainerDay's zones is a separate change because it affects progression levels and past rides; the new text follows `ZONE_BOUNDS`, so it will pick up that change automatically.
+- A **30/30 workout** (30 seconds hard, 30 easy) still looks like a few ~8-minute blocks at ~85% FTP to interval detection, because it averages the on/off pattern. The ride name tells Claude what it really was.
+
+### Files Changed
+- `src/lib/summary.js` — `buildAnalysisText` rewritten
+- `src/lib/progression.js` — `workReps` is now exported (no behaviour change)
+- `src/state/AppDataContext.jsx` — passes `userProfile` to the export
+- `src/lib/summary.test.js` — new (13 tests; 122 in total)
+- `ARCHITECTURE.md` — new "Copy for Claude" section
+
+---
 ## Session 25 - Settings Badge, Date Field, Elevation Fix (2026-09-26)
 
 ### What you'll see on your iPhone

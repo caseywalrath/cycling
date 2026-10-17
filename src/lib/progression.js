@@ -157,7 +157,7 @@ export const REP_MERGE_GAP_SECONDS = 60;
 
 // The in-zone work reps of a ride as [{ count, seconds, ratio }]. Uses the individual efforts
 // (`segments`, with short pauses merged) when present, otherwise the grouped `sets`.
-const workReps = (intervalData, ftp, minRatio) => {
+export const workReps = (intervalData, ftp, minRatio) => {
   const segs = (intervalData?.segments || [])
     .filter(g => g && g.endSec > g.startSec && g.avgWatts > 0)
     .sort((a, b) => a.startSec - b.startSec);

@@ -1089,7 +1089,7 @@ export function AppDataProvider({ children }) {
   };
 
   // "Copy for Claude" text (the Today screen copies it to the clipboard).
-  const buildCopyText = () => buildAnalysisText({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves });
+  const buildCopyText = () => buildAnalysisText({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile });
 
   const value = {
     // state

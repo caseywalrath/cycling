@@ -18,7 +18,7 @@ Phase 5 adds **vitest** (the only new dependency the whole V2 plan allows) as th
 runner: `npm test` runs `vitest run`. Tests live next to the code they test, as `*.test.js`, and
 cover the pure `src/lib/` functions only (no React component tests) — `dates.test.js`,
 `zones.test.js`, `rideFiles.test.js`, `eftp.test.js`, `intervals.test.js`, `load.test.js`,
-`analysis.test.js`, `records.test.js`. This is separate from `tools/v2-check.mjs`, the
+`analysis.test.js`, `records.test.js`, `summary.test.js`. This is separate from `tools/v2-check.mjs`, the
 Playwright-based regression check (§0.4 in `V2_PLAN.md`), which drives the real app in a browser.
 
 ## File Structure
@@ -87,7 +87,7 @@ src/
     chartData.js             #   calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation,
                              #   calculateEFTPHistory, weeklyTimeInZones (Phase 6)
     summary.js               #   getDaysUntilEvent, weekComparison, latestRide, mondayOf,
-                             #   buildAnalysisText (Copy for Claude, Phase 6 additions §6.3), copyToClipboard
+                             #   buildAnalysisText (Copy for Claude, rebuilt in Session 26), copyToClipboard
     alerts.js                #   buildAlerts, ridesNeedingZone; Phase 6 adds new-best/ramp-rate/
                              #   feels-harder/max-hr, ALERT_DISMISSALS_KEY, MAXHR_PROMPT_KEY,
                              #   readDismissals/writeDismissal (Today alerts)
@@ -207,7 +207,7 @@ last90Days }`), `rideRecords` (`records()`), `maxHrObserved` (`observedMaxHr`).
 | `resolveEftpAlert(value)` | Store the answered eFTP value (Dismiss or Update FTP) | – |
 | `resolveMaxHrAlert(value)` | V2 Phase 6: store the answered max-HR value (`maxhr-prompted-value`), same pattern as eFTP | – |
 | `dismissAlert(key, value)` | V2 Phase 6: write one entry into the device-local `alert-dismissals` map (new-best per ride id, ramp-rate's date, feels-harder's ride id) | – |
-| `buildCopyText()` | Copy for Claude text (Phase 6 adds ramp rate/90-day bests/HR drift/time-in-zone share, §6.3) | string |
+| `buildCopyText()` | Copy for Claude text (rebuilt in Session 26 — see "Copy for Claude" below); passes `userProfile` for LTHR/max HR/weight | string |
 | `closePostLogSummary()` | Start the level-bar animation for `lastLoggedWorkout` | – |
 | `markDataChanged()` | `exportedAt = now` — called by every mutation | – |
 
@@ -293,7 +293,7 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
 6. **Event:** name, date, "36 days to go" / "Today!" / "Event complete" (+ Set next event), and
    the Fitness (CTL) → target bar (moved here from the old Fitness Progress card). No date:
    "No event set · Add one".
-7. **Copy for Claude** (secondary button; text format unchanged, `buildAnalysisText`).
+7. **Copy for Claude** (secondary button; `buildAnalysisText`, rebuilt in Session 26 — see "Copy for Claude" below).
 8. **＋ Log Ride** floats above the tab bar on Today and Rides (rendered by `Shell`).
 
 ### Rides (`screens/RidesScreen.jsx`, V2 Phase 4 rebuild)
@@ -754,7 +754,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `calculateWeeklyHours/TSS`, `calculateMonthlyElevation` | `lib/chartData.js` | Chart data (20 weeks / 11 months) |
 | `parseFitFile(arrayBuffer)`, `parseTcxFile(text)` | `lib/rideFiles.js` | File → Log Ride form values + stream + laps |
 | `findMatchingRideForImport(rides, parsed)` | `lib/rideFiles.js` | Same-day ride with duration within 25% (unset duration always qualifies), else `null` |
-| `buildAnalysisText(...)` | `lib/summary.js` | Copy for Claude text: FTP, W/kg, eFTP, event countdown, loads (7/14/28d TSS), weekly hours (4wk), recent workouts, interval progressions |
+| `buildAnalysisText(...)` | `lib/summary.js` | Copy for Claude text — see "Copy for Claude" below |
 | `getDaysUntilEvent(event)` | `lib/summary.js` | Whole days to the event (negative once passed), `null` without a date |
 | `buildAlerts(state, derived, today)` | `lib/alerts.js` | Today alerts |
 | `redetectRide(id)` / `redetectAll()` | `AppDataContext` | Re-run detection against saved streams — no file re-import needed |
@@ -862,3 +862,35 @@ the result. Each new chart card carries a `data-chart="<name>"` attribute (`fitn
   - Uses `actions/configure-pages@v4` for proper Pages environment setup
 - **PWA**: `scope` and `start_url` set to `/cycling/` in manifest
 - **Branch model**: `main` is the deploy branch; `claude/` session branches merge into `main` via PR
+
+## Copy for Claude (Session 26)
+
+`buildAnalysisText()` in `lib/summary.js` builds the text the Today tab's button copies. It exists
+to help pick the next workout, so it is organised around that. Sections, in order:
+
+1. **Header** — training status, CTL/ATL/TSB, ramp rate, 7-day TSS; days since the last ride and
+   the last *hard* ride (indoor sweet spot or above, or IF ≥ 0.85, TrainerDay's own "hard day" bar).
+2. **Athlete** — FTP; eFTP worded as "95% of best 20-min NNNW … a floor, not a max-effort test"
+   (it comes from the best 20 minutes of any ride, not a maximal test, so it can sit below FTP while
+   the best 20-min is above it); LTHR / max HR / weight from `userProfile` (`n/a` when unset); the
+   next event only while it is still ahead.
+3. **Zones** — every zone as % of FTP and watts, straight from `ZONE_BOUNDS`, so the names mean the
+   same to Claude as in the app.
+4. **Days since each zone was last trained** — indoor rides filed under the zone.
+5. **Weekly load** — the last 6 Monday-start weeks, *including weeks with no rides*, with the
+   current week marked partial (the chart helper `calculateWeeklyHours` skips empty weeks and is
+   left alone).
+6. **Recent rides** (21 days, max 10) — name, zone, duration, NP, IF (with "@ FTP NNNW then" when
+   the ride was scored at a different FTP than today's), TSS, average HR, RPE, completed. Indoor
+   rides in tempo-or-above add a **Main set** line: only in-zone reps (`workReps` from
+   `progression.js`, the same filter progression levels use), as reps, %FTP, minutes in zone.
+   Distance/elevation are no longer printed.
+7. **Interval progression** — last 3 sessions per zone in the last 90 days, in-zone reps at %FTP;
+   "none in 90 days (last <date>)" otherwise; a ride labelled for a zone whose reps never reached it
+   says "none in zone".
+8. **Time in zone** (4 weeks) in minutes, Recovery/coasting reported separately and left out of the
+   percentages. 9. **Bests (90d)** and **HR drift (30d)** — `n/a` instead of disappearing.
+
+Known limit: interval detection works on the smoothed stream and skips efforts under 90 s, so a
+30/30 session shows up as a few ~8-minute blocks at ~85% FTP. The ride *name* is in the text so
+Claude can tell. Not built (need new inputs): a "current goal" field and a "note for Claude" box.
