@@ -7,6 +7,8 @@
 // and lets you rate, change and clear it; Copy for Claude writes "RPE n (expected e, +d)", "RPE
 // not rated" and the one-line summary. Prints PASS/FAIL per check; exits 1 on any FAIL.
 //
+// The import check uses tools/.out/synthetic-3x8.tcx, which tools/v2-check.mjs writes (run it once first).
+//
 // Usage (dev server must already be running: `npx vite --port 3000`):
 //   node tools/rpe-check.mjs
 // Override PW_MODULE / PW_CHROME / BASE_URL as in tools/v2-check.mjs. Screenshots go to tools/.out.
@@ -82,6 +84,20 @@ ok('saving without a rating stores no RPE (null, not 5)', unrated && unrated.rpe
 ok('the post-log summary says "Not rated"', /Not rated/.test(await page.locator('body').innerText()));
 await page.screenshot({ path: path.join(OUT, 'rpe-post-log.png') });
 await page.getByRole('button', { name: /^continue$/i }).first().click().catch(() => {});
+
+// ---- Importing a file never arrives pre-rated, even after a rating was tapped on an abandoned form ----
+await page.getByRole('button', { name: /log ride/i }).first().click();
+await page.getByRole('tab', { name: /enter manually/i }).click();
+await rpeBtn(7).click();
+await page.getByRole('button', { name: /^cancel$/i }).click();
+await page.waitForTimeout(500);
+await page.getByRole('button', { name: /log ride/i }).first().click();
+await page.getByRole('tab', { name: /import file/i }).click();
+await page.locator('input[type=file][accept*=".tcx"]').first().setInputFiles(path.join(OUT, 'synthetic-3x8.tcx'));
+await page.waitForSelector('[data-rpe-value]');
+ok('importing a file starts "Not rated" (a 7 tapped earlier does not carry over)', (await page.locator('[data-rpe-value]').innerText()) === 'Not rated');
+await page.getByRole('button', { name: /^cancel$/i }).click();
+await page.waitForTimeout(500);
 
 // ---- Editing an unrated ride keeps it unrated ----
 await page.evaluate(() => { window.location.hash = '#/rides'; });

@@ -15,6 +15,9 @@ Based on a literature review of RPE in cycling (rate the whole session, 0–10 "
 - **The alert skips unrated rides,** so forgotten ratings can't set it off.
 - **Copy for Claude** writes each ride as `RPE 8 (expected 7, +1)` (or `RPE not rated`), and adds one line under Recent rides: `RPE vs expected, last 5 rated rides: +0.4 avg, 1 ride +2 or more`.
 
+### Follow-up fix (same day)
+- Importing a file could show an effort already selected: tapping a number, cancelling, then importing a file kept that number (the form isn't cleared when cancelled). Importing a file now always starts "Not rated". Found when you reported it; `tools/rpe-check.mjs` covers it.
+
 ### Not changed
 - **Progression levels.** They still use their own per-zone table, so no level moves because of this.
 - **Past rides.** Saved ratings are not rewritten. Old rides that were saved as a 5 without you choosing it still count as a 5. New ones are blank, so this corrects itself as you log. Because "typical effort" is worked out when needed, past rides are judged by the new rule immediately, so today's "feels harder" alert could appear or disappear.
