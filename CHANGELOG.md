@@ -1,5 +1,38 @@
 # Changelog
 
+## Session 28 - Smoother Ride Charts and Best-Effort Bars (2026-10-17)
+
+### What you'll see on your iPhone
+- **Ride page chart smoothing.** A selector above the power/heart-rate chart: **Auto, Raw, 30s, 1 min, 5 min**. The chart draws a rolling average, with a smooth line, and a note under it says which average you're looking at ("Power and heart rate shown as a 2-min average. Peaks are higher in the raw data.").
+  - **Auto** (the default) picks a window from the ride. Outdoor rides get about 100 points across the chart: a 1-hour ride is a 1-min average, a 3-hour ride a 2-min average, up to 5 min on very long ones. Indoor rides up to 90 minutes stay raw so ERG steps stay sharp, and longer indoor rides get a 30-second average.
+  - Your choice is remembered on this phone. **Raw** shows every 10 seconds as before.
+  - It changes only how the chart looks. NP, TSS, best efforts, time in zones and interval detection still use the raw data, and nothing is re-imported.
+- **Best efforts bars.** Under each best effort (5s, 1m, 5m, 20m, 60m) there is a small bar showing how it compares with your best at that duration over the 90 days before the ride (the ride itself isn't counted):
+  - **Yellow**: a new best (still with the ★ New best label).
+  - **Blue**: within 5% of your best.
+  - **Grey**: lower.
+  - **No bar**: nothing earlier in those 90 days to compare with.
+  - **Tap an effort** to see it in words, for example "5m: 300W is 97% of your 90-day best of 310W (Sep 20)." Tap again to close it.
+
+### Under the hood
+- New `src/lib/rideChart.js` (`smoothingSeconds`, `smoothSeries`, `rideChartPoints`, `describeSmoothing`, read/write for the device-local `ride-chart-smoothing` key) with tests.
+- New `bestEffortComparison` in `src/lib/records.js`; `newBestsForRide` now reads from it, so the ★ and the bar colour can't disagree.
+- `src/screens/WorkoutDetailPage.jsx`: the selector, the smoothed chart, the note, and the new best-effort buttons and bars.
+
+### Checks
+- 163 unit tests pass (was 148). New: window choice for indoor and outdoor rides, rolling average rules (gaps, ends, spikes), chart points, and the best-effort comparison (near, below, new, no reference, the 90-day limit, the ride not comparing with itself).
+- `tools/v2-check.mjs`: **no differences vs baseline**; `tools/ftp-history-check.mjs` still passes.
+- New `tools/ride-chart-check.mjs` drives the real app (all checks pass) on a made-up 3-hour noisy outdoor ride and a short ERG ride: Auto smooths the outdoor ride with a 2-min note and leaves the ERG ride raw, Raw, 30s and 5 min work, the choice survives a reload, the bars are new / near / below / none as expected with the right widths, and the tap detail text is right. On the test ride the smoothed line has about one eighth of the up-and-down travel of the raw one.
+
+### Anything skipped?
+- A marker on the chart where your best 20 minutes happened is not built (it needs a small search for where the best window sits in a ride).
+- The test rides are made up. I haven't seen your own rides on the new chart.
+
+### Files Changed
+- `src/lib/rideChart.js`, `src/lib/rideChart.test.js`, `tools/ride-chart-check.mjs` — new
+- `src/lib/records.js`, `src/lib/records.test.js`, `src/screens/WorkoutDetailPage.jsx`
+- `ARCHITECTURE.md`, `CHANGELOG.md`
+
 ## Session 27 - FTP History: Rides Measured Against the FTP of Their Day (2026-10-17)
 
 ### What you'll see on your iPhone

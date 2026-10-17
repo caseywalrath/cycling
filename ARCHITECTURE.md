@@ -18,7 +18,7 @@ Phase 5 adds **vitest** (the only new dependency the whole V2 plan allows) as th
 runner: `npm test` runs `vitest run`. Tests live next to the code they test, as `*.test.js`, and
 cover the pure `src/lib/` functions only (no React component tests) — `dates.test.js`,
 `zones.test.js`, `rideFiles.test.js`, `eftp.test.js`, `intervals.test.js`, `load.test.js`,
-`analysis.test.js`, `records.test.js`, `summary.test.js`, `ftpHistory.test.js`, `chartData.test.js`. This is separate from `tools/v2-check.mjs`, the
+`analysis.test.js`, `records.test.js`, `summary.test.js`, `ftpHistory.test.js`, `chartData.test.js`, `rideChart.test.js`. This is separate from `tools/v2-check.mjs`, the
 Playwright-based regression check (§0.4 in `V2_PLAN.md`), which drives the real app in a browser.
 
 ## File Structure
@@ -84,7 +84,9 @@ src/
     analysis.js              #   Phase 5: per-ride analysis — bestsForRide, timeInZones,
                              #   aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, rpeMismatch
     records.js                #   Phase 5: across-rides analysis — powerCurve, personalBests,
-                             #   newBestsForRide, records, observedMaxHr
+                             #   newBestsForRide, bestEffortComparison (Session 28), records, observedMaxHr
+    rideChart.js             #   Session 28: Ride page chart smoothing — smoothingSeconds, smoothSeries,
+                             #   rideChartPoints, describeSmoothing, read/writeSmoothingChoice
     chartData.js             #   calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation,
                              #   calculateEFTPHistory, weeklyTimeInZones (Phase 6)
     summary.js               #   getDaysUntilEvent, weekComparison, latestRide, mondayOf,
@@ -97,6 +99,7 @@ src/
 tools/
   v2-check.mjs               # regression check (see V2_PLAN.md §0.4); v2-baseline.json
   ftp-history-check.mjs      # Session 27: drives Settings → FTP history, re-score + undo, ride-page note
+  ride-chart-check.mjs       # Session 28: drives the Ride page — chart smoothing choices, best-effort bars
 public/                      # PWA icons, apple-touch-icon.png
 .github/workflows/deploy.yml # GitHub Actions → GitHub Pages
 vite.config.js               # Vite + PWA config (base: /cycling/)
@@ -389,14 +392,20 @@ CHANGELOG).
   header (name, date, type/zone pill, interval label); a 3×2 `StatTile` stats grid (Duration,
   Distance, Elevation, NP, TSS, IF), plus Avg HR when the ride has a stream with heart rate; the
   power/HR chart with shaded intervals (rides with a stream only — HR-only rides, `stream.power
-  === null`, draw the HR line alone with no power axis); the interval table; notes; and an
+  === null`, draw the HR line alone with no power axis). Session 28: a **smoothing selector**
+  above it (Auto / Raw / 30s / 1 min / 5 min, `SegmentedControl`) draws a centered rolling average
+  of power and HR (display only — see "Ride chart smoothing" below), with a note
+  (`[data-smoothing-note]`) saying which average is shown; the interval table; notes; and an
   action row — **Edit ride**, **Attach ride file** (runs the FIT/TCX backfill for *this* ride
   directly, no date guessing — calls `importRideFile` then `attachRideFile`), and **Delete**
   (destructive ConfirmSheet, then back to Rides). Header right action: **Re-detect** (rides with
   a stream; result as a toast). **Phase 5 metrics** (each shown only when the ride has the data
-  for it — see "Metrics engine" below): a **best efforts** table (5s/1m/5m/20m/60m, `★ New best`
-  badges from `newBestsForRide`, a footnote when the bests come from the coarser 10s stream
-  instead of 1Hz data); a **time in zones** stacked bar with minutes per zone
+  for it — see "Metrics engine" below): a **best efforts** row (5s/1m/5m/20m/60m, `★ New best`
+  badges; Session 28: each effort has a small bar against your best over the 90 days before the
+  ride — yellow = new best, blue = within 5%, grey = below, no bar when there was nothing to
+  compare with — and tapping one shows a detail line, `[data-best-detail]`, e.g. "5m: 300W is
+  97% of your 90-day best of 310W (Sep 20)"; a footnote when the bests come from the coarser 10s
+  stream instead of 1Hz data); a **time in zones** stacked bar with minutes per zone
   (`timeInZones`, needs a power stream; Session 27: against the FTP on the ride's own date, with a
   "Zones at 240W, your FTP on this date." note — `[data-ride-ftp-note]` — when that isn't today's FTP); **heart-rate drift**
   (`aerobicDecoupling` + `decouplingBand`, steady rides only); **efficiency** (`efficiencyFactor`,
@@ -736,7 +745,11 @@ needs, rather than a misleading number:
   date-bounded) rides in `history`, with which ride and date set it.
 - `personalBests(history)` → `{ allTime, last90Days }` power curves.
 - `newBestsForRide(history, ride)` → durations where `ride` set a new all-time or 90-day best
-  (drives the Ride page's "★ New best" badges, and the Today "New best" alert, V2 Phase 6).
+  (drives the Today "New best" alert, V2 Phase 6, and the Ride page's "★ New best" badges).
+- `bestEffortComparison(history, ride)` (Session 28) → per duration `{ watts, ref, refDate, ratio,
+  status }`, comparing the ride's best with the best of the 90 days before the ride (the ride itself
+  left out). `status` is `'new'` (same rule as `newBestsForRide`, which now reads from it),
+  `'near'` (ratio ≥ `NEAR_BEST_RATIO`, 0.95) or `'below'`; `ref`/`ratio` are `null` with nothing earlier.
 - `records(history)` → longest ride (by duration and by distance), most elevation, highest TSS,
   and year-to-date totals (distance/hours/elevation/rides) vs. the same date last year.
 - `observedMaxHr(history)` → the highest HR ever seen, preferring `hrStats.max` and falling back
@@ -747,6 +760,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 - `schemaVersion` (2, since V2 Phase 3), `levels`, `history`, `ftp`, `intervalsFTP`, `event`, `userProfile`, `vo2maxEstimates`, `powerCurveData`, `exportedAt`, `lastSyncedAt`, `lastWorkedDates`
 - The Export file and the Google Drive backup write the same fields (plus `syncVersion`; Export also `deviceId`). Files without `schemaVersion` (every backup made before Phase 3) load exactly as before — the loader never looks at it.
 - Device-local keys, not synced: `eftp-prompted-value`, `alert-dismissals`, `maxhr-prompted-value`,
+  `ride-chart-smoothing` (Session 28: the Ride page smoothing choice),
   `levels-before-recalc` (V2 Phase 7: the Undo snapshot for "Recalculate levels").
 
 **Load/save architecture** (in `AppDataProvider`): one load effect (runs once on mount with `try/catch`; also runs the Phase 2 outdoor-category migration and removes the old `intervals-icu-config` key) and one save effect (skips initial mount via the `isInitialMount` ref so defaults never overwrite saved data; the `setItem` call is wrapped in `try/catch` — a quota error shows the one remaining `alert()` asking the user to export a backup). Restoring a backup asks first (ConfirmSheet) and then applies the same field-by-field restore as before.
@@ -966,3 +980,23 @@ forward-looking**: the zone table in watts, Today's header, the eFTP alert.
 (rides before it, heart-rate-only rides and rides with no NP/duration are skipped). Preview shows
 CTL/ATL/TSB before and after; apply stores the old values per ride in `scores-before-rescore`
 (device-local) for **Undo re-score**. Levels, zones and intervals are never touched.
+
+## Ride chart smoothing (Session 28)
+
+The Ride page power/HR chart (`WorkoutDetailPage`) can show a rolling average instead of every
+10-second bin, because a long outdoor ride squeezes ~1,000 spiky points into a phone-width chart.
+**Display only**: `ride.stream` is never changed, and NP, TSS, bests, time in zones and interval
+detection keep reading the raw bins. Logic is in `lib/rideChart.js`:
+
+- `smoothingSeconds(choice, { rideSeconds, indoor })` → window in seconds (0 = raw). `raw` = 0;
+  `30` / `60` / `300` are fixed. **Auto**: indoor rides up to 90 min stay raw (ERG steps stay crisp),
+  longer indoor rides use 30 s; outdoor rides use the smallest of 30 / 60 / 120 / 180 / 300 s that
+  leaves about 100 points across the chart (60 min → 1 min, 3 h → 2 min).
+- `smoothSeries(values, windowBins)` → centered rolling mean. A bin with no reading stays empty,
+  empty bins inside a window are skipped, and the window narrows at the ends of the ride.
+- `rideChartPoints(stream, seconds)` → `{ min, power, hr }` per bin; power and HR use the same window.
+- The choice is kept in the device-local `ride-chart-smoothing` key (`readSmoothingChoice`,
+  `writeSmoothingChoice`; unreadable or unknown → `auto`). It is not synced or exported.
+- With smoothing on, the power area is drawn `monotone`; raw keeps the `stepAfter` stairs. The note
+  under the chart ("Power and heart rate shown as a 2-min average. Peaks are higher in the raw
+  data.") appears only when a window is applied.

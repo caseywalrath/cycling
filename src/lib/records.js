@@ -40,22 +40,40 @@ export const personalBests = (history, today = new Date()) => {
 // (used for the "New best!" alert — V2_PLAN.md §6.2). Excludes `ride` itself when checking
 // what the *previous* best was, so re-saving the same ride doesn't self-congratulate.
 export const newBestsForRide = (history, ride) => {
-  if (!ride) return [];
+  const comparison = bestEffortComparison(history, ride);
+  return BEST_DURATIONS.map(String).filter(d => comparison[d]?.status === 'new');
+};
+
+// A ride at or above this share of the 90-day best counts as "near" it (the blue bar).
+export const NEAR_BEST_RATIO = 0.95;
+
+// How each of the ride's best efforts compares with the best of the 90 days before the ride, not
+// counting the ride itself. Returns { [duration]: { watts, ref, refDate, ratio, status } }:
+//   ref / refDate  the prior 90-day best (null when there was none)
+//   ratio          watts / ref, or null with no ref
+//   status         'new' (beats the prior best, the same rule as the "New best" star),
+//                  'near' (within NEAR_BEST_RATIO of it) or 'below'
+export const bestEffortComparison = (history, ride) => {
+  const result = {};
+  if (!ride) return result;
   const { bests: rideBests } = bestsForRide(ride);
-  if (Object.keys(rideBests).length === 0) return [];
+  if (Object.keys(rideBests).length === 0) return result;
 
   const others = history.filter(w => w.id !== ride.id);
   const priorBests = personalBests(others, parseDateLocal(ride.date));
 
-  const isNewBest = (duration) => {
-    const watts = rideBests[duration];
-    if (watts == null) return false;
+  Object.entries(rideBests).forEach(([duration, watts]) => {
+    if (watts == null) return;
     const priorAllTime = priorBests.allTime[duration]?.watts ?? 0;
-    const prior90 = priorBests.last90Days[duration]?.watts ?? 0;
-    return watts > priorAllTime || watts > prior90;
-  };
-
-  return BEST_DURATIONS.map(String).filter(isNewBest);
+    const prior90 = priorBests.last90Days[duration];
+    const ref = prior90?.watts ?? null;
+    const ratio = ref ? watts / ref : null;
+    let status = 'below';
+    if (watts > priorAllTime || watts > (ref ?? 0)) status = 'new';
+    else if (ratio != null && ratio >= NEAR_BEST_RATIO) status = 'near';
+    result[duration] = { watts, ref, refDate: prior90?.date ?? null, ratio, status };
+  });
+  return result;
 };
 
 // Longest ride/most climbing/highest TSS, and year-to-date totals vs the same date last year.
