@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { powerCurve, personalBests, newBestsForRide, records, observedMaxHr } from './records.js';
+import { powerCurve, personalBests, newBestsForRide, bestEffortComparison, records, observedMaxHr } from './records.js';
 
 const ride = (id, date, bests) => ({ id, date, name: `Ride ${id}`, bests });
 
@@ -26,6 +26,40 @@ describe('newBestsForRide', () => {
   it('does not flag a duration that does not beat the prior best', () => {
     const history = [ride(1, '2026-01-01', { '300': 300 }), ride(2, '2026-02-01', { '300': 260 })];
     expect(newBestsForRide(history, history[1])).not.toContain('300');
+  });
+});
+
+describe('bestEffortComparison', () => {
+  const prior = ride(1, '2026-09-01', { '300': 300, '1200': 250 });
+
+  it('compares with the prior 90-day best and leaves the ride itself out', () => {
+    const now = ride(2, '2026-09-20', { '300': 285, '1200': 200 });
+    const result = bestEffortComparison([prior, now], now);
+    expect(result['300']).toMatchObject({ watts: 285, ref: 300, refDate: '2026-09-01', status: 'near' });
+    expect(result['300'].ratio).toBeCloseTo(0.95, 6);
+    expect(result['1200'].status).toBe('below');
+    expect(result['1200'].ratio).toBeCloseTo(0.8, 6);
+  });
+
+  it('calls a beaten best "new", in step with newBestsForRide', () => {
+    const now = ride(2, '2026-09-20', { '300': 310, '1200': 200 });
+    const result = bestEffortComparison([prior, now], now);
+    expect(result['300'].status).toBe('new');
+    expect(result['300'].ratio).toBeGreaterThan(1);
+    expect(newBestsForRide([prior, now], now)).toEqual(['300']);
+  });
+
+  it('only looks back 90 days from the ride, and has no ref when nothing came before', () => {
+    const old = ride(1, '2026-01-01', { '300': 400 });
+    const now = ride(2, '2026-09-20', { '300': 250 });
+    expect(bestEffortComparison([old, now], now)['300']).toMatchObject({ ref: null, ratio: null });
+    const first = ride(3, '2026-09-20', { '300': 250 });
+    expect(bestEffortComparison([first], first)['300'].status).toBe('new');
+  });
+
+  it('returns nothing for a ride without bests', () => {
+    expect(bestEffortComparison([prior], { id: 9, date: '2026-09-20' })).toEqual({});
+    expect(bestEffortComparison([prior], null)).toEqual({});
   });
 });
 

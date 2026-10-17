@@ -1,17 +1,43 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Area, Line, ReferenceArea, Legend } from 'recharts';
-import { formatDateWithDay } from '../lib/dates.js';
+import { formatDateWithDay, parseDateLocal } from '../lib/dates.js';
 import { ZONES, getZoneColor, getZoneName } from '../lib/zones.js';
 import { bestsForRide, timeInZones, aerobicDecoupling, decouplingBand, efficiencyFactor } from '../lib/analysis.js';
-import { newBestsForRide } from '../lib/records.js';
+import { bestEffortComparison } from '../lib/records.js';
+import {
+  smoothingSeconds, describeSmoothing, rideChartPoints, readSmoothingChoice, writeSmoothingChoice,
+} from '../lib/rideChart.js';
 import { formatMinutes } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
 import { goBack } from '../state/useHashRoute.js';
-import { Page, Button, Card, StatTile, EmptyState, useToast, useConfirm } from '../components/ui/index.js';
+import { Page, Button, Card, StatTile, SegmentedControl, EmptyState, useToast, useConfirm } from '../components/ui/index.js';
 
 // Best-effort durations shown on the Ride page, with their display labels (V2_PLAN.md §5.6).
 const BEST_EFFORT_ROWS = [['5', '5s'], ['60', '1m'], ['300', '5m'], ['1200', '20m'], ['3600', '60m']];
+
+// Chart smoothing choices (Session 28), shown above the power/HR chart.
+const SMOOTHING_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'raw', label: 'Raw' },
+  { value: '30', label: '30s' },
+  { value: '60', label: '1 min' },
+  { value: '300', label: '5 min' },
+];
+
+// Bar colours for a best effort against the prior 90-day best: yellow = new best, blue = within
+// 5% of it, grey = below.
+const BEST_BAR_COLOR = { new: 'bg-yellow-400', near: 'bg-blue-500', below: 'bg-gray-500' };
+
+const bestDetailText = (label, c) => {
+  if (c.ref == null) return `${label}: ${c.watts}W. No earlier effort in the 90 days before this ride to compare with.`;
+  const pct = Math.round(Math.abs(c.ratio - 1) * 100);
+  const against = `your 90-day best of ${c.ref}W (${shortDate(c.refDate)})`;
+  if (c.status === 'new') return `${label}: ${c.watts}W is a new best, ${pct}% above ${against}.`;
+  return `${label}: ${c.watts}W is ${Math.round(c.ratio * 100)}% of ${against}.`;
+};
+
+const shortDate = (dateStr) => parseDateLocal(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 // Ride page at #/ride/<id> (V2 Phase 4 rebuild — replaces the old Workout Detail modal look).
 // Header (name/date/type-zone pill/interval label), a 3x2 stats grid, the power/HR chart with
@@ -23,6 +49,8 @@ export default function WorkoutDetailPage({ rideId }) {
   const toast = useToast();
   const confirm = useConfirm();
   const attachInputRef = useRef(null);
+  const [smoothingChoice, setSmoothingChoice] = useState(readSmoothingChoice);
+  const [bestDetail, setBestDetail] = useState(null);
   const detailRide = history.find(w => String(w.id) === String(rideId));
 
   if (!detailRide) {
@@ -43,19 +71,19 @@ export default function WorkoutDetailPage({ rideId }) {
 
   // V2 Phase 5: a ride can have HR with no power (stream.power === null) — chart HR only.
   const streamLength = detailRide.stream ? (detailRide.stream.power?.length ?? detailRide.stream.hr.length) : 0;
-  const chartData = detailRide.stream
-    ? Array.from({ length: streamLength }, (_, i) => ({
-        min: Math.round((i * detailRide.stream.binSeconds) / 60 * 10) / 10,
-        power: detailRide.stream.power ? detailRide.stream.power[i] : null,
-        hr: detailRide.stream.hr[i],
-      }))
-    : [];
+  // Session 28: the chart can show a rolling average (display only; the saved stream is raw).
+  const smoothSecs = detailRide.stream
+    ? smoothingSeconds(smoothingChoice, { rideSeconds: streamLength * detailRide.stream.binSeconds, indoor: !isOutdoor })
+    : 0;
+  const chartData = rideChartPoints(detailRide.stream, smoothSecs);
+  const smoothingLabel = describeSmoothing(smoothSecs);
+  const chooseSmoothing = (value) => { setSmoothingChoice(value); writeSmoothingChoice(value); };
   const hasHR = detailRide.stream && detailRide.stream.hr.some(v => v != null);
   const hasPower = detailRide.stream && detailRide.stream.power != null;
 
   // V2 Phase 5 §5.6: best efforts, time in zones, HR drift and efficiency.
   const { bests, source: bestsSource } = bestsForRide(detailRide);
-  const newBests = newBestsForRide(history, detailRide);
+  const comparison = bestEffortComparison(history, detailRide);
   // Session 27: zones are measured against the FTP on the ride's own date.
   const rideFtp = ftpOn(detailRide.date);
   const zoneTotals = rideFtp ? timeInZones(detailRide, rideFtp) : null;
@@ -155,6 +183,13 @@ export default function WorkoutDetailPage({ rideId }) {
       {/* Power/HR chart */}
       {detailRide.stream ? (
         <div className="mb-4">
+          <SegmentedControl
+            ariaLabel="Chart smoothing"
+            options={SMOOTHING_OPTIONS}
+            value={smoothingChoice}
+            onChange={chooseSmoothing}
+            className="mb-2"
+          />
           <ResponsiveContainer width="100%" height={220}>
             <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -201,7 +236,7 @@ export default function WorkoutDetailPage({ rideId }) {
               {hasPower && (
                 <Area
                   yAxisId="power"
-                  type="stepAfter"
+                  type={smoothSecs ? 'monotone' : 'stepAfter'}
                   dataKey="power"
                   name="Power"
                   stroke="#3B82F6"
@@ -226,6 +261,11 @@ export default function WorkoutDetailPage({ rideId }) {
               <Legend wrapperStyle={{ fontSize: '12px' }} />
             </ComposedChart>
           </ResponsiveContainer>
+          {smoothingLabel && (
+            <p className="text-xs text-gray-500 mt-1" data-smoothing-note>
+              {hasPower ? 'Power' : 'Heart rate'}{hasPower && hasHR ? ' and heart rate' : ''} shown as a {smoothingLabel}. Peaks are higher in the raw data.
+            </p>
+          )}
         </div>
       ) : (
         <p className="text-gray-400 text-sm mb-4">No power/HR stream saved for this ride.</p>
@@ -250,15 +290,39 @@ export default function WorkoutDetailPage({ rideId }) {
       {Object.keys(bests).length > 0 && (
         <Card className="mb-4">
           <h3 className="text-sm font-medium text-gray-300 mb-2">Best efforts</h3>
-          <div className="grid grid-cols-5 gap-2 text-center">
-            {BEST_EFFORT_ROWS.filter(([d]) => bests[d] != null).map(([d, label]) => (
-              <div key={d}>
-                <div className="text-xs text-gray-400">{label}</div>
-                <div className="text-base font-bold tabular-nums">{bests[d]}W</div>
-                {newBests.includes(d) && <div className="text-[10px] text-yellow-400 mt-0.5">★ New best</div>}
-              </div>
-            ))}
+          <div className="grid grid-cols-5 gap-1 text-center">
+            {BEST_EFFORT_ROWS.filter(([d]) => bests[d] != null).map(([d, label]) => {
+              const c = comparison[d];
+              const selected = bestDetail === d;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  data-best-effort={d}
+                  data-status={c?.status}
+                  aria-pressed={selected}
+                  aria-label={`${label} best ${bests[d]} watts${c?.ratio != null ? `, ${Math.round(c.ratio * 100)}% of your 90-day best` : ''}`}
+                  onClick={() => setBestDetail(selected ? null : d)}
+                  className={`rounded-lg py-1 min-h-[44px] ${selected ? 'bg-gray-700' : ''}`}
+                >
+                  <div className="text-xs text-gray-400">{label}</div>
+                  <div className="text-base font-bold tabular-nums">{bests[d]}W</div>
+                  {c?.ratio != null && (
+                    <div className="mx-1 mt-1 h-1.5 rounded-full bg-gray-700 overflow-hidden" data-best-bar>
+                      <div className={`h-full rounded-full ${BEST_BAR_COLOR[c.status]}`} style={{ width: `${Math.min(1, c.ratio) * 100}%` }} />
+                    </div>
+                  )}
+                  {c?.status === 'new' && <div className="text-[10px] text-yellow-400 mt-0.5">★ New best</div>}
+                </button>
+              );
+            })}
           </div>
+          {bestDetail && comparison[bestDetail] && (
+            <p className="text-xs text-gray-300 mt-2" data-best-detail>
+              {bestDetailText(BEST_EFFORT_ROWS.find(([d]) => d === bestDetail)[1], comparison[bestDetail])}
+            </p>
+          )}
+          <p className="text-xs text-gray-500 mt-2">Bars compare with your best over the 90 days before this ride. Tap one for detail.</p>
           {bestsSource === '10s' && (
             <p className="text-xs text-gray-500 mt-2">Re-attach the ride file for sprint-length bests.</p>
           )}
