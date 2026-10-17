@@ -768,6 +768,8 @@ export function AppDataProvider({ children }) {
       ...parsed,
       workoutLevel: null,
       workoutLevelSource: null,
+      // A new file is a new ride: a rating tapped earlier on an abandoned form must not carry over.
+      rpe: null,
       // Only pre-select a zone for indoor rides; outdoor rides are never filed under one (D5).
       ...(detection && parsed.rideType !== 'Outdoor' ? { zone: detection.category } : {}),
     }));
