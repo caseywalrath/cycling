@@ -278,6 +278,10 @@ export default function SettingsScreen({ route }) {
                 </div>
               ))}
             </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Edges follow TrainerDay's power levels. Sweet Spot (88–94%) is this app's own band, inside
+              TrainerDay's Tempo (Z3) and Threshold (Z4).
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

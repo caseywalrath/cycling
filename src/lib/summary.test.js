@@ -87,7 +87,9 @@ describe('buildAnalysisText', () => {
     const text = build();
     const { min, max } = zoneWattRange('sweetspot', FTP);
     expect(text).toContain(`- Sweet Spot: `);
-    expect(text).toContain(`(${min}-${max}W)`);
+    expect(text).toContain(`(${min}-${max}W) [top of Z3 and start of Z4]`);
+    expect(text).toContain('- Threshold: 95-106% (');
+    expect(text).toContain('TrainerDay has no sweet-spot level');
   });
 
   it('shows days since each zone was last trained', () => {

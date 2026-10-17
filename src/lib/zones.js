@@ -38,19 +38,48 @@ export const ZONE_ADJACENCY = {
   vo2max:    [{ zone: 'threshold', factor: 0.2 }, { zone: 'anaerobic', factor: 0.2 }],
   anaerobic: [{ zone: 'vo2max', factor: 0.2 }],
 };
-// V2 Phase 2: single source of truth for zone boundaries (fraction of FTP), replacing the
-// old ZONE_POWER_RATIO_RANGES (interval detection) and the separate, disagreeing
-// getZoneDescription() table (labels shown on screen). These edges are detection's, tuned in
-// Session 19 - unchanged, so no existing interval gets re-filed into a different zone.
+// Single source of truth for zone boundaries (fraction of FTP), used by interval detection, the
+// labels on screen, time-in-zone, the progression levels and Copy for Claude.
+//
+// Session 26: anchored to TrainerDay, which uses Coggan's power levels (Z1 under 55%, Z2 56-75,
+// Z3 76-90, Z4 91-105, Z5 106-120, Z6 121+). The one-point gaps in that table (75 to 76, and so
+// on) are closed so every ratio lands in exactly one zone. Coggan has no sweet-spot level, so
+// Sweet Spot is the app's own band, 88-94%, cut out of the top of Z3 and the bottom of Z4 (the
+// same band TrainerRoad and the offseason plan call sweet spot). Tempo therefore stops at 88%
+// and Threshold starts at 95%. See ZONE_COGGAN_LEVEL below.
 // [min, max) - the last zone's max is Infinity.
 export const ZONE_BOUNDS = {
   recovery:  [0,    0.55],
-  endurance: [0.55, 0.70],
-  tempo:     [0.70, 0.81],
-  sweetspot: [0.81, 0.94],
-  threshold: [0.94, 1.02],
-  vo2max:    [1.02, 1.20],
-  anaerobic: [1.20, Infinity],
+  endurance: [0.55, 0.76],
+  tempo:     [0.76, 0.88],
+  sweetspot: [0.88, 0.95],
+  threshold: [0.95, 1.06],
+  vo2max:    [1.06, 1.21],
+  anaerobic: [1.21, Infinity],
+};
+
+// Which TrainerDay / Coggan level each app zone sits in (for the Settings footnote and the
+// Copy for Claude zone table). Sweet Spot straddles two.
+export const ZONE_COGGAN_LEVEL = {
+  recovery: 'Z1',
+  endurance: 'Z2',
+  tempo: 'Z3',
+  sweetspot: 'top of Z3 and start of Z4',
+  threshold: 'Z4',
+  vo2max: 'Z5',
+  anaerobic: 'Z6',
+};
+
+// Zone widths (fraction of FTP) the progression levels use to scale intensity. These are the
+// widths of the pre-Session-26 zones, kept fixed so moving the zone edges above did not move the
+// levels (Phase 7 calibrated INTENSITY_SLOPE against them). Anaerobic is open-ended, so it uses
+// OPEN_ZONE_WIDTH in progression.js. Not tied to ZONE_BOUNDS on purpose.
+export const ZONE_LEVEL_WIDTH = {
+  endurance: 0.15,
+  tempo: 0.11,
+  sweetspot: 0.13,
+  threshold: 0.08,
+  vo2max: 0.18,
 };
 
 // First zone (in ZONES order) whose [min, max) contains ratio.

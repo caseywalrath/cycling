@@ -1,5 +1,5 @@
 import { parseDateLocal } from './dates.js';
-import { ZONE_BOUNDS, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, DEFAULT_LEVELS } from './zones.js';
+import { ZONE_BOUNDS, ZONE_LEVEL_WIDTH, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, DEFAULT_LEVELS } from './zones.js';
 
 // Apply decay to progression levels based on days since last worked per zone.
 // Grace period: 14 days of inactivity, then -0.1/week (VO2max/Anaerobic decay 1.5x faster).
@@ -107,13 +107,14 @@ export const STRUCTURE_REFERENCE = {
 // Levels gained each time the work score doubles (log scale: doubling a session ≠ doubling L).
 export const WORK_SCORE_SLOPE = 1.7;
 
-// Levels gained for riding one full zone-width harder than the reference (e.g. SS 81→94%).
+// Levels gained for riding one full zone-width harder than the reference (e.g. SS 13% of FTP,
+// the width of the old 81-94% zone; see ZONE_LEVEL_WIDTH).
 export const INTENSITY_SLOPE = 3;
 
 // The intensity term (per set) is capped at ± this many levels, so a mislabelled ride can't run away.
 export const INTENSITY_CAP = 2;
 
-// Zone width used for the intensity term when the zone has no upper bound (anaerobic).
+// Zone width used for the intensity term when the zone has no fixed width (anaerobic).
 export const OPEN_ZONE_WIDTH = 0.3;
 
 // Efforts this far (fraction of FTP) below the zone's lower bound still count as the zone's work.
@@ -133,10 +134,9 @@ export const ENDURANCE_INTENSITY_SLOPE = 2;
 const clampLevel = (x) => Math.min(10, Math.max(1, x));
 const round1 = (x) => Math.round(x * 10) / 10;
 
-const zoneWidth = (zone) => {
-  const [lo, hi] = ZONE_BOUNDS[zone];
-  return hi === Infinity ? OPEN_ZONE_WIDTH : hi - lo;
-};
+// Fixed per-zone widths (zones.js ZONE_LEVEL_WIDTH), not the live ZONE_BOUNDS spans, so the zone
+// edges can move without moving the levels.
+const zoneWidth = (zone) => ZONE_LEVEL_WIDTH[zone] ?? OPEN_ZONE_WIDTH;
 
 const intensityTerm = (zone, ratio, refRatio, slope) => {
   if (!Number.isFinite(ratio) || ratio <= 0) return 0;

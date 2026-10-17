@@ -485,33 +485,58 @@ current FTP); a ride with a manual level keeps it; a ride the model can't score 
 interval data) counts as a typical session, level 5. Preview first, apply on confirm, Undo
 until the next ride is logged.
 
-## Zone Definitions (V2 Phase 2)
+## Zone Definitions (V2 Phase 2, re-anchored in Session 26)
 
-Before Phase 2, the on-screen zone labels (`getZoneDescription`, in `App.jsx`) and interval
-detection (`ZONE_POWER_RATIO_RANGES`, in `src/lib/zones.js`) used two different sets of %FTP
-edges, so 79–83% FTP fell in no zone on screen even though detection filed it somewhere.
-They're now one table, `ZONE_BOUNDS` in `src/lib/zones.js`, using detection's edges (tuned in
-Session 19 — unchanged, so no existing interval gets re-filed):
+One table, `ZONE_BOUNDS` in `src/lib/zones.js`, is the only place zone edges live. Interval
+detection, the on-screen watt labels, time-in-zone, the progression levels and Copy for Claude all
+read it.
+
+**Source of the edges (Session 26):** TrainerDay uses Coggan's seven power levels (Z1 under 55%,
+Z2 56–75, Z3 76–90, Z4 91–105, Z5 106–120, Z6 121+). The app uses those edges, with the one-point
+gaps closed so every ratio is in exactly one zone. Coggan has no sweet-spot level, so **Sweet Spot
+(88–94%) is the app's own band**, cut from the top of Z3 and the bottom of Z4; it stays a
+progression level and training target. (Earlier versions used 70/81/94/102/120, tuned in Session 19
+for detection, and the Sweet Spot band had been borrowed from TrainerRoad's chart.)
+
+| App zone | % of FTP | TrainerDay / Coggan |
+|---|---|---|
+| Recovery | under 55 | Z1 |
+| Endurance | 55–75 | Z2 |
+| Tempo | 76–87 | Z3 (76–90), lower part |
+| Sweet Spot | 88–94 | top of Z3 and start of Z4 |
+| Threshold | 95–105 | Z4 (91–105), upper part |
+| VO2max | 106–120 | Z5 |
+| Anaerobic | over 120 | Z6 |
 
 ```javascript
-ZONE_BOUNDS = {
+ZONE_BOUNDS = {                      // [min, max) as a fraction of FTP
   recovery:  [0,    0.55],
-  endurance: [0.55, 0.70],
-  tempo:     [0.70, 0.81],
-  sweetspot: [0.81, 0.94],
-  threshold: [0.94, 1.02],
-  vo2max:    [1.02, 1.20],
-  anaerobic: [1.20, Infinity],
+  endurance: [0.55, 0.76],
+  tempo:     [0.76, 0.88],
+  sweetspot: [0.88, 0.95],
+  threshold: [0.95, 1.06],
+  vo2max:    [1.06, 1.21],
+  anaerobic: [1.21, Infinity],
 }
+ZONE_COGGAN_LEVEL            // zone -> "Z2" … ("top of Z3 and start of Z4" for sweet spot); used by the
+                             //   Settings footnote and the Copy for Claude zone table
+ZONE_LEVEL_WIDTH             // FIXED per-zone widths the progression levels use (the old zones' widths:
+                             //   endurance .15, tempo .11, sweet spot .13, threshold .08, VO2max .18;
+                             //   anaerobic uses OPEN_ZONE_WIDTH). Deliberately NOT derived from
+                             //   ZONE_BOUNDS, so moving an edge never moves a level
 zoneForRatio(ratio)          // first zone whose [min, max) contains ratio
-categoryForRatio(ratio)      // same exact behavior as before Phase 2 (verified: 2,001 ratios
-                              //   from 0.000 to 2.000 in 0.001 steps, 0 mismatches); ratios
-                              //   below 0.55 still return 'endurance', since detection never
-                              //   files a block as recovery
+categoryForRatio(ratio)      // same as zoneForRatio, but ratios below 0.55 return 'endurance', since
+                             //   detection never files a block as recovery
 zoneWattRange(zoneId, ftp)   // { min, max } in watts (max: null for the open-ended top zone)
-zoneRangeLabel(zoneId, ftp)  // "Z2: 127-162W" or "277W+" style label shown on the progression
-                              //   bars — replaces getZoneDescription()
+zoneRangeLabel(zoneId, ftp)  // "Z2: 127-176W", "203-219W" (sweet spot has no Z prefix), "Z6: 280W+"
 ```
+
+**What a change to the edges does and doesn't touch:** stored ride zones and stored interval
+labels never change. Time-in-zone (charts, ride page, export) is computed live, so it follows the
+new edges at once. Progression levels are unchanged for any session still in its zone (checked
+against the old edges); a ride filed under a zone but ridden entirely below that zone's floor (floor =
+lower edge minus `ZONE_SET_TOLERANCE`, 3%) no longer scores for it. For Sweet Spot the floor is now
+85%, up from 78%, which stops tempo-level blocks counting as sweet spot work.
 
 ## Utility Functions (`src/lib/`)
 ```javascript

@@ -48,7 +48,7 @@ describe('workoutLevelFromStructure', () => {
 
   it('is monotonic in intensity: harder within (and above) the zone never lowers the level', () => {
     let prev = 0;
-    for (let pct = 0.79; pct <= 1.05; pct += 0.01) {
+    for (let pct = 0.86; pct <= 1.05; pct += 0.01) {
       const l = L(intervalRide('sweetspot', [[2, 20, pct]]));
       expect(l).toBeGreaterThanOrEqual(prev);
       prev = l;
@@ -69,7 +69,7 @@ describe('workoutLevelFromStructure', () => {
   });
 
   it('is bounded 1–10', () => {
-    expect(L(intervalRide('sweetspot', [[1, 2, 0.8]]))).toBe(1);
+    expect(L(intervalRide('sweetspot', [[1, 2, 0.86]]))).toBe(1);
     expect(L(intervalRide('sweetspot', [[6, 45, 0.94]]))).toBe(10);
     expect(L(enduranceRide(10, 0.5))).toBe(1);
     expect(L(enduranceRide(900, 0.7))).toBe(10);
@@ -106,6 +106,20 @@ describe('workoutLevelFromStructure', () => {
     };
     expect(L(split)).toBe(L(clean));
     expect(L(clean)).toBe(L(intervalRide('sweetspot', [[2, 20, 222 / FTP]])));
+  });
+
+  it('does not move when the zone edges move: levels use fixed zone widths (Session 26)', () => {
+    // Pinned to the values the pre-Coggan zone edges gave for the same sessions (FTP 250 here).
+    expect(L(intervalRide('sweetspot', [[2, 20, 0.92]]))).toBe(7.2);
+    expect(L(intervalRide('sweetspot', [[1, 45, 0.88]]))).toBe(8.6);
+    expect(L(intervalRide('tempo', [[2, 20, 0.82]]))).toBe(5.5);
+    expect(L(intervalRide('threshold', [[2, 20, 0.97]]))).toBe(7.1);
+    expect(L(intervalRide('vo2max', [[5, 5, 1.10]]))).toBe(5.9);
+    expect(L(enduranceRide(120, 0.72))).toBe(7);
+  });
+
+  it('does not score a sweet-spot ride whose efforts are all below the zone (tempo-level work)', () => {
+    expect(L(intervalRide('sweetspot', [[2, 20, 0.83]]))).toBeNull();
   });
 
   it('returns null when there is nothing to score', () => {

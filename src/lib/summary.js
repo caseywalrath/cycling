@@ -1,5 +1,5 @@
 import { parseDateLocal, toLocalDateStr, formatDateWithDay } from './dates.js';
-import { ZONES, ZONE_BOUNDS, getZoneName, zoneWattRange } from './zones.js';
+import { ZONES, ZONE_BOUNDS, ZONE_COGGAN_LEVEL, getZoneName, zoneWattRange } from './zones.js';
 import { timeInZones, aerobicDecoupling } from './analysis.js';
 import { workReps, rideFtpAtTime, ZONE_SET_TOLERANCE } from './progression.js';
 import { getTrainingStatus, estimateLthr } from './load.js';
@@ -199,9 +199,10 @@ const eftpText = (currentEftp, best20) => {
 const zoneTableLines = (ftp) => ZONES.map(z => {
   const [lo, hi] = ZONE_BOUNDS[z.id];
   const { min, max } = zoneWattRange(z.id, ftp);
-  if (lo === 0) return `- ${z.name}: under ${Math.round(hi * 100)}% (under ${max}W)`;
-  if (max === null) return `- ${z.name}: ${Math.round(lo * 100)}%+ (${min}W+)`;
-  return `- ${z.name}: ${Math.round(lo * 100)}-${Math.round(hi * 100)}% (${min}-${max}W)`;
+  const level = ZONE_COGGAN_LEVEL[z.id];
+  if (lo === 0) return `- ${z.name}: under ${Math.round(hi * 100)}% (under ${max}W) [${level}]`;
+  if (max === null) return `- ${z.name}: ${Math.round(lo * 100)}%+ (${min}W+) [${level}]`;
+  return `- ${z.name}: ${Math.round(lo * 100)}-${Math.round(hi * 100)}% (${min}-${max}W) [${level}]`;
 });
 
 export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile, now = new Date() }) => {
@@ -334,8 +335,9 @@ ${sinceLine}
 **Athlete**
 ${athleteLines.join('\n')}
 
-**Zones @ ${currentFTP}W** (the app's zone names; % of FTP)
+**Zones @ ${currentFTP}W** (% of FTP; [Z#] = TrainerDay/Coggan power level)
 ${zoneTableLines(currentFTP).join('\n')}
+TrainerDay has no sweet-spot level; its "SS" workouts target this app's Sweet Spot band. Other edges match TrainerDay.
 
 **Days since each zone was last trained (indoor rides)**
 - ${zoneDays.join(' | ')}

@@ -1,5 +1,32 @@
 # Changelog
 
+## Session 26 - Zones Anchored to TrainerDay (2026-10-17)
+
+### What you'll see on your iPhone
+- **The training zones now follow TrainerDay**, which uses Coggan's power levels. At FTP 225W: Recovery under 124W, Endurance 124–171W, Tempo 171–198W, **Sweet Spot 198–214W**, Threshold 214–239W, VO2max 239–272W, Anaerobic 272W+.
+- **Sweet Spot is still a zone and still a progression level.** TrainerDay has no sweet-spot level, so Sweet Spot is the app's own band (88–94% of FTP), taken from the top of TrainerDay's Tempo and the bottom of its Threshold. It is the same 88–94% your plan uses. Before, the app's Sweet Spot was 81–94%, which counted tempo-level riding as sweet spot.
+- **Settings → Profile** has a short note under the zone table saying this. The **Copy for Claude** zone list shows each zone's TrainerDay level, and says TrainerDay's "SS" workouts target the Sweet Spot band.
+- **Your progression levels did not move.** The level maths now uses fixed zone widths instead of the new (narrower) Sweet Spot band, and I checked sample sessions against the old edges: identical levels. The one difference: a ride filed as Sweet Spot but ridden entirely below 85% of FTP (it used to need 78%) no longer scores as sweet spot work. If you tap "Recalculate levels from my rides", such old rides count as a typical session instead.
+- **Time in zone** (the Progress "Zones" chart, a ride's zone bar, and the export) uses the new edges straight away, because it is worked out from the ride file each time.
+- **Rides you already saved keep the zone and interval label they had.** Only new imports use the new edges when the app guesses a zone.
+
+### Why
+TrainerDay and the app labelled the same ride differently (an 85% effort was "tempo" in TrainerDay and "sweet spot" in the app). One of the app's edges had been borrowed from TrainerRoad's chart, not TrainerDay's.
+
+### Anything skipped?
+- Your **FTP history** (230, 240, then 225) is still not stored, so an old ride is zoned against today's FTP rather than the FTP you had then.
+- I did not run the browser regression check (`tools/v2-check.mjs`). Its test ride (3x8 @ 250W at FTP 231, about 108%) is VO2max under both the old and new edges, so its numbers should not change.
+
+### Files Changed
+- `src/lib/zones.js` — new `ZONE_BOUNDS` edges, new `ZONE_COGGAN_LEVEL` and `ZONE_LEVEL_WIDTH`
+- `src/lib/progression.js` — intensity scaling reads `ZONE_LEVEL_WIDTH`
+- `src/lib/summary.js` — zone list shows Coggan levels and the sweet-spot note
+- `src/screens/SettingsScreen.jsx` — note under the zone table
+- `src/lib/zones.test.js`, `progression.test.js`, `analysis.test.js`, `summary.test.js` — updated for the new edges; new tests pin the edges, that there are no gaps, and that levels didn't move (126 tests in total)
+- `ARCHITECTURE.md` — "Zone Definitions" rewritten
+
+---
+
 ## Session 26 - Copy for Claude, Rebuilt for Picking Workouts (2026-10-17)
 
 ### What you'll see on your iPhone
@@ -14,7 +41,7 @@
 
 ### Anything skipped?
 - The **"current goal"** field and the **"note for Claude"** box from the recommendations need new screens and weren't built.
-- The **zone table itself was not changed.** The app's zones (Sweet Spot 81–94%) differ from TrainerDay's (Sweet Spot 88–94%). Moving the app onto TrainerDay's zones is a separate change because it affects progression levels and past rides; the new text follows `ZONE_BOUNDS`, so it will pick up that change automatically.
+- The **zone table itself was not changed in this entry**; the zone change is the next entry below it in time ("Zones Anchored to TrainerDay"), and the export text follows `ZONE_BOUNDS`.
 - A **30/30 workout** (30 seconds hard, 30 easy) still looks like a few ~8-minute blocks at ~85% FTP to interval detection, because it averages the on/off pattern. The ride name tells Claude what it really was.
 
 ### Files Changed
