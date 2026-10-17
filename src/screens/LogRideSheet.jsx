@@ -20,7 +20,7 @@ const RPE_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const {
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
-    saveRide, importRideFile, applyRideImport, attachRideFile, calculateTSS, currentFTP,
+    saveRide, importRideFile, applyRideImport, attachRideFile, calculateTSS, calculateIF, currentFTP,
     userProfile, formStructureLevel,
   } = useAppData();
   const toast = useToast();
@@ -55,8 +55,9 @@ export default function LogRideSheet({ open, onClose, onSaved, onAttached }) {
   const canSave = duration > 0
     && (isHrOnlyImport ? hrOnlyTss != null : normalizedPower > 0)
     && (isOutdoor || !!formData.zone);
-  const currentIF = currentFTP ? normalizedPower / currentFTP : 0;
-  const currentTSS = isHrOnlyImport ? hrOnlyTss : calculateTSS(normalizedPower, duration);
+  // Session 27: measured against the FTP on the ride's date (today's when no FTP history is recorded).
+  const currentIF = currentFTP ? calculateIF(normalizedPower, formData.date) : 0;
+  const currentTSS = isHrOnlyImport ? hrOnlyTss : calculateTSS(normalizedPower, duration, formData.date);
 
   const switchToManual = () => {
     setMode('manual');

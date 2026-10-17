@@ -18,7 +18,7 @@ Phase 5 adds **vitest** (the only new dependency the whole V2 plan allows) as th
 runner: `npm test` runs `vitest run`. Tests live next to the code they test, as `*.test.js`, and
 cover the pure `src/lib/` functions only (no React component tests) — `dates.test.js`,
 `zones.test.js`, `rideFiles.test.js`, `eftp.test.js`, `intervals.test.js`, `load.test.js`,
-`analysis.test.js`, `records.test.js`. This is separate from `tools/v2-check.mjs`, the
+`analysis.test.js`, `records.test.js`, `summary.test.js`, `ftpHistory.test.js`, `chartData.test.js`. This is separate from `tools/v2-check.mjs`, the
 Playwright-based regression check (§0.4 in `V2_PLAN.md`), which drives the real app in a browser.
 
 ## File Structure
@@ -75,6 +75,7 @@ src/
                              #   calculateNormalizedPower, findMatchingRideForImport,
                              #   toOneHzSeries, bestsFromOneHz, hrStatsFromSeries, avgPowerFromSeries (Phase 5)
     eftp.js                  #   EFTP_* constants, bestAveragePower, estimateRideFtp, buildEftpTimeline
+    ftpHistory.js            #   Session 27: cleanFtpHistory, ftpOnDate, withFtpChange, describeFtpHistory, rescoreRides
     intervals.js             #   interval-detection constants, detectIntervals and helpers
     progression.js           #   applyDecay, workoutLevelFromStructure, calculateNewLevel,
                              #   recalculateLevelsFromHistory (V2 Phase 7 — see Progression model)
@@ -87,7 +88,7 @@ src/
     chartData.js             #   calculateWeeklyHours, calculateWeeklyTSS, calculateMonthlyElevation,
                              #   calculateEFTPHistory, weeklyTimeInZones (Phase 6)
     summary.js               #   getDaysUntilEvent, weekComparison, latestRide, mondayOf,
-                             #   buildAnalysisText (Copy for Claude, Phase 6 additions §6.3), copyToClipboard
+                             #   buildAnalysisText (Copy for Claude, rebuilt in Session 26), copyToClipboard
     alerts.js                #   buildAlerts, ridesNeedingZone; Phase 6 adds new-best/ramp-rate/
                              #   feels-harder/max-hr, ALERT_DISMISSALS_KEY, MAXHR_PROMPT_KEY,
                              #   readDismissals/writeDismissal (Today alerts)
@@ -95,6 +96,7 @@ src/
     *.test.js                #   vitest unit tests, next to the code they test (Phase 6 adds alerts.test.js)
 tools/
   v2-check.mjs               # regression check (see V2_PLAN.md §0.4); v2-baseline.json
+  ftp-history-check.mjs      # Session 27: drives Settings → FTP history, re-score + undo, ride-page note
 public/                      # PWA icons, apple-touch-icon.png
 .github/workflows/deploy.yml # GitHub Actions → GitHub Pages
 vite.config.js               # Vite + PWA config (base: /cycling/)
@@ -151,7 +153,8 @@ No router library. `useHashRoute()` parses `location.hash` into
 | `levels` | Base progression levels per zone (1-10) — raw, unaffected by decay |
 | `lastWorkedDates` | `{ zoneId: 'YYYY-MM-DD' }` — when each zone was last directly trained (decay clock) |
 | `history` | Array of ride objects (newest logged first) |
-| `currentFTP` | FTP (saved as `ftp`) |
+| `currentFTP` | FTP (saved as `ftp`). When `ftpHistory` has entries it is always the latest entry's FTP |
+| `ftpHistory` | Session 27: `[{ date, ftp }]` oldest first — the FTP that applied from each date (see **FTP history** below). Empty = none recorded. Saved, exported, synced and restored with `ftp` |
 | `event` | `{ name, date, distance, targetCTL }` |
 | `userProfile` | `{ maxHR, restingHR, lthr, weight (lb), age, sex }` — `lthr` (Threshold HR) is optional, added V2 Phase 4, read by Phase 5's heart-rate TSS |
 | `intervalsFTP`, `vo2maxEstimates` | **Pass-through** (V2 §0.3): loaded, saved, exported, synced unchanged, never edited |
@@ -166,6 +169,7 @@ No router library. `useHashRoute()` parses `location.hash` into
 | `lastLoggedWorkout` | The ride just logged (post-log summary data; drives the animation) |
 | `formData`, `editingRide`, `pendingFitDetail` | The Log Ride form, the id being edited (null = new ride), and `{ stream, detection }` from a file import awaiting Save. V2 Phase 7: `formData.workoutLevel` (stepper value, null = not set) and `formData.workoutLevelSource` (`'manual'` once the user sets/overrides it) |
 | `recalcUndoAvailable` | V2 Phase 7: an "Undo recalculation" snapshot exists on this device (`levels-before-recalc`) |
+| `rescoreUndoAvailable` | Session 27: an "Undo re-score" snapshot (`{ rideId: { tss, intensityFactor } }`) exists on this device (`scores-before-rescore`) |
 | `isDriveSyncing`, `driveSyncStatus` | Sync button state; status clears after 5 s |
 | `eftpPromptedValue` | Highest eFTP the user has answered (device-local `localStorage['eftp-prompted-value']`) |
 | `hasUnsyncedChanges` | V2 Phase 4: true once a data change hasn't auto-synced yet (no valid Google token when the 3s debounce fired). Shown as a badge on the Settings tab; cleared on the next successful sync (auto or manual) |
@@ -195,7 +199,10 @@ last90Days }`), `rideRecords` (`records()`), `maxHrObserved` (`observedMaxHr`).
 | `applyRideImport(result)` | Pre-fill the form + `pendingFitDetail` | – |
 | `attachRideFile(existing, result)` | FIT backfill onto an existing ride (stream + intervalData only) | `{ rideId, detection }` |
 | `redetectRide(id)`, `redetectCandidates()`, `redetectAll()` | Re-run interval detection on saved streams | `{ ok, message }` / rides / `{ ok, message }` |
-| `saveProfile({ ftp, profile, resetLevels })` | Save Settings → Profile (caller validates FTP 100–500 and asks about resetting levels) | – |
+| `saveProfile({ ftp, profile, resetLevels, effectiveFrom })` | Save Settings → Profile (caller validates FTP 100–500 and asks about resetting levels). Session 27: a changed FTP is added to `ftpHistory` from `effectiveFrom` (kept between the latest entry and today; default today); the first change on a install with no history also records the previous FTP "from the beginning" | – |
+| `saveFtpHistory(list)` | Session 27: replace the history with an edited list (invalid rows dropped); `currentFTP` becomes the latest entry's FTP. `[]` clears it | cleaned list |
+| `ftpOn(date)`, `calculateTSS(np, min, date?)`, `calculateIF(np, date?)` | Session 27: the FTP in effect on a date (today's when no history/date), and TSS/IF against it | number |
+| `previewRescore()` / `applyRescore(preview)` / `undoRescore()` | Session 27: Settings → Re-score my rides. Preview changes nothing and returns `{ changed, updates, before, after }` (before/after = `calculateTrainingLoads` CTL/ATL/TSB); apply snapshots old TSS/IF to `scores-before-rescore` and writes new ones; undo restores them | – / – / `true/false` |
 | `saveEvent(data)`, `deleteEvent()` | Event | – |
 | `resetLevels()` | All zones to 1.0, clears `lastWorkedDates` (and any recalculation Undo snapshot) | – |
 | `oldImportedRideCount()` | Count of indoor, `source: 'imported'`, `zone == null`, not-yet-`historical` rides | number |
@@ -207,7 +214,7 @@ last90Days }`), `rideRecords` (`records()`), `maxHrObserved` (`observedMaxHr`).
 | `resolveEftpAlert(value)` | Store the answered eFTP value (Dismiss or Update FTP) | – |
 | `resolveMaxHrAlert(value)` | V2 Phase 6: store the answered max-HR value (`maxhr-prompted-value`), same pattern as eFTP | – |
 | `dismissAlert(key, value)` | V2 Phase 6: write one entry into the device-local `alert-dismissals` map (new-best per ride id, ramp-rate's date, feels-harder's ride id) | – |
-| `buildCopyText()` | Copy for Claude text (Phase 6 adds ramp rate/90-day bests/HR drift/time-in-zone share, §6.3) | string |
+| `buildCopyText()` | Copy for Claude text (rebuilt in Session 26 — see "Copy for Claude" below); passes `userProfile` for LTHR/max HR/weight | string |
 | `closePostLogSummary()` | Start the level-bar animation for `lastLoggedWorkout` | – |
 | `markDataChanged()` | `exportedAt = now` — called by every mutation | – |
 
@@ -293,7 +300,7 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
 6. **Event:** name, date, "36 days to go" / "Today!" / "Event complete" (+ Set next event), and
    the Fitness (CTL) → target bar (moved here from the old Fitness Progress card). No date:
    "No event set · Add one".
-7. **Copy for Claude** (secondary button; text format unchanged, `buildAnalysisText`).
+7. **Copy for Claude** (secondary button; `buildAnalysisText`, rebuilt in Session 26 — see "Copy for Claude" below).
 8. **＋ Log Ride** floats above the tab bar on Today and Rides (rendered by `Shell`).
 
 ### Rides (`screens/RidesScreen.jsx`, V2 Phase 4 rebuild)
@@ -360,7 +367,12 @@ Cards, each with its own Save: **Profile** (FTP validated 100–500 with an inli
 zone-watt table underneath it, from `zoneRangeLabel`, updating as the FTP box is typed; if FTP
 changed, a ConfirmSheet asks whether to reset levels; Max HR, Resting HR, an optional **Threshold
 HR / LTHR** field — "leave blank to estimate from Max HR", read by Phase 5 — Weight, Age, Sex are
-a draft saved together with the FTP), **Event** (Save; Delete with a ConfirmSheet), **Sync &
+a draft saved together with the FTP; Session 27: typing a different FTP shows "New FTP applies from",
+a date input, `[data-ftp-effective]`), **FTP history** (Session 27, `#settings-ftp-history`: one
+stacked row per entry — date + watts + Remove, the opening entry reads "From the beginning" — with
+Add a change / Save FTP history, a warning when saving changes today's FTP, and, once a history
+exists, **Re-score my rides…** (ConfirmSheet with CTL/ATL/TSB now → after, `[data-rescore-preview]`)
+and an **Undo re-score** link while `rescoreUndoAvailable`), **Event** (Save; Delete with a ConfirmSheet), **Sync &
 backup** (Sync with Google Drive; status line shows a sync result, "Unsynced changes"
 (`hasUnsyncedChanges`), or "Last synced …"; Export backup, Import backup → ConfirmSheet "This
 replaces all rides on this device (N) with M rides from the backup saved <date>"), **Old imported
@@ -385,7 +397,8 @@ CHANGELOG).
   for it — see "Metrics engine" below): a **best efforts** table (5s/1m/5m/20m/60m, `★ New best`
   badges from `newBestsForRide`, a footnote when the bests come from the coarser 10s stream
   instead of 1Hz data); a **time in zones** stacked bar with minutes per zone
-  (`timeInZones`, needs a power stream and the current FTP); **heart-rate drift**
+  (`timeInZones`, needs a power stream; Session 27: against the FTP on the ride's own date, with a
+  "Zones at 240W, your FTP on this date." note — `[data-ride-ftp-note]` — when that isn't today's FTP); **heart-rate drift**
   (`aerobicDecoupling` + `decouplingBand`, steady rides only); **efficiency** (`efficiencyFactor`,
   "Higher over time = fitter").
 - **Workout Progression** (`WorkoutProgressionPage`): zone Chips, Work Minutes / Avg Watts
@@ -485,33 +498,58 @@ current FTP); a ride with a manual level keeps it; a ride the model can't score 
 interval data) counts as a typical session, level 5. Preview first, apply on confirm, Undo
 until the next ride is logged.
 
-## Zone Definitions (V2 Phase 2)
+## Zone Definitions (V2 Phase 2, re-anchored in Session 26)
 
-Before Phase 2, the on-screen zone labels (`getZoneDescription`, in `App.jsx`) and interval
-detection (`ZONE_POWER_RATIO_RANGES`, in `src/lib/zones.js`) used two different sets of %FTP
-edges, so 79–83% FTP fell in no zone on screen even though detection filed it somewhere.
-They're now one table, `ZONE_BOUNDS` in `src/lib/zones.js`, using detection's edges (tuned in
-Session 19 — unchanged, so no existing interval gets re-filed):
+One table, `ZONE_BOUNDS` in `src/lib/zones.js`, is the only place zone edges live. Interval
+detection, the on-screen watt labels, time-in-zone, the progression levels and Copy for Claude all
+read it.
+
+**Source of the edges (Session 26):** TrainerDay uses Coggan's seven power levels (Z1 under 55%,
+Z2 56–75, Z3 76–90, Z4 91–105, Z5 106–120, Z6 121+). The app uses those edges, with the one-point
+gaps closed so every ratio is in exactly one zone. Coggan has no sweet-spot level, so **Sweet Spot
+(88–94%) is the app's own band**, cut from the top of Z3 and the bottom of Z4; it stays a
+progression level and training target. (Earlier versions used 70/81/94/102/120, tuned in Session 19
+for detection, and the Sweet Spot band had been borrowed from TrainerRoad's chart.)
+
+| App zone | % of FTP | TrainerDay / Coggan |
+|---|---|---|
+| Recovery | under 55 | Z1 |
+| Endurance | 55–75 | Z2 |
+| Tempo | 76–87 | Z3 (76–90), lower part |
+| Sweet Spot | 88–94 | top of Z3 and start of Z4 |
+| Threshold | 95–105 | Z4 (91–105), upper part |
+| VO2max | 106–120 | Z5 |
+| Anaerobic | over 120 | Z6 |
 
 ```javascript
-ZONE_BOUNDS = {
+ZONE_BOUNDS = {                      // [min, max) as a fraction of FTP
   recovery:  [0,    0.55],
-  endurance: [0.55, 0.70],
-  tempo:     [0.70, 0.81],
-  sweetspot: [0.81, 0.94],
-  threshold: [0.94, 1.02],
-  vo2max:    [1.02, 1.20],
-  anaerobic: [1.20, Infinity],
+  endurance: [0.55, 0.76],
+  tempo:     [0.76, 0.88],
+  sweetspot: [0.88, 0.95],
+  threshold: [0.95, 1.06],
+  vo2max:    [1.06, 1.21],
+  anaerobic: [1.21, Infinity],
 }
+ZONE_COGGAN_LEVEL            // zone -> "Z2" … ("top of Z3 and start of Z4" for sweet spot); used by the
+                             //   Settings footnote and the Copy for Claude zone table
+ZONE_LEVEL_WIDTH             // FIXED per-zone widths the progression levels use (the old zones' widths:
+                             //   endurance .15, tempo .11, sweet spot .13, threshold .08, VO2max .18;
+                             //   anaerobic uses OPEN_ZONE_WIDTH). Deliberately NOT derived from
+                             //   ZONE_BOUNDS, so moving an edge never moves a level
 zoneForRatio(ratio)          // first zone whose [min, max) contains ratio
-categoryForRatio(ratio)      // same exact behavior as before Phase 2 (verified: 2,001 ratios
-                              //   from 0.000 to 2.000 in 0.001 steps, 0 mismatches); ratios
-                              //   below 0.55 still return 'endurance', since detection never
-                              //   files a block as recovery
+categoryForRatio(ratio)      // same as zoneForRatio, but ratios below 0.55 return 'endurance', since
+                             //   detection never files a block as recovery
 zoneWattRange(zoneId, ftp)   // { min, max } in watts (max: null for the open-ended top zone)
-zoneRangeLabel(zoneId, ftp)  // "Z2: 127-162W" or "277W+" style label shown on the progression
-                              //   bars — replaces getZoneDescription()
+zoneRangeLabel(zoneId, ftp)  // "Z2: 127-176W", "203-219W" (sweet spot has no Z prefix), "Z6: 280W+"
 ```
+
+**What a change to the edges does and doesn't touch:** stored ride zones and stored interval
+labels never change. Time-in-zone (charts, ride page, export) is computed live, so it follows the
+new edges at once. Progression levels are unchanged for any session still in its zone (checked
+against the old edges); a ride filed under a zone but ridden entirely below that zone's floor (floor =
+lower edge minus `ZONE_SET_TOLERANCE`, 3%) no longer scores for it. For Sweet Spot the floor is now
+85%, up from 78%, which stops tempo-level blocks counting as sweet spot work.
 
 ## Utility Functions (`src/lib/`)
 ```javascript
@@ -754,7 +792,7 @@ Single localStorage key (`STORAGE_KEY`) stores all app data in one JSON object:
 | `calculateWeeklyHours/TSS`, `calculateMonthlyElevation` | `lib/chartData.js` | Chart data (20 weeks / 11 months) |
 | `parseFitFile(arrayBuffer)`, `parseTcxFile(text)` | `lib/rideFiles.js` | File → Log Ride form values + stream + laps |
 | `findMatchingRideForImport(rides, parsed)` | `lib/rideFiles.js` | Same-day ride with duration within 25% (unset duration always qualifies), else `null` |
-| `buildAnalysisText(...)` | `lib/summary.js` | Copy for Claude text: FTP, W/kg, eFTP, event countdown, loads (7/14/28d TSS), weekly hours (4wk), recent workouts, interval progressions |
+| `buildAnalysisText(...)` | `lib/summary.js` | Copy for Claude text — see "Copy for Claude" below |
 | `getDaysUntilEvent(event)` | `lib/summary.js` | Whole days to the event (negative once passed), `null` without a date |
 | `buildAlerts(state, derived, today)` | `lib/alerts.js` | Today alerts |
 | `redetectRide(id)` / `redetectAll()` | `AppDataContext` | Re-run detection against saved streams — no file re-import needed |
@@ -862,3 +900,69 @@ the result. Each new chart card carries a `data-chart="<name>"` attribute (`fitn
   - Uses `actions/configure-pages@v4` for proper Pages environment setup
 - **PWA**: `scope` and `start_url` set to `/cycling/` in manifest
 - **Branch model**: `main` is the deploy branch; `claude/` session branches merge into `main` via PR
+
+## Copy for Claude (Session 26)
+
+`buildAnalysisText()` in `lib/summary.js` builds the text the Today tab's button copies. It exists
+to help pick the next workout, so it is organised around that. Sections, in order:
+
+1. **Header** — training status, CTL/ATL/TSB, ramp rate, 7-day TSS; days since the last ride and
+   the last *hard* ride (indoor sweet spot or above, or IF ≥ 0.85, TrainerDay's own "hard day" bar).
+2. **Athlete** — FTP (and, when recorded, the FTP history); eFTP worded as "95% of best 20-min NNNW … a floor, not a max-effort test"
+   (it comes from the best 20 minutes of any ride, not a maximal test, so it can sit below FTP while
+   the best 20-min is above it); LTHR / max HR / weight from `userProfile` (`n/a` when unset); the
+   next event only while it is still ahead.
+3. **Zones** — every zone as % of FTP and watts, straight from `ZONE_BOUNDS`, so the names mean the
+   same to Claude as in the app.
+4. **Days since each zone was last trained** — indoor rides filed under the zone.
+5. **Weekly load** — the last 6 Monday-start weeks, *including weeks with no rides*, with the
+   current week marked partial (the chart helper `calculateWeeklyHours` skips empty weeks and is
+   left alone).
+6. **Recent rides** (21 days, max 10) — name, zone, duration, NP, IF, TSS, average HR, RPE,
+   completed. With an FTP history, IF is NP ÷ the FTP of the ride's own day, with "(FTP then NNNW)"
+   when that isn't today's; without one, IF is as stored, with "(scored at FTP NNNW)" when that
+   differs. Indoor rides in tempo-or-above add a **Main set** line: only in-zone reps (`workReps`
+   from `progression.js`, the same filter progression levels use) judged against the ride's own
+   day's FTP, as reps, %FTP ("@ 88% of 240W FTP" when that isn't today's), minutes in zone.
+   Distance/elevation are no longer printed.
+7. **Interval progression** — last 3 sessions per zone in the last 90 days, in-zone reps at %FTP;
+   "none in 90 days (last <date>)" otherwise; a ride labelled for a zone whose reps never reached it
+   says "none in zone".
+8. **Time in zone** (4 weeks) in minutes, Recovery/coasting reported separately and left out of the
+   percentages. 9. **Bests (90d)** and **HR drift (30d)** — `n/a` instead of disappearing.
+
+Known limit: interval detection works on the smoothed stream and skips efforts under 90 s, so a
+30/30 session shows up as a few ~8-minute blocks at ~85% FTP. The ride *name* is in the text so
+Claude can tell. Not built (need new inputs): a "current goal" field and a "note for Claude" box.
+
+## FTP history (Session 27)
+
+A ride should be measured against the FTP you had on the day, not today's. `ftpHistory`
+(`[{ date: 'YYYY-MM-DD', ftp }]`, oldest first, `lib/ftpHistory.js`) records when FTP changed; each
+entry applies from its date until the next. **Empty means nothing recorded, and the app behaves as
+it did before** (every ride against `currentFTP`).
+
+**Lookup:** `ftpOnDate(history, date, fallback)` — the latest entry on or before the date; a date
+before the first entry uses the first entry's FTP; no history or no date returns `fallback`.
+`cleanFtpHistory` (valid date, FTP 100–500, one entry per date, sorted) runs on everything read
+from storage, a backup or Drive. An entry dated `FTP_HISTORY_START` (1970-01-01) means "from the
+beginning": the first FTP change on an install with no history records the previous FTP that way,
+so earlier rides keep it.
+
+**Invariants:** when the list has entries, `currentFTP` is the latest entry's FTP (`saveProfile` and
+`saveFtpHistory` maintain it). Entries can't be dated in the future. Restoring a backup or pulling
+from Drive replaces the history together with `ftp` (an older file with no history clears it).
+
+**Where the ride-date FTP is used:** TSS and IF when a ride is saved or edited (`calculateTSS/IF(…,
+date)`, Log Ride's preview, `formStructureLevel`); interval detection on import and Re-detect; time in
+zones on the Ride page and the Progress Zones chart (`weeklyTimeInZones` takes a number or a
+`date => FTP` function); `recalculateLevelsFromHistory(history, fallbackFtp, ftpHistory)`
+(with a history it uses the ride-date FTP instead of NP ÷ IF, which was only the FTP at the time of
+*logging*); and the Copy for Claude text (see above). **Today's FTP is still used for anything
+forward-looking**: the zone table in watts, Today's header, the eFTP alert.
+
+**Re-score my rides** (`rescoreRides`, Settings → FTP history): recalculates stored `tss` and
+`intensityFactor` from NP, duration and the ride-date FTP for rides on or after the first entry
+(rides before it, heart-rate-only rides and rides with no NP/duration are skipped). Preview shows
+CTL/ATL/TSB before and after; apply stores the old values per ride in `scores-before-rescore`
+(device-local) for **Undo re-score**. Levels, zones and intervals are never touched.

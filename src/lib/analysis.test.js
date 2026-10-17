@@ -18,8 +18,8 @@ describe('bestsForRide', () => {
 
 describe('timeInZones', () => {
   it('bins seconds per zone, skipping null bins', () => {
-    // FTP 200: 100W (50%) = recovery, 150W (75%) = tempo, null = skipped
-    const stream = { power: [100, 150, null], hr: [], binSeconds: 10 };
+    // FTP 200: 100W (50%) = recovery, 165W (82.5%) = tempo, null = skipped
+    const stream = { power: [100, 165, null], hr: [], binSeconds: 10 };
     const totals = timeInZones({ stream }, 200);
     expect(totals.recovery).toBe(10);
     expect(totals.tempo).toBe(10);

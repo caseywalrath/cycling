@@ -215,8 +215,11 @@ export const calculateEFTPHistory = (history, eftpTimeline) => {
 // chart: minutes per zone, summed per Monday-start week, over the last `weeks` weeks.
 // Rides with power data only (timeInZones needs a stream + FTP); a ride without one is
 // silently skipped, exactly like the note shown under the chart.
+// `ftp` is a number, or a function date => FTP (Session 27: each ride is zoned against the FTP
+// on its own date).
 export const weeklyTimeInZones = (history, ftp, weeks = 12) => {
   if (!history || history.length === 0 || !ftp) return [];
+  const ftpFor = typeof ftp === 'function' ? ftp : () => ftp;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -242,7 +245,7 @@ export const weeklyTimeInZones = (history, ftp, weeks = 12) => {
     const key = toLocalDateStr(monday);
     const bucket = buckets[key];
     if (!bucket) return;
-    const zoneSeconds = timeInZones(w, ftp);
+    const zoneSeconds = timeInZones(w, ftpFor(w.date));
     if (!zoneSeconds) return;
     let any = false;
     Object.entries(zoneSeconds).forEach(([zoneId, seconds]) => {

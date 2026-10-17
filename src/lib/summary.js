@@ -1,7 +1,10 @@
 import { parseDateLocal, toLocalDateStr, formatDateWithDay } from './dates.js';
-import { ZONES, getZoneName } from './zones.js';
-import { calculateWeeklyHours } from './chartData.js';
+import { ZONES, ZONE_BOUNDS, ZONE_COGGAN_LEVEL, getZoneName, zoneWattRange } from './zones.js';
 import { timeInZones, aerobicDecoupling } from './analysis.js';
+import { workReps, rideFtpAtTime, ZONE_SET_TOLERANCE } from './progression.js';
+import { getTrainingStatus, estimateLthr } from './load.js';
+import { EFTP_20MIN_FACTOR } from './eftp.js';
+import { ftpOnDate, describeFtpHistory } from './ftpHistory.js';
 
 // Whole days from today to the event date (negative once it has passed), or null when no
 // event date is set. Moved from App.jsx (getDaysUntilEvent) in V2 Phase 3.
@@ -79,113 +82,294 @@ export const latestRide = (history) => {
   return best;
 };
 
-// "Copy for Claude" text. Moved verbatim from App.jsx's copyForAnalysis() in V2 Phase 3;
-// the text format is unchanged, apart from the V2 Phase 6 §6.3 additions appended at the
-// end (ramp rate, 90-day bests, 30-day HR drift, 4-week time-in-zone share) — every existing
-// section and its order stays the same. The new inputs are optional so this still works if a
-// caller doesn't pass them.
-export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, now = new Date() }) => {
-  const recentWorkouts = history.slice(0, 7);
+// ---------------------------------------------------------------------------------------------
+// "Copy for Claude" text. Rebuilt in Session 26 to answer "what workout should I do today?":
+// every calendar week is listed (empty ones too), rides carry their name/IF/HR, interval work is
+// shown as in-zone reps at %FTP, and the zone table is printed so the names mean the same thing
+// to Claude as they do in the app. Anything the app can't measure prints "n/a" rather than
+// disappearing. All zone edges come from ZONE_BOUNDS, so re-anchoring the zones there changes
+// this text with it.
+// ---------------------------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HARD_ZONES = ['sweetspot', 'threshold', 'vo2max', 'anaerobic'];
+const HARD_IF = 0.85; // same "hard day" bar the TrainerDay coaching rules use
+const ZONES_WITH_REPS = ['tempo', 'sweetspot', 'threshold', 'vo2max', 'anaerobic'];
+const PROGRESSION_WINDOW_DAYS = 90;
+const RECENT_RIDES_DAYS = 21;
+const RECENT_RIDES_MAX = 10;
+const WEEKLY_LOAD_WEEKS = 6;
+const MAX_LISTED_REPS = 6; // more reps than this are summarised instead of listed one by one
+
+const startOfDay = (date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const daysSince = (dateStr, today) => Math.round((today - parseDateLocal(dateStr)) / DAY_MS);
+
+const daysAgoText = (n) => (n === 0 ? 'today' : n === 1 ? '1 day ago' : `${n} days ago`);
+
+const shortDate = (dateStr) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Minutes rounded to the nearest half minute, without a trailing ".0".
+const halfMinutes = (seconds) => String(Math.round(seconds / 30) / 2);
+
+// Zone an indoor ride is filed under (outdoor rides have none).
+const rideZone = (w) => (w.rideType === 'Outdoor' ? null : (w.zone || w.intervalData?.category || null));
+
+const isHardRide = (w) => HARD_ZONES.includes(rideZone(w)) || Number(w.intensityFactor) >= HARD_IF;
+
+// In-zone work of one ride, from the same filter progression levels use (workReps): only efforts
+// at or above the zone's floor, short pauses merged. null when the ride has no in-zone reps.
+const inZoneWork = (w, zoneId, ftp) => {
+  if (!w.intervalData || !ZONE_BOUNDS[zoneId] || !(ftp > 0)) return null;
+  const reps = workReps(w.intervalData, ftp, ZONE_BOUNDS[zoneId][0] - ZONE_SET_TOLERANCE);
+  const lengths = [];
+  let totalSec = 0;
+  let wattSec = 0;
+  reps.forEach(({ count, seconds, ratio }) => {
+    for (let i = 0; i < count; i++) lengths.push(seconds);
+    totalSec += count * seconds;
+    wattSec += count * seconds * ratio;
+  });
+  if (totalSec === 0) return null;
+  return { lengths, totalSec, ratio: wattSec / totalSec };
+};
+
+// "2 reps (10, 10 min) @ 87% (196W avg), 20 min in zone". `ofFtp` names the FTP the percentage is
+// of when it is not today's: "@ 85% of 240W FTP (204W avg)".
+const describeWork = (work, ftp, ofFtp = null) => {
+  const n = work.lengths.length;
+  const reps = n <= MAX_LISTED_REPS
+    ? `${plural(n, 'rep')} (${work.lengths.map(halfMinutes).join(', ')} min)`
+    : `${n} reps (~${halfMinutes(work.totalSec / n)} min each, longest ${halfMinutes(Math.max(...work.lengths))})`;
+  return `${reps} @ ${Math.round(work.ratio * 100)}%${ofFtp ? ` of ${ofFtp}W FTP` : ''} (${Math.round(work.ratio * ftp)}W avg), ${halfMinutes(work.totalSec)} min in zone`;
+};
+
+// "4x9 @ 96%" when the reps are about the same length, else "3 reps, 31 min @ 90%".
+const compactWork = (work) => {
+  const n = work.lengths.length;
+  const mean = work.totalSec / n;
+  const even = work.lengths.every(s => Math.abs(s - mean) <= 60);
+  const pct = Math.round(work.ratio * 100);
+  return even ? `${n}x${halfMinutes(mean)} @ ${pct}%` : `${plural(n, 'rep')}, ${halfMinutes(work.totalSec)} min @ ${pct}%`;
+};
+
+// Every Monday-start week for the last `weeks` weeks, including weeks with no rides. The
+// current week is marked partial until its Sunday.
+const weeklyLoad = (history, today, weeks = WEEKLY_LOAD_WEEKS) => {
+  const thisMonday = mondayOf(today);
+  const todayStr = toLocalDateStr(today);
+  const rows = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = new Date(thisMonday);
+    start.setDate(start.getDate() - 7 * i);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    const startStr = toLocalDateStr(start);
+    const endStr = toLocalDateStr(end);
+    const rides = history.filter(w => w.date && w.date >= startStr && w.date <= endStr);
+    rows.push({
+      start: startStr,
+      hours: rides.reduce((s, w) => s + (w.duration || 0), 0) / 60,
+      tss: Math.round(rides.reduce((s, w) => s + (w.tss || 0), 0)),
+      rides: rides.length,
+      partial: todayStr < endStr,
+    });
+  }
+  return rows;
+};
+
+const eftpText = (currentEftp, best20) => {
+  if (!currentEftp) return 'eFTP n/a (no power file with 20+ minutes in the last 90d)';
+  const pct = Math.round(EFTP_20MIN_FACTOR * 100);
+  const floor = 'a floor, not a max-effort test';
+  if (best20 && Math.round(EFTP_20MIN_FACTOR * best20) === currentEftp.value) {
+    return `eFTP ${currentEftp.value}W (${pct}% of best 20-min ${Math.round(best20)}W in 90d; ${floor})`;
+  }
+  return `eFTP ${currentEftp.value}W (from best 20/60-min power in 90d; ${floor})`;
+};
+
+const zoneTableLines = (ftp) => ZONES.map(z => {
+  const [lo, hi] = ZONE_BOUNDS[z.id];
+  const { min, max } = zoneWattRange(z.id, ftp);
+  const level = ZONE_COGGAN_LEVEL[z.id];
+  if (lo === 0) return `- ${z.name}: under ${Math.round(hi * 100)}% (under ${max}W) [${level}]`;
+  if (max === null) return `- ${z.name}: ${Math.round(lo * 100)}%+ (${min}W+) [${level}]`;
+  return `- ${z.name}: ${Math.round(lo * 100)}-${Math.round(hi * 100)}% (${min}-${max}W) [${level}]`;
+});
+
+export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile, ftpHistory = [], now = new Date() }) => {
+  const today = startOfDay(now);
+  // The FTP a ride is measured against: the FTP on its own date when a history is recorded.
+  const ftpFor = (w) => ftpOnDate(ftpHistory, w.date, currentFTP);
+  const todayStr = toLocalDateStr(today);
   const daysToEvent = getDaysUntilEvent(event, now);
+  const status = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
+  const rides = history.filter(w => w.date);
+  const newestFirst = [...rides].sort((a, b) => b.date.localeCompare(a.date));
+  const signed = (n) => `${n >= 0 ? '+' : ''}${n}`;
 
-  // 28-day TSS
-  const fourWeeksAgo = new Date(now);
-  fourWeeksAgo.setHours(0, 0, 0, 0);
-  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-  const twentyEightDayTSS = history
-    .filter(w => parseDateLocal(w.date) >= fourWeeksAgo)
-    .reduce((sum, w) => sum + (w.tss || 0), 0);
+  // --- Header: status, load, how long since riding ---
+  const lastRide = newestFirst[0] || null;
+  const lastHard = newestFirst.find(isHardRide) || null;
+  const sinceText = (w) => (w ? `${daysAgoText(daysSince(w.date, today))} (${shortDate(w.date)})` : 'none on record');
+  const statusLine = `Status: ${status.label} | CTL ${loads.ctl} | ATL ${loads.atl} | TSB ${signed(loads.tsb)}${rampRate != null ? ` | Ramp ${signed(rampRate)}/wk` : ''} | 7-day TSS ${loads.weeklyTSS}`;
+  const sinceLine = `Last ride: ${sinceText(lastRide)} | Last hard ride (sweet spot or above, or IF ${HARD_IF}+): ${sinceText(lastHard)}`;
 
-  // Weekly training hours (last 4 weeks)
-  const weeklyHoursData = calculateWeeklyHours(history);
-  const last4Weeks = weeklyHoursData.slice(-4);
+  // --- Athlete ---
+  const lthr = estimateLthr(userProfile);
+  const hrBits = [
+    `LTHR ${lthr ? `${lthr}${userProfile?.lthr ? '' : ' (estimated from max HR)'}` : 'n/a'}`,
+    `Max HR ${userProfile?.maxHR || 'n/a'}`,
+    `Weight ${userProfile?.weight ? `${userProfile.weight} lb` : 'n/a'}`,
+  ];
+  const best20 = bestCurves?.last90Days?.['1200']?.watts;
+  const athleteLines = [
+    `- FTP ${currentFTP}W | ${eftpText(currentEftp, best20)}`,
+    `- ${hrBits.join(' | ')}`,
+  ];
+  const ftpHistoryText = describeFtpHistory(ftpHistory);
+  if (ftpHistoryText) athleteLines.push(`- FTP history: ${ftpHistoryText}. Each ride below is measured against the FTP of its own day.`);
+  if (daysToEvent !== null && daysToEvent >= 0) {
+    athleteLines.push(`- Next event: ${event.name || 'Event'}, ${daysToEvent === 0 ? 'today' : plural(daysToEvent, 'day') + ' away'}`);
+  }
 
-  // Interval progressions: last 3 sessions per category, oldest -> newest
-  const shortDate = (dateStr) => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-  const intervalCategories = ZONES.filter(z => z.id !== 'recovery');
-  const intervalLines = intervalCategories
-    .map(z => {
-      const sessions = history
-        .filter(w => w.intervalData?.category === z.id)
-        .slice()
-        .sort((a, b) => parseDateLocal(a.date) - parseDateLocal(b.date))
-        .slice(-3);
-      if (sessions.length === 0) return null;
-      return `- ${z.name}: ${sessions.map(w => `${w.intervalData.label} (${shortDate(w.date)})`).join(' → ')}`;
+  // --- Days since each zone was last trained (indoor rides filed under the zone) ---
+  const zoneDays = ZONES.filter(z => z.id !== 'recovery').map(z => {
+    const last = newestFirst.find(w => rideZone(w) === z.id);
+    return `${z.name} ${last ? daysSince(last.date, today) : 'never'}`;
+  });
+
+  // --- Weekly load ---
+  const weekLines = weeklyLoad(rides, today).map(wk => {
+    const partial = wk.partial ? ` (partial, Mon${today.getDay() === 1 ? ' only' : `-${DAY_ABBR[today.getDay()]}`})` : '';
+    return `- ${shortDate(wk.start)}${partial}: ${wk.hours.toFixed(1)}h, ${wk.tss} TSS (${plural(wk.rides, 'ride')})`;
+  });
+
+  // --- Recent rides ---
+  const recentCutoff = toLocalDateStr(new Date(today.getTime() - RECENT_RIDES_DAYS * DAY_MS));
+  const recent = newestFirst.filter(w => w.date >= recentCutoff).slice(0, RECENT_RIDES_MAX);
+  const recentLines = recent.flatMap(w => {
+    const indoor = w.rideType !== 'Outdoor';
+    const zone = rideZone(w);
+    // With an FTP history, the ride is measured against its own day's FTP and IF is worked out
+    // from NP to match. Without one, IF is as stored, and the note says which FTP it was scored at.
+    const rideFtp = ftpFor(w);
+    const hasHistory = ftpHistory.length > 0;
+    const ftpDiffers = hasHistory && rideFtp !== currentFTP;
+    const savedFtp = rideFtpAtTime(w);
+    const ifValue = hasHistory && w.normalizedPower > 0 && rideFtp > 0 ? w.normalizedPower / rideFtp : Number(w.intensityFactor);
+    const ftpNote = ftpDiffers
+      ? ` (FTP then ${rideFtp}W)`
+      : (!hasHistory && savedFtp && Math.abs(savedFtp - currentFTP) >= 3 ? ` (scored at FTP ${Math.round(savedFtp)}W)` : '');
+    const parts = [
+      `${w.rideType || 'Indoor'}${w.name ? ` "${w.name}"` : ''}`,
+      indoor ? getZoneName(w.zone) : null,
+      `${w.duration}min`,
+      w.normalizedPower != null ? `NP ${w.normalizedPower}W` : 'no power meter',
+      w.intensityFactor != null ? `IF ${ifValue.toFixed(2)}${ftpNote}` : null,
+      `TSS ${w.tss}${w.tssSource === 'hr' ? ' (from heart rate)' : ''}`,
+      w.hrStats?.avg != null ? `avg HR ${Math.round(w.hrStats.avg)}` : null,
+      w.rpe != null ? `RPE ${w.rpe}` : null,
+      indoor ? (w.completed === false ? 'did NOT finish all intervals' : 'completed') : null,
+    ].filter(Boolean);
+    const line = `- ${formatDateWithDay(w.date)}: ${parts.join(', ')}${w.notes ? ` (${w.notes})` : ''}`;
+    const work = ZONES_WITH_REPS.includes(zone) ? inZoneWork(w, zone, rideFtp) : null;
+    return work ? [line, `  Main set: ${describeWork(work, rideFtp, ftpDiffers ? rideFtp : null)}`] : [line];
+  });
+
+  // --- Interval progression: in-zone reps at %FTP, last 3 per zone, oldest first ---
+  const progressionCutoff = toLocalDateStr(new Date(today.getTime() - PROGRESSION_WINDOW_DAYS * DAY_MS));
+  const progressionLines = ZONES.filter(z => z.id !== 'recovery').map(z => {
+    const sessions = rides.filter(w => w.intervalData?.category === z.id);
+    const inWindow = sessions
+      .filter(w => w.date >= progressionCutoff)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-3);
+    if (inWindow.length === 0) {
+      const lastEver = sessions.map(w => w.date).sort().pop();
+      return `- ${z.name}: none in ${PROGRESSION_WINDOW_DAYS} days${lastEver ? ` (last ${shortDate(lastEver)})` : ''}`;
+    }
+    const items = inWindow.map(w => {
+      if (z.id === 'endurance') return `${shortDate(w.date)} ${w.duration}min${w.intensityFactor != null ? ` @ IF ${Number(w.intensityFactor).toFixed(2)}` : ''}`;
+      const work = inZoneWork(w, z.id, ftpFor(w));
+      return `${shortDate(w.date)} ${work ? compactWork(work) : `none in zone${w.intervalData?.label ? ` (ride was ${w.intervalData.label})` : ''}`}`;
+    });
+    return `- ${z.name}: ${items.join(' → ')}`;
+  });
+
+  // --- Time in zone, last 4 weeks, minutes; recovery (coasting) kept out of the shares ---
+  const fourWeeksAgoStr = toLocalDateStr(new Date(today.getTime() - 28 * DAY_MS));
+  const zoneSeconds = {};
+  ZONES.forEach(z => { zoneSeconds[z.id] = 0; });
+  rides.filter(w => w.date >= fourWeeksAgoStr).forEach(w => {
+    const zones = timeInZones(w, ftpFor(w));
+    if (zones) Object.entries(zones).forEach(([id, secs]) => { zoneSeconds[id] += secs; });
+  });
+  const trainedSeconds = ZONES.filter(z => z.id !== 'recovery').reduce((s, z) => s + zoneSeconds[z.id], 0);
+  const zoneTimeLines = trainedSeconds > 0
+    ? [
+        ZONES.filter(z => z.id !== 'recovery' && zoneSeconds[z.id] > 0)
+          .map(z => `${z.name} ${Math.round(zoneSeconds[z.id] / 60)} min (${Math.round((zoneSeconds[z.id] / trainedSeconds) * 100)}%)`)
+          .join(' | '),
+        `Recovery/coasting, not counted: ${Math.round(zoneSeconds.recovery / 60)} min`,
+      ]
+    : ['n/a (no rides with a power file in the last 4 weeks)'];
+
+  // --- Bests and heart-rate drift ---
+  const bestBits = [['60', '1-min'], ['300', '5-min'], ['1200', '20-min']]
+    .map(([sec, label]) => {
+      const b = bestCurves?.last90Days?.[sec];
+      if (!b) return null;
+      return `${label} ${b.watts}W${sec === '1200' ? ` (${b.rideName}, ${b.date})` : ''}`;
     })
     .filter(Boolean);
-  const intervalProgressionsSection = intervalLines.length > 0
-    ? `\n\n## Interval Progressions\n${intervalLines.join('\n')}`
-    : '';
-
-  // V2 Phase 6 §6.3 additions, appended after every existing section.
-  const metricsLines = [];
-  if (rampRate != null) {
-    metricsLines.push(`- Ramp rate: ${rampRate >= 0 ? '+' : ''}${rampRate} fitness/week`);
-  }
-  if (bestCurves) {
-    const bestLine = (sec, label) => {
-      const b = bestCurves.last90Days[sec];
-      return b ? `- ${label}: ${b.watts}W (${b.rideName}, ${b.date})` : null;
-    };
-    const lines = [bestLine('60', '1-min'), bestLine('300', '5-min'), bestLine('1200', '20-min')].filter(Boolean);
-    if (lines.length > 0) metricsLines.push('- 90-day bests:', ...lines.map(l => `  ${l.replace(/^- /, '')}`));
-  }
-  const thirtyDaysAgo = new Date(now);
-  thirtyDaysAgo.setHours(0, 0, 0, 0);
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const nowStr = toLocalDateStr(new Date(now));
-  const driftVals = history
-    .filter(w => w.date >= toLocalDateStr(thirtyDaysAgo) && w.date <= nowStr)
+  const thirtyDaysAgoStr = toLocalDateStr(new Date(today.getTime() - 30 * DAY_MS));
+  const driftVals = rides
+    .filter(w => w.date >= thirtyDaysAgoStr && w.date <= todayStr)
     .map(w => aerobicDecoupling(w))
     .filter(v => v != null);
-  if (driftVals.length > 0) {
-    const avgDrift = Math.round((driftVals.reduce((a, b) => a + b, 0) / driftVals.length) * 10) / 10;
-    metricsLines.push(`- Heart-rate drift (last 30 days, avg): ${avgDrift}%`);
-  }
-  const fourWeeksAgoForZones = new Date(now);
-  fourWeeksAgoForZones.setHours(0, 0, 0, 0);
-  fourWeeksAgoForZones.setDate(fourWeeksAgoForZones.getDate() - 28);
-  const zoneTotals = {};
-  ZONES.forEach(z => { zoneTotals[z.id] = 0; });
-  history
-    .filter(w => parseDateLocal(w.date) >= fourWeeksAgoForZones)
-    .forEach(w => {
-      const zones = timeInZones(w, currentFTP);
-      if (!zones) return;
-      Object.entries(zones).forEach(([z, secs]) => { zoneTotals[z] += secs; });
-    });
-  const totalZoneSeconds = Object.values(zoneTotals).reduce((a, b) => a + b, 0);
-  if (totalZoneSeconds > 0) {
-    const shareLines = ZONES.filter(z => zoneTotals[z.id] > 0).map(z =>
-      `  - ${z.name}: ${Math.round((zoneTotals[z.id] / totalZoneSeconds) * 100)}%`);
-    metricsLines.push('- Time in zone (last 4 weeks, rides with power data):', ...shareLines);
-  }
-  const additionalMetricsSection = metricsLines.length > 0
-    ? `\n\n## Additional Metrics\n${metricsLines.join('\n')}`
-    : '';
+  const driftText = driftVals.length > 0
+    ? `${Math.round((driftVals.reduce((a, b) => a + b, 0) / driftVals.length) * 10) / 10}% avg over ${plural(driftVals.length, 'ride')}`
+    : 'n/a (no steady 60+ min rides with heart rate and power)';
 
-  return `## Training Status - ${formatDateWithDay(toLocalDateStr(new Date(now)))}
+  return `## Training Status - ${formatDateWithDay(todayStr)}
+${statusLine}
+${sinceLine}
 
-**Athlete Profile:**
-- FTP: ${currentFTP}W${currentEftp ? ` | eFTP: ${currentEftp.value}W (est. best 20-min, 90d)` : ''}${daysToEvent !== null ? (daysToEvent < 0 ? ' | Event complete' : ` | Days to Event: ${daysToEvent}`) : ''}
+**Athlete**
+${athleteLines.join('\n')}
 
-**Training Loads:**
-- CTL (Fitness): ${loads.ctl}
-- ATL (Fatigue): ${loads.atl}
-- TSB (Form): ${loads.tsb}
-- 7-Day TSS: ${loads.weeklyTSS}
-- 14-Day TSS: ${loads.twoWeekTSS}
-- 28-Day TSS: ${twentyEightDayTSS}
+**Zones @ ${currentFTP}W** (% of FTP; [Z#] = TrainerDay/Coggan power level)
+${zoneTableLines(currentFTP).join('\n')}
+TrainerDay has no sweet-spot level; its "SS" workouts target this app's Sweet Spot band. Other edges match TrainerDay.
 
-**Weekly Training Hours (past 4 weeks):**
-${last4Weeks.map(w => `- ${w.label}: ${w.hours}h (${w.workouts} rides)`).join('\n')}
+**Days since each zone was last trained (indoor rides)**
+- ${zoneDays.join(' | ')}
 
-**Recent Workouts:**
-${recentWorkouts.map(w => `- ${formatDateWithDay(w.date)}: ${w.rideType || 'Indoor'}${w.rideType !== 'Outdoor' ? `, ${getZoneName(w.zone)}` : ''}${w.rideType === 'Outdoor' && w.distance > 0 ? `, ${w.distance}mi` : ''}${w.rideType === 'Outdoor' && w.elevation > 0 ? `, ${w.elevation}ft gain` : ''}, ${w.duration}min, ${w.normalizedPower != null ? `NP ${w.normalizedPower}W` : 'no power meter'}, TSS ${w.tss}${w.tssSource === 'hr' ? ' (from heart rate)' : ''}${w.rpe != null ? `, RPE ${w.rpe}` : ''}${w.notes ? ` (${w.notes})` : ''}`).join('\n')}${intervalProgressionsSection}${additionalMetricsSection}`;
+**Weekly load** (Monday start, last ${WEEKLY_LOAD_WEEKS} weeks, empty weeks included)
+${weekLines.join('\n')}
+
+**Recent rides** (last ${RECENT_RIDES_DAYS} days)
+${recentLines.length > 0 ? recentLines.join('\n') : '- none'}
+
+**Interval progression** (in-zone reps only, last 3 per zone, oldest first)
+${progressionLines.join('\n')}
+
+**Time in zone** (last 4 weeks)
+${zoneTimeLines.map(l => `- ${l}`).join('\n')}
+
+**Bests (90d):** ${bestBits.length > 0 ? bestBits.join(' | ') : 'n/a'}
+**HR drift (30d):** ${driftText}`;
 };
 
 // Clipboard write with a fallback for non-secure (HTTP on LAN) contexts. Moved from
