@@ -104,7 +104,7 @@ describe('buildAnalysisText', () => {
     expect(text).toContain('Indoor "Short VO2 intervals"');
     expect(text).toContain('IF 0.77');
     expect(text).toContain('avg HR 107');
-    expect(text).toContain('IF 0.73 @ FTP 240W then');
+    expect(text).toContain('IF 0.73 (scored at FTP 240W)');
     expect(text).not.toContain('900ft');
   });
 
@@ -127,6 +127,48 @@ describe('buildAnalysisText', () => {
     const zone = getZoneName(zoneForRatio(190 / FTP));
     expect(text).toContain(`${zone} 55 min (100%)`);
     expect(text).toContain('Recovery/coasting, not counted: 5 min');
+  });
+
+  describe('with an FTP history', () => {
+    const FTP_HISTORY = [
+      { date: '2025-12-26', ftp: 230 },
+      { date: '2026-07-01', ftp: 240 },
+      { date: '2026-10-13', ftp: 225 },
+    ];
+    // The Oct 8 ride was logged after FTP dropped to 225, so its stored IF is NP / 225.
+    const loggedLate = { ...sweetSpotSession, intensityFactor: 176 / 225 };
+    const withHistory = (history = [vo2Session, loggedLate, easySession]) => build({ history, ftpHistory: FTP_HISTORY });
+
+    it('lists the FTP history in the athlete section', () => {
+      expect(withHistory()).toContain('- FTP history: 230W from 2025-12-26 → 240W from 2026-07-01 → 225W from 2026-10-13.');
+      expect(build()).not.toContain('FTP history');
+    });
+
+    it("shows IF at the ride's own FTP, not the FTP it was logged at", () => {
+      const text = withHistory();
+      expect(text).toContain('IF 0.73 (FTP then 240W)'); // 176 / 240, not the stored 0.78
+      expect(text).not.toContain('IF 0.78');
+      // A ride on or after the latest change needs no note.
+      expect(text).toMatch(/Short VO2 intervals", VO2max, 60min, NP 173W, IF 0\.77, TSS/);
+    });
+
+    it('re-checks in-zone work at the ride\'s own FTP: 196W was tempo-level at 240W, so no main set', () => {
+      const text = withHistory();
+      expect(text).not.toContain('Main set: 2 reps (10, 10 min) @ 87%');
+      expect(text).toContain('- Sweet Spot: Oct 8 none in zone (ride was 2x10 @ 196W)');
+    });
+
+    it('names the FTP a main set is a percentage of when it is not the current FTP', () => {
+      const hard = { ...sweetSpotSession, intensityFactor: 176 / 225, intervalData: { category: 'sweetspot', label: '2x10 @ 212W', segments: [seg(600, 10, 212), seg(1500, 10, 212)] } };
+      const text = withHistory([hard]);
+      expect(text).toContain('Main set: 2 reps (10, 10 min) @ 88% of 240W FTP (212W avg), 20 min in zone');
+    });
+
+    it('does not change anything for a ride on today\'s FTP', () => {
+      const text = withHistory([vo2Session]);
+      expect(text).not.toContain('FTP then');
+      expect(text).not.toContain('of 225W FTP');
+    });
   });
 
   it('omits an event that has already happened', () => {

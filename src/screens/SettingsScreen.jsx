@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import packageJson from '../../package.json';
 import { ZONES, zoneRangeLabel } from '../lib/zones.js';
+import { toLocalDateStr } from '../lib/dates.js';
+import { FTP_HISTORY_START, cleanFtpHistory } from '../lib/ftpHistory.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { navigate } from '../state/useHashRoute.js';
 import { Screen, Card, SectionHeader, Button, useConfirm, useToast } from '../components/ui/index.js';
@@ -10,6 +12,8 @@ import { Screen, Card, SectionHeader, Button, useConfirm, useToast } from '../co
 // Progression levels (V2 Phase 7: recalculate from rides with preview + Undo, or reset), and About.
 const inputClass = 'w-full bg-gray-700 rounded-lg px-3 py-2 text-base min-h-[44px]';
 const labelClass = 'block text-sm text-gray-400 mb-1';
+// The same box without w-full, for rows that set their own width (a w-* class next to w-full is a coin flip).
+const rowInputClass = inputClass.replace('w-full ', '');
 
 const formatSyncTime = (iso) => {
   if (!iso) return null;
@@ -20,10 +24,11 @@ const formatSyncTime = (iso) => {
 
 export default function SettingsScreen({ route }) {
   const {
-    currentFTP, userProfile, event, history, lastSyncedAt, isDriveSyncing, driveSyncStatus,
+    currentFTP, ftpHistory, userProfile, event, history, lastSyncedAt, isDriveSyncing, driveSyncStatus,
     hasUnsyncedChanges, saveProfile, saveEvent, deleteEvent, resetLevels, exportData,
     readBackupFile, restoreBackup, syncWithDrive, oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
     previewRecalculation, applyRecalculation, undoRecalculation, recalcUndoAvailable,
+    saveFtpHistory, previewRescore, applyRescore, undoRescore, rescoreUndoAvailable,
   } = useAppData();
   const confirm = useConfirm();
   const toast = useToast();
@@ -34,6 +39,14 @@ export default function SettingsScreen({ route }) {
   const [profileDraft, setProfileDraft] = useState(userProfile);
   useEffect(() => { setFtpInputValue(String(currentFTP)); setFtpInputError(''); }, [currentFTP]);
   useEffect(() => { setProfileDraft(userProfile); }, [userProfile]);
+
+  // Session 27: the day a changed FTP took effect (defaults to today), and the FTP-history card's draft rows.
+  const todayStr = toLocalDateStr(new Date());
+  const [ftpEffectiveFrom, setFtpEffectiveFrom] = useState(todayStr);
+  const toFtpDraft = (list) => list.map(e => ({ date: e.date, ftp: String(e.ftp) }));
+  const [ftpDraft, setFtpDraft] = useState(() => toFtpDraft(ftpHistory));
+  const [ftpHistoryError, setFtpHistoryError] = useState('');
+  useEffect(() => { setFtpDraft(toFtpDraft(ftpHistory)); setFtpHistoryError(''); }, [ftpHistory]);
 
   // Pre-fill from the Today tab's eFTP alert ("Update FTP"), then drop the query.
   useEffect(() => {
@@ -90,8 +103,91 @@ export default function SettingsScreen({ route }) {
         destructive: true,
       });
     }
-    saveProfile({ ftp: parsedFTP, profile: profileDraft, resetLevels: reset });
+    saveProfile({ ftp: parsedFTP, profile: profileDraft, resetLevels: reset, effectiveFrom: ftpEffectiveFrom });
+    setFtpEffectiveFrom(todayStr);
     toast(reset ? 'Profile saved. Levels reset to 1.0.' : 'Profile saved', { tone: 'success' });
+  };
+
+  // ---- FTP history (Session 27) ----
+  const setDraftRow = (i, field, value) => setFtpDraft(rows => rows.map((r, j) => (j === i ? { ...r, [field]: value } : r)));
+  const addDraftRow = () => setFtpDraft(rows => [...rows, { date: todayStr, ftp: String(currentFTP) }]);
+  const removeDraftRow = (i) => setFtpDraft(rows => rows.filter((_, j) => j !== i));
+
+  // The rows as a cleaned list, or an error message for the first bad row.
+  const validateFtpDraft = () => {
+    for (const r of ftpDraft) {
+      const n = parseInt(r.ftp, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date || '')) return { error: 'Every row needs a date.' };
+      if (r.date > todayStr) return { error: 'An FTP change can\'t start in the future.' };
+      if (!Number.isFinite(n) || n < 100 || n > 500) return { error: 'Every FTP must be between 100 and 500 watts.' };
+    }
+    const dates = ftpDraft.map(r => r.date);
+    if (new Set(dates).size !== dates.length) return { error: 'Two rows have the same date.' };
+    return { list: cleanFtpHistory(ftpDraft.map(r => ({ date: r.date, ftp: parseInt(r.ftp, 10) }))) };
+  };
+
+  const draftLatestFtp = (() => {
+    const { list } = validateFtpDraft();
+    return list && list.length > 0 ? list[list.length - 1].ftp : null;
+  })();
+
+  const handleSaveFtpHistory = () => {
+    const { list, error } = validateFtpDraft();
+    if (error) { setFtpHistoryError(error); return; }
+    setFtpHistoryError('');
+    saveFtpHistory(list);
+    toast(list.length === 0 ? 'FTP history cleared. Rides use your current FTP.' : 'FTP history saved', { tone: 'success' });
+  };
+
+  // Re-score stored TSS and IF from the FTP on each ride's day. Shows what Fitness/Fatigue/Form do
+  // first; nothing changes unless confirmed, and it can be undone.
+  const handleRescore = async () => {
+    const preview = previewRescore();
+    if (preview.changed === 0) {
+      toast('Your rides already match your FTP history.');
+      return;
+    }
+    const rows = [['Fitness (CTL)', 'ctl'], ['Fatigue (ATL)', 'atl'], ['Form (TSB)', 'tsb']];
+    const signed = (n) => `${n > 0 ? '+' : ''}${n}`;
+    const ok = await confirm({
+      title: 'Re-score your rides?',
+      message: (
+        <div data-rescore-preview>
+          <p className="mb-3">
+            Recalculates TSS and IF for {preview.changed} ride{preview.changed === 1 ? '' : 's'} using the FTP you had on each ride's day. Rides from before your first FTP entry aren't touched.
+          </p>
+          <table className="w-full text-base tabular-nums">
+            <thead>
+              <tr className="text-sm text-gray-500">
+                <th className="text-left font-normal pb-1">Today's</th>
+                <th className="text-right font-normal pb-1">Now</th>
+                <th className="text-right font-normal pb-1">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([label, key]) => (
+                <tr key={key} data-rescore-row={key}>
+                  <td className="py-0.5">{label}</td>
+                  <td className="py-0.5 text-right text-gray-400" data-before>{key === 'tsb' ? signed(preview.before[key]) : preview.before[key]}</td>
+                  <td className="py-0.5 text-right font-semibold text-gray-100" data-after>{key === 'tsb' ? signed(preview.after[key]) : preview.after[key]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-3 text-sm text-gray-500">Levels, zones and intervals aren't changed. You can undo this.</p>
+        </div>
+      ),
+      confirmLabel: 'Re-score rides',
+    });
+    if (ok) {
+      applyRescore(preview);
+      toast(`✓ Re-scored ${preview.changed} ride${preview.changed === 1 ? '' : 's'}`, { tone: 'success' });
+    }
+  };
+
+  const handleUndoRescore = () => {
+    if (undoRescore()) toast('Ride scores restored to what they were before re-scoring.');
+    else toast('Nothing to undo on this device.', { tone: 'error' });
   };
 
   const handleSaveEvent = () => {
@@ -267,6 +363,30 @@ export default function SettingsScreen({ route }) {
             )}
           </div>
 
+          {(() => {
+            const typed = parseInt(ftpInputValue, 10);
+            const changing = Number.isFinite(typed) && typed >= 100 && typed <= 500 && typed !== currentFTP;
+            if (!changing) return null;
+            const latest = ftpHistory.length > 0 ? ftpHistory[ftpHistory.length - 1].date : null;
+            return (
+              <div data-ftp-effective>
+                <label className={labelClass} htmlFor="profile-ftp-from">New FTP applies from</label>
+                <input
+                  id="profile-ftp-from"
+                  type="date"
+                  value={ftpEffectiveFrom}
+                  onChange={(e) => setFtpEffectiveFrom(e.target.value || todayStr)}
+                  min={latest && latest !== FTP_HISTORY_START ? latest : undefined}
+                  max={todayStr}
+                  className={inputClass}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Rides before this date keep being measured against your old FTP ({currentFTP}W). Leave it on today if it changed today.
+                </p>
+              </div>
+            );
+          })()}
+
           {/* Live zone-watt table (V2 Phase 4), from zoneRangeLabel */}
           <div className="bg-gray-900/50 rounded-xl p-3">
             <p className="text-xs text-gray-400 mb-2">Your training zones at {previewFTP}W</p>
@@ -338,6 +458,73 @@ export default function SettingsScreen({ route }) {
           </div>
 
           <Button variant="primary" block onClick={handleSaveProfile}>Save profile</Button>
+        </div>
+      </Card>
+
+      {/* FTP history (Session 27) */}
+      <Card id="settings-ftp-history" className="scroll-mt-4">
+        <SectionHeader title="FTP history" subtitle="So each ride is measured against the FTP you had that day" />
+        <div className="space-y-3" data-ftp-history>
+          {ftpDraft.length === 0 ? (
+            <p className="text-sm text-gray-400">
+              Nothing recorded, so every ride is measured against your current FTP ({currentFTP}W). Add each time your FTP changed, with the date it took effect.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {ftpDraft.map((row, i) => (
+                <div key={i} className="bg-gray-900/50 rounded-xl p-2" data-ftp-row>
+                  <div className="flex items-center gap-2">
+                    {row.date === FTP_HISTORY_START ? (
+                      <span className="flex-1 min-w-0 px-1 text-base text-gray-300">From the beginning</span>
+                    ) : (
+                      <input
+                        type="date"
+                        value={row.date}
+                        max={todayStr}
+                        onChange={(e) => setDraftRow(i, 'date', e.target.value)}
+                        aria-label={`FTP change ${i + 1} date`}
+                        className={`${rowInputClass} flex-1 min-w-0`}
+                      />
+                    )}
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={row.ftp}
+                      min="100"
+                      max="500"
+                      onChange={(e) => setDraftRow(i, 'ftp', e.target.value)}
+                      aria-label={`FTP change ${i + 1} watts`}
+                      className={`${rowInputClass} w-24 shrink-0`}
+                    />
+                    <span className="text-sm text-gray-400 shrink-0">W</span>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button variant="ghost-destructive" size="sm" onClick={() => removeDraftRow(i)} aria-label={`Remove FTP change ${i + 1}`}>Remove</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {ftpHistoryError && <p className="text-sm text-red-400">{ftpHistoryError}</p>}
+          {draftLatestFtp != null && draftLatestFtp !== currentFTP && (
+            <p className="text-sm text-yellow-400">Saving makes your current FTP {draftLatestFtp}W (the latest row).</p>
+          )}
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={addDraftRow}>Add a change</Button>
+            <Button variant="primary" onClick={handleSaveFtpHistory}>Save FTP history</Button>
+          </div>
+
+          {ftpHistory.length > 0 && (
+            <div className="pt-3 border-t border-gray-700">
+              <p className="text-sm text-gray-400 mb-2">
+                New rides are already scored with the FTP of their date. To fix the TSS and IF of rides you logged earlier, re-score them. This changes Fitness, Fatigue and Form, and you see how before anything changes.
+              </p>
+              <Button variant="secondary" block onClick={handleRescore}>Re-score my rides…</Button>
+              {rescoreUndoAvailable && (
+                <button type="button" onClick={handleUndoRescore} className="mt-2 text-sm text-blue-400 underline min-h-[44px]">Undo re-score</button>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 

@@ -18,7 +18,7 @@ const BEST_EFFORT_ROWS = [['5', '5s'], ['60', '1m'], ['300', '5m'], ['1200', '20
 // shaded intervals, the interval table, notes, and the action row (Edit / Re-detect / Attach
 // ride file / Delete).
 export default function WorkoutDetailPage({ rideId }) {
-  const { history, currentFTP, redetectRide, importRideFile, attachRideFile, deleteRide } = useAppData();
+  const { history, currentFTP, ftpOn, redetectRide, importRideFile, attachRideFile, deleteRide } = useAppData();
   const { openEditRide } = useShell();
   const toast = useToast();
   const confirm = useConfirm();
@@ -56,7 +56,9 @@ export default function WorkoutDetailPage({ rideId }) {
   // V2 Phase 5 §5.6: best efforts, time in zones, HR drift and efficiency.
   const { bests, source: bestsSource } = bestsForRide(detailRide);
   const newBests = newBestsForRide(history, detailRide);
-  const zoneTotals = currentFTP ? timeInZones(detailRide, currentFTP) : null;
+  // Session 27: zones are measured against the FTP on the ride's own date.
+  const rideFtp = ftpOn(detailRide.date);
+  const zoneTotals = rideFtp ? timeInZones(detailRide, rideFtp) : null;
   const totalZoneSeconds = zoneTotals ? Object.values(zoneTotals).reduce((a, b) => a + b, 0) : 0;
   const decoupling = aerobicDecoupling(detailRide);
   const decBand = decouplingBand(decoupling);
@@ -266,6 +268,9 @@ export default function WorkoutDetailPage({ rideId }) {
       {zoneTotals && totalZoneSeconds > 0 && (
         <Card className="mb-4">
           <h3 className="text-sm font-medium text-gray-300 mb-2">Time in zones</h3>
+          {rideFtp !== currentFTP && (
+            <p className="text-xs text-gray-500 mb-2" data-ride-ftp-note>Zones at {rideFtp}W, your FTP on this date.</p>
+          )}
           <div className="flex w-full h-3 rounded-full overflow-hidden">
             {ZONES.map(z => {
               const secs = zoneTotals[z.id] || 0;

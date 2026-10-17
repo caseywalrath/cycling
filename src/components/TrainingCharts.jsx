@@ -19,15 +19,18 @@ const CHART_TABS = [
 const ZONE_ORDER = ZONES.filter(z => z.id !== 'recovery');
 
 export default function TrainingCharts() {
-  const { history, currentFTP } = useAppData();
+  const { history, currentFTP, ftpHistory, ftpOn } = useAppData();
   const [weeklyChartView, setWeeklyChartView] = useState('hours'); // 'hours' | 'tss' | 'elevation' | 'zones'
 
   const weeklyTSSData = calculateWeeklyTSS(history);
   const weeklyHoursData = calculateWeeklyHours(history);
   const monthlyElevationData = calculateMonthlyElevation(history);
   // Memoised: timeInZones() walks every ride's power stream, so this is worth keying on
-  // history/currentFTP rather than recomputing on every render (V2_PLAN.md §6.4).
-  const zonesData = useMemo(() => weeklyTimeInZones(history, currentFTP, 12), [history, currentFTP]);
+  // history/currentFTP/ftpHistory rather than recomputing on every render (V2_PLAN.md §6.4).
+  // Session 27: each ride is zoned against the FTP on its own date (ftpOn reads ftpHistory and
+  // currentFTP, which are the memo's inputs, so it isn't a dependency itself).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const zonesData = useMemo(() => weeklyTimeInZones(history, ftpOn, 12), [history, currentFTP, ftpHistory]);
   const hasZoneMinutes = zonesData.some(w => ZONE_ORDER.some(z => w[z.id] > 0));
 
   const currentWeekTSS = weeklyTSSData.length > 0 ? weeklyTSSData[weeklyTSSData.length - 1].tss : 0;

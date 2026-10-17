@@ -11,6 +11,7 @@ import {
 } from '../lib/progression.js';
 import { calculateTSS as tssFor, calculateIF as ifFor, calculateTrainingLoads, getTrainingStatus, estimateLthr, hrTss, dailyLoadSeries, rampRate as computeRampRate } from '../lib/load.js';
 import { buildAnalysisText } from '../lib/summary.js';
+import { cleanFtpHistory, ftpOnDate, withFtpChange, rescoreRides } from '../lib/ftpHistory.js';
 import { MAXHR_PROMPT_KEY, readDismissals, writeDismissal } from '../lib/alerts.js';
 import { personalBests, records as computeRecords, observedMaxHr } from '../lib/records.js';
 
@@ -38,6 +39,18 @@ const readRecalcSnapshot = () => {
 };
 const clearRecalcSnapshot = () => {
   try { localStorage.removeItem(RECALC_UNDO_KEY); } catch { /* storage unavailable */ }
+};
+// Session 27: device-local snapshot of every ride's { tss, intensityFactor } taken just before
+// "Re-score my rides" is applied, for its Undo link. Removed on Undo and on restore.
+export const RESCORE_UNDO_KEY = 'scores-before-rescore';
+const readRescoreSnapshot = () => {
+  try {
+    const raw = localStorage.getItem(RESCORE_UNDO_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+const clearRescoreSnapshot = () => {
+  try { localStorage.removeItem(RESCORE_UNDO_KEY); } catch { /* storage unavailable */ }
 };
 const FTP = 235;
 
@@ -112,6 +125,10 @@ export function AppDataProvider({ children }) {
   const [powerCurveData, setPowerCurveData] = useState(null);
 
   const [currentFTP, setCurrentFTP] = useState(FTP);
+  // Session 27: [{ date, ftp }] oldest first — the FTP that applied from each date. Empty means no
+  // history recorded: every ride is measured against currentFTP, as before. When it has entries,
+  // currentFTP is always the FTP of the latest entry.
+  const [ftpHistory, setFtpHistory] = useState([]);
   const [intervalsFTP, setIntervalsFTP] = useState(null); // pass-through from old intervals.icu imports
 
   // Google Drive sync state
@@ -154,6 +171,8 @@ export function AppDataProvider({ children }) {
   const [pendingFitDetail, setPendingFitDetail] = useState(null); // { stream, detection } from FIT import, awaiting save
   // V2 Phase 7: whether Settings offers "Undo recalculation" (a snapshot is stored on this device)
   const [recalcUndoAvailable, setRecalcUndoAvailable] = useState(() => !!readRecalcSnapshot());
+  // Session 27: whether Settings offers "Undo re-score" (a snapshot is stored on this device)
+  const [rescoreUndoAvailable, setRescoreUndoAvailable] = useState(() => !!readRescoreSnapshot());
 
   // ---------------- derived ----------------
   const todayKey = useTodayKey();
@@ -206,6 +225,9 @@ export function AppDataProvider({ children }) {
         }
         if (parsed.intervalsFTP) {
           setIntervalsFTP(parsed.intervalsFTP);
+        }
+        if (parsed.ftpHistory) {
+          setFtpHistory(cleanFtpHistory(parsed.ftpHistory));
         }
 
         // Load event if available
@@ -279,6 +301,7 @@ export function AppDataProvider({ children }) {
         levels,
         history,
         ftp: currentFTP,
+        ftpHistory,
         intervalsFTP,
         event,
         userProfile,
@@ -293,7 +316,7 @@ export function AppDataProvider({ children }) {
       // Must stay a plain alert (V2 plan §4.6): it fires when the UI may be broken.
       alert('⚠️ Could not save your data — browser storage may be full. Please export a backup (Export Data) soon so nothing is lost.');
     }
-  }, [levels, history, currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
+  }, [levels, history, currentFTP, ftpHistory, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData, exportedAt, lastSyncedAt, lastWorkedDates]);
 
   // ---------------- Google Drive auto-sync (V2 Phase 4, D3) ----------------
   // After any data change, wait 3s so a burst of edits (e.g. typing in a form, or an import
@@ -394,15 +417,19 @@ export function AppDataProvider({ children }) {
     animationRef.current = requestAnimationFrame(animate);
   };
 
-  const calculateTSS = (normalizedPower, durationMinutes) => tssFor(normalizedPower, durationMinutes, currentFTP);
-  const calculateIF = (normalizedPower) => ifFor(normalizedPower, currentFTP);
+  // Session 27: the FTP in effect on a date (today's FTP when no history is recorded or no date given).
+  const ftpOn = (date) => ftpOnDate(ftpHistory, date, currentFTP);
+
+  // TSS / IF of a ride on `date` (optional: omitted = today's FTP).
+  const calculateTSS = (normalizedPower, durationMinutes, date) => tssFor(normalizedPower, durationMinutes, ftpOn(date));
+  const calculateIF = (normalizedPower, date) => ifFor(normalizedPower, ftpOn(date));
 
   // V2 Phase 5 §5.2: a ride imported from a file with heart rate but no power gets
   // heart-rate-based TSS instead of the usual power-based TSS. Manual entry is unchanged
   // (power only, per §5.2). `isHrOnly` is true only for the file-import path, using
   // pendingFitDetail (the just-imported stream), not a previously-saved ride's own tssSource
   // — editing an already-saved HR-only ride without re-importing keeps its stored tss/source.
-  const computeRideMetrics = (duration, normalizedPower, hrStats) => {
+  const computeRideMetrics = (duration, normalizedPower, hrStats, date) => {
     const isHrOnly = !!pendingFitDetail && pendingFitDetail.stream && pendingFitDetail.stream.power == null;
     if (isHrOnly) {
       const lthr = estimateLthr(userProfile);
@@ -411,8 +438,8 @@ export function AppDataProvider({ children }) {
     }
     return {
       normalizedPower,
-      tss: calculateTSS(normalizedPower, duration),
-      intensityFactor: calculateIF(normalizedPower),
+      tss: calculateTSS(normalizedPower, duration, date),
+      intensityFactor: calculateIF(normalizedPower, date),
       tssSource: undefined, // absent means 'power' (§0.5)
     };
   };
@@ -431,14 +458,15 @@ export function AppDataProvider({ children }) {
     const hasFile = !!pendingFitDetail || !!(oldRide && (oldRide.stream || oldRide.intervalData));
     const np = Number(form.normalizedPower) || 0;
     if (!hasFile && !(zone === 'endurance' && np > 0 && parseDuration(form.duration) > 0)) return null;
+    const rideFtp = ftpOn(form.date);
     return workoutLevelFromStructure({
       rideType: form.rideType,
       zone,
       duration: parseDuration(form.duration),
       normalizedPower: np,
-      intensityFactor: np > 0 ? np / currentFTP : null,
+      intensityFactor: np > 0 ? np / rideFtp : null,
       intervalData: pendingFitDetail ? pendingFitDetail.detection : oldRide?.intervalData,
-    }, currentFTP);
+    }, rideFtp);
   };
 
   // { workoutLevel, workoutLevelSource } to use for the form's ride in `zone`: the user's own
@@ -470,7 +498,7 @@ export function AppDataProvider({ children }) {
     // field with no invented default; coerce once here for TSS/IF and the saved value.
     const rawNormalizedPower = Number(formData.normalizedPower) || 0;
     // V2 Phase 5: HR-only imports get heart-rate TSS instead, and no NP/IF (§5.2).
-    const { normalizedPower, tss, intensityFactor, tssSource } = computeRideMetrics(duration, rawNormalizedPower, formData.hrStats);
+    const { normalizedPower, tss, intensityFactor, tssSource } = computeRideMetrics(duration, rawNormalizedPower, formData.hrStats, formData.date);
     // V2 Phase 4: "Name" defaults to "Indoor ride" / "Outdoor ride" when left blank.
     const name = formData.name || (isOutdoor ? 'Outdoor ride' : 'Indoor ride');
 
@@ -719,7 +747,7 @@ export function AppDataProvider({ children }) {
         const parsed = isTcx ? parseTcxFile(e.target.result) : await parseFitFile(e.target.result);
         const existingMatch = findMatchingRideForImport(history, parsed);
         const detection = currentFTP
-          ? detectIntervals(parsed.stream, currentFTP, parsed.laps, { indoor: parsed.rideType !== 'Outdoor' })
+          ? detectIntervals(parsed.stream, ftpOn(parsed.date), parsed.laps, { indoor: parsed.rideType !== 'Outdoor' })
           : null;
         resolve({ parsed, detection, existingMatch });
       } catch (err) {
@@ -770,7 +798,7 @@ export function AppDataProvider({ children }) {
   // identical, occasionally a little less precise on interval boundaries.
   const redetectForRide = (ride) => {
     if (!ride || !ride.stream || !currentFTP) return null;
-    const detection = detectIntervals(ride.stream, currentFTP, null, { indoor: ride.rideType !== 'Outdoor' });
+    const detection = detectIntervals(ride.stream, ftpOn(ride.date), null, { indoor: ride.rideType !== 'Outdoor' });
     if (!detection) return null;
     return {
       ...detection,
@@ -855,7 +883,10 @@ export function AppDataProvider({ children }) {
 
   // Save the Settings → Profile form. The caller validates the FTP (100–500) and asks
   // whether to reset levels when it changed.
-  const saveProfile = ({ ftp, profile, resetLevels }) => {
+  // Session 27: `effectiveFrom` ('YYYY-MM-DD', optional) is the day a changed FTP took effect. It is
+  // kept between the latest recorded change and today, and the change is added to the FTP history
+  // (the first change also records the FTP you had before it, from the beginning).
+  const saveProfile = ({ ftp, profile, resetLevels, effectiveFrom }) => {
     if (resetLevels) {
       const resetLevelsObj = { ...DEFAULT_LEVELS };
       setLevels(resetLevelsObj);
@@ -863,8 +894,65 @@ export function AppDataProvider({ children }) {
       setLastWorkedDates({});
     }
     if (profile) setUserProfile(profile);
+    if (ftp !== currentFTP) {
+      const today = toLocalDateStr(new Date());
+      const latest = ftpHistory.length > 0 ? ftpHistory[ftpHistory.length - 1].date : null;
+      let date = effectiveFrom && effectiveFrom < today ? effectiveFrom : today;
+      if (latest && date < latest) date = latest;
+      setFtpHistory(withFtpChange(ftpHistory, { date, ftp, previousFtp: currentFTP }));
+    }
     setCurrentFTP(ftp);
     markDataChanged();
+  };
+
+  // Session 27: Settings → FTP history. Replaces the list with the edited one (invalid rows are
+  // dropped) and makes today's FTP the latest entry's. An empty list clears the history, so every
+  // ride goes back to being measured against the current FTP.
+  const saveFtpHistory = (list) => {
+    const cleaned = cleanFtpHistory(list);
+    setFtpHistory(cleaned);
+    if (cleaned.length > 0) setCurrentFTP(ftpOnDate(cleaned, toLocalDateStr(new Date()), currentFTP));
+    markDataChanged();
+    return cleaned;
+  };
+
+  // Session 27: Settings → "Re-score my rides". previewRescore() changes nothing: it returns how
+  // many rides would change and the Fitness/Fatigue/Form (CTL/ATL/TSB) before and after.
+  const previewRescore = () => {
+    const result = rescoreRides(history, ftpHistory, currentFTP);
+    return {
+      changed: result.changed,
+      updates: result.updates,
+      before: calculateTrainingLoads(history),
+      after: calculateTrainingLoads(result.history),
+    };
+  };
+
+  // Apply a preview: snapshot each affected ride's old numbers on this device for Undo, then set
+  // the new ones. Only TSS and IF change; levels, zones and intervals are untouched.
+  const applyRescore = (preview) => {
+    const snapshot = {};
+    Object.entries(preview.updates).forEach(([id, u]) => { snapshot[id] = u.before; });
+    try {
+      localStorage.setItem(RESCORE_UNDO_KEY, JSON.stringify(snapshot));
+      setRescoreUndoAvailable(true);
+    } catch { setRescoreUndoAvailable(false); /* storage unavailable: apply without Undo */ }
+    setHistory(prev => prev.map(w => {
+      const u = preview.updates[w.id];
+      return u ? { ...w, tss: u.after.tss, intensityFactor: u.after.intensityFactor } : w;
+    }));
+    markDataChanged();
+  };
+
+  // Put back the numbers saved by applyRescore(). Returns true if anything was restored.
+  const undoRescore = () => {
+    const snap = readRescoreSnapshot();
+    clearRescoreSnapshot();
+    setRescoreUndoAvailable(false);
+    if (!snap) return false;
+    setHistory(prev => prev.map(w => (snap[w.id] ? { ...w, tss: snap[w.id].tss, intensityFactor: snap[w.id].intensityFactor } : w)));
+    markDataChanged();
+    return true;
   };
 
   // Settings → Reset progression levels (the caller confirms first).
@@ -882,7 +970,7 @@ export function AppDataProvider({ children }) {
   // changes nothing; it returns { before, after } per zone (both with decay applied as of
   // today, as the level bars show them) plus the raw result to pass to applyRecalculation().
   const previewRecalculation = () => {
-    const result = recalculateLevelsFromHistory(history, currentFTP);
+    const result = recalculateLevelsFromHistory(history, currentFTP, ftpHistory);
     return {
       ...result,
       before: effectiveLevels,
@@ -952,6 +1040,7 @@ export function AppDataProvider({ children }) {
       levels,
       history,
       ftp: currentFTP,
+      ftpHistory,
       intervalsFTP: intervalsFTP,
       event,
       userProfile,
@@ -999,6 +1088,8 @@ export function AppDataProvider({ children }) {
     if (parsed.history) setHistory(parsed.history);
     // Import FTP data if available
     if (parsed.ftp) setCurrentFTP(parsed.ftp);
+    // The backup's FTP and its FTP history go together: an older backup with no history clears it.
+    if (parsed.ftp) setFtpHistory(cleanFtpHistory(parsed.ftpHistory));
     if (parsed.intervalsFTP) setIntervalsFTP(parsed.intervalsFTP);
     // Import user profile and event if available
     if (parsed.userProfile) setUserProfile(parsed.userProfile);
@@ -1008,6 +1099,8 @@ export function AppDataProvider({ children }) {
     if (parsed.lastWorkedDates) setLastWorkedDates(parsed.lastWorkedDates);
     clearRecalcSnapshot();
     setRecalcUndoAvailable(false);
+    clearRescoreSnapshot();
+    setRescoreUndoAvailable(false);
     markDataChanged();
     return parsed.history?.length || 0;
   };
@@ -1031,6 +1124,7 @@ export function AppDataProvider({ children }) {
         levels,
         history,
         ftp: currentFTP,
+        ftpHistory,
         intervalsFTP,
         event,
         userProfile,
@@ -1049,6 +1143,7 @@ export function AppDataProvider({ children }) {
         }
         if (remoteData.history) setHistory(remoteData.history);
         if (remoteData.ftp) setCurrentFTP(remoteData.ftp);
+        if (remoteData.ftp) setFtpHistory(cleanFtpHistory(remoteData.ftpHistory));
         if (remoteData.intervalsFTP) setIntervalsFTP(remoteData.intervalsFTP);
         if (remoteData.event) setEvent(remoteData.event);
         if (remoteData.userProfile) setUserProfile(remoteData.userProfile);
@@ -1089,20 +1184,21 @@ export function AppDataProvider({ children }) {
   };
 
   // "Copy for Claude" text (the Today screen copies it to the clipboard).
-  const buildCopyText = () => buildAnalysisText({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile });
+  const buildCopyText = () => buildAnalysisText({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile, ftpHistory });
 
   const value = {
     // state
     levels, displayLevels, animatingZone, history, recentChanges, lastWorkedDates,
-    currentFTP, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData,
+    currentFTP, ftpHistory, intervalsFTP, event, userProfile, vo2maxEstimates, powerCurveData,
     exportedAt, lastSyncedAt, isDriveSyncing, driveSyncStatus, eftpPromptedValue,
     lastLoggedWorkout, hasUnsyncedChanges, maxhrPromptedValue, alertDismissals, recalcUndoAvailable,
+    rescoreUndoAvailable,
     // Log Ride form
     formData, setFormData, editingRide, pendingFitDetail, setPendingFitDetail,
     // derived
     effectiveLevels, eftpTimeline, currentEftp, loads, trainingStatus,
     fitnessSeries, rampRate, bestCurves, rideRecords, maxHrObserved,
-    calculateTSS, calculateIF,
+    calculateTSS, calculateIF, ftpOn,
     // actions
     saveRide: handleLogWorkout,
     closePostLogSummary,
@@ -1112,7 +1208,8 @@ export function AppDataProvider({ children }) {
     importRideFile, applyRideImport, attachRideFile,
     redetectRide: handleRedetectRide, redetectCandidates, redetectAll: handleRedetectAll,
     saveEvent: handleSaveEvent, deleteEvent: handleDeleteEvent,
-    saveProfile, resetLevels,
+    saveProfile, resetLevels, saveFtpHistory,
+    previewRescore, applyRescore, undoRescore,
     previewRecalculation, applyRecalculation, undoRecalculation, formStructureLevel,
     oldImportedRideCount, hideOldImportedRides, showOldImportedRides,
     exportData, readBackupFile, restoreBackup,

@@ -250,6 +250,20 @@ describe('recalculateLevelsFromHistory (synthetic history)', () => {
     expect(r.levels.sweetspot).toBeCloseTo(calculateNewLevel(1, L, 6, true, 'sweetspot'), 10);
   });
 
+  it('scores each ride at the FTP on its own date when an FTP history is recorded', () => {
+    // 223W blocks, saved at FTP 250 (NP / IF). If FTP was 280 that day they were tempo-level (80%).
+    const ride = ss(1, '2026-03-01', [[2, 20, 0.89]]);
+    const history = [{ date: '2026-01-01', ftp: 280 }];
+    const withHistory = recalculateLevelsFromHistory([ride], 250, history);
+    expect(withHistory.typical).toBe(1);
+    expect(withHistory.scored).toBe(0);
+    const sameDayFtp250 = recalculateLevelsFromHistory([ride], 250, [{ date: '2026-01-01', ftp: 250 }]);
+    expect(sameDayFtp250.scored).toBe(1);
+    // No history: unchanged behaviour (NP / IF).
+    expect(recalculateLevelsFromHistory([ride], 250).scored).toBe(1);
+    expect(recalculateLevelsFromHistory([ride], 250, []).scored).toBe(1);
+  });
+
   it('decays between rides', () => {
     const first = ss(1, '2026-01-01', [[3, 20, 0.9]]);
     const soon = recalculateLevelsFromHistory([first, ss(2, '2026-01-05', [[1, 10, 0.85]], { completed: false })], FTP);

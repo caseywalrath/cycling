@@ -1,5 +1,44 @@
 # Changelog
 
+## Session 27 - FTP History: Rides Measured Against the FTP of Their Day (2026-10-17)
+
+### What you'll see on your iPhone
+- **Settings → FTP history** (new card, below Profile). Add each time your FTP changed, with the date it took effect, for example 230W from 2025-12-26, 240W from 2026-07-01, 225W from 2026-10-13. Tap **Save FTP history**. The last row becomes your current FTP, and a note warns you if saving would change it.
+- **Changing FTP in Profile** now asks **"New FTP applies from"** (today by default). If it changed a few days ago, pick that date. The change is added to the history for you. The first time you do this, the app also records the FTP you had before it, "from the beginning", so older rides keep it.
+- **New rides** get their TSS and IF from the FTP on the ride's date. Log Ride's preview does too. Before, a ride logged late got the newest FTP: the Oct 8 ride showed IF 0.78 (225W) where TrainerDay had 0.73 (240W).
+- **Time in zones** on a ride page, and the Progress → Zones chart, use each ride's own FTP. A ride page says "Zones at 240W, your FTP on this date." when that isn't today's FTP.
+- **Interval detection** on import and Re-detect, and **Recalculate levels from my rides**, also use the FTP of the ride's day (once a history is recorded).
+- **Re-score my rides…** (Settings → FTP history, once you have a history). It recalculates TSS and IF of earlier rides from the FTP of their day. A preview shows Fitness, Fatigue and Form now and after, and nothing changes until you tap **Re-score rides**. **Undo re-score** puts the old numbers back. Rides before your first FTP entry, heart-rate-only rides, and levels, zones and intervals are not touched.
+- **Copy for Claude** lists your FTP history, shows each ride's IF and %FTP against its own day's FTP, and says "(FTP then 240W)" when it differs from today's. The note from the last version that said "@ FTP 240W then" is replaced: it could only show the FTP at the time of logging, which was the wrong FTP for rides logged late.
+- With **no history recorded, everything works exactly as before.**
+
+### Under the hood
+- New `src/lib/ftpHistory.js` (`ftpOnDate`, `cleanFtpHistory`, `withFtpChange`, `describeFtpHistory`, `rescoreRides`), with tests. `ftpHistory` is saved with your data, included in Export, Drive sync and Restore. A restore or Drive pull replaces it together with FTP, so the two can't disagree.
+- `weeklyTimeInZones` accepts either one FTP or a function from date to FTP. `recalculateLevelsFromHistory` takes the history as an optional third argument.
+- The Undo copy for Re-score is kept only on this device (`scores-before-rescore`), like the other undo copies.
+
+### Checks
+- 148 unit tests pass (was 126). New: FTP lookup rules, seeding on the first change, re-scoring rules, the export with and without a history, recalculation and the zones chart with a per-ride FTP.
+- `tools/v2-check.mjs`: **no differences vs baseline**.
+- New `tools/ftp-history-check.mjs` drives the real app (16 checks, all pass): add history, refuse a duplicate date, preview and apply re-score (Oct 8 ride goes to IF 0.733, TSS 54; a ride already right and a ride before the first entry stay as they were), ride-page note, undo, an effective-from change, and the first-change seeding on an install with no history.
+
+### Anything skipped?
+- I did not seed your history for you: the app stores it on your phone, so enter the three entries once in Settings → FTP history, then tap Re-score my rides.
+- Fitness (CTL) will move when you re-score, because rides logged at one FTP and others at another are brought onto the same footing. The preview shows by how much first.
+
+### Files Changed
+- `src/lib/ftpHistory.js`, `src/lib/ftpHistory.test.js` — new
+- `src/lib/chartData.test.js` — new
+- `src/state/AppDataContext.jsx` — `ftpHistory` state, load/save/export/restore/sync, `saveProfile` effective date, `saveFtpHistory`, re-score actions, `ftpOn`, ride-date TSS/IF/detection
+- `src/screens/SettingsScreen.jsx` — effective-from date, FTP history card, re-score
+- `src/screens/WorkoutDetailPage.jsx`, `src/components/TrainingCharts.jsx`, `src/screens/LogRideSheet.jsx` — ride-date FTP
+- `src/lib/summary.js`, `src/lib/progression.js`, `src/lib/chartData.js` — ride-date FTP in the export, recalculation and zones chart
+- `src/lib/summary.test.js`, `src/lib/progression.test.js` — extended
+- `tools/ftp-history-check.mjs` — new
+- `ARCHITECTURE.md` — new "FTP history" section; state, action, Settings, ride page and Copy for Claude updated
+
+---
+
 ## Session 26 - Zones Anchored to TrainerDay (2026-10-17)
 
 ### What you'll see on your iPhone
@@ -14,7 +53,7 @@
 TrainerDay and the app labelled the same ride differently (an 85% effort was "tempo" in TrainerDay and "sweet spot" in the app). One of the app's edges had been borrowed from TrainerRoad's chart, not TrainerDay's.
 
 ### Anything skipped?
-- Your **FTP history** (230, 240, then 225) is still not stored, so an old ride is zoned against today's FTP rather than the FTP you had then.
+- Your **FTP history** was still not stored at this point; the next entry ("FTP History") adds it.
 - I did not run the browser regression check (`tools/v2-check.mjs`). Its test ride (3x8 @ 250W at FTP 231, about 108%) is VO2max under both the old and new edges, so its numbers should not change.
 
 ### Files Changed

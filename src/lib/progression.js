@@ -1,4 +1,5 @@
 import { parseDateLocal } from './dates.js';
+import { ftpOnDate } from './ftpHistory.js';
 import { ZONE_BOUNDS, ZONE_LEVEL_WIDTH, ZONE_EXPECTED_RPE, ZONE_ADJACENCY, DEFAULT_LEVELS } from './zones.js';
 
 // Apply decay to progression levels based on days since last worked per zone.
@@ -283,11 +284,12 @@ export const trickleFor = (zone, change, newLevel, effectiveLevels) => {
 
 // V2 Phase 7 §7.4: rebuild levels by replaying every classified indoor ride, oldest first,
 // through the new model, starting every zone at 1.0, with decay between rides and trickle.
-// Each ride is scored at the FTP it was saved with (NP ÷ IF), falling back to `fallbackFtp`.
+// Each ride is scored at the FTP on its own date when an FTP history is recorded (Session 27);
+// otherwise at the FTP it was saved with (NP ÷ IF), falling back to `fallbackFtp`.
 // A ride the user levelled by hand keeps its manual level; a ride the model can't score (no
 // interval data, not endurance) counts as a typical session for its zone (LEVEL_AT_REFERENCE).
 // Pure: returns { levels, lastWorkedDates, scored, typical, manual } and changes nothing.
-export const recalculateLevelsFromHistory = (history, fallbackFtp) => {
+export const recalculateLevelsFromHistory = (history, fallbackFtp, ftpHistory = null) => {
   const levels = { ...DEFAULT_LEVELS };
   let lastWorkedDates = {};
   const counts = { scored: 0, typical: 0, manual: 0 };
@@ -302,7 +304,8 @@ export const recalculateLevelsFromHistory = (history, fallbackFtp) => {
       L = Number(ride.workoutLevel);
       counts.manual++;
     } else {
-      L = workoutLevelFromStructure(ride, rideFtpAtTime(ride) || fallbackFtp);
+      const rideFtp = ftpHistory?.length ? ftpOnDate(ftpHistory, ride.date, fallbackFtp) : (rideFtpAtTime(ride) || fallbackFtp);
+      L = workoutLevelFromStructure(ride, rideFtp);
       if (L == null) { L = LEVEL_AT_REFERENCE; counts.typical++; } else counts.scored++;
     }
     const before = effective[ride.zone];

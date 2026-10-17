@@ -4,6 +4,7 @@ import { timeInZones, aerobicDecoupling } from './analysis.js';
 import { workReps, rideFtpAtTime, ZONE_SET_TOLERANCE } from './progression.js';
 import { getTrainingStatus, estimateLthr } from './load.js';
 import { EFTP_20MIN_FACTOR } from './eftp.js';
+import { ftpOnDate, describeFtpHistory } from './ftpHistory.js';
 
 // Whole days from today to the event date (negative once it has passed), or null when no
 // event date is set. Moved from App.jsx (getDaysUntilEvent) in V2 Phase 3.
@@ -143,13 +144,14 @@ const inZoneWork = (w, zoneId, ftp) => {
   return { lengths, totalSec, ratio: wattSec / totalSec };
 };
 
-// "2 reps (10, 10 min) @ 87% (196W avg), 20 min in zone"
-const describeWork = (work, ftp) => {
+// "2 reps (10, 10 min) @ 87% (196W avg), 20 min in zone". `ofFtp` names the FTP the percentage is
+// of when it is not today's: "@ 85% of 240W FTP (204W avg)".
+const describeWork = (work, ftp, ofFtp = null) => {
   const n = work.lengths.length;
   const reps = n <= MAX_LISTED_REPS
     ? `${plural(n, 'rep')} (${work.lengths.map(halfMinutes).join(', ')} min)`
     : `${n} reps (~${halfMinutes(work.totalSec / n)} min each, longest ${halfMinutes(Math.max(...work.lengths))})`;
-  return `${reps} @ ${Math.round(work.ratio * 100)}% (${Math.round(work.ratio * ftp)}W avg), ${halfMinutes(work.totalSec)} min in zone`;
+  return `${reps} @ ${Math.round(work.ratio * 100)}%${ofFtp ? ` of ${ofFtp}W FTP` : ''} (${Math.round(work.ratio * ftp)}W avg), ${halfMinutes(work.totalSec)} min in zone`;
 };
 
 // "4x9 @ 96%" when the reps are about the same length, else "3 reps, 31 min @ 90%".
@@ -205,8 +207,10 @@ const zoneTableLines = (ftp) => ZONES.map(z => {
   return `- ${z.name}: ${Math.round(lo * 100)}-${Math.round(hi * 100)}% (${min}-${max}W) [${level}]`;
 });
 
-export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile, now = new Date() }) => {
+export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loads, rampRate, bestCurves, userProfile, ftpHistory = [], now = new Date() }) => {
   const today = startOfDay(now);
+  // The FTP a ride is measured against: the FTP on its own date when a history is recorded.
+  const ftpFor = (w) => ftpOnDate(ftpHistory, w.date, currentFTP);
   const todayStr = toLocalDateStr(today);
   const daysToEvent = getDaysUntilEvent(event, now);
   const status = getTrainingStatus(loads.ctl, loads.atl, loads.tsb, loads.ctl14dAgo);
@@ -233,6 +237,8 @@ export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loa
     `- FTP ${currentFTP}W | ${eftpText(currentEftp, best20)}`,
     `- ${hrBits.join(' | ')}`,
   ];
+  const ftpHistoryText = describeFtpHistory(ftpHistory);
+  if (ftpHistoryText) athleteLines.push(`- FTP history: ${ftpHistoryText}. Each ride below is measured against the FTP of its own day.`);
   if (daysToEvent !== null && daysToEvent >= 0) {
     athleteLines.push(`- Next event: ${event.name || 'Event'}, ${daysToEvent === 0 ? 'today' : plural(daysToEvent, 'day') + ' away'}`);
   }
@@ -255,22 +261,30 @@ export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loa
   const recentLines = recent.flatMap(w => {
     const indoor = w.rideType !== 'Outdoor';
     const zone = rideZone(w);
+    // With an FTP history, the ride is measured against its own day's FTP and IF is worked out
+    // from NP to match. Without one, IF is as stored, and the note says which FTP it was scored at.
+    const rideFtp = ftpFor(w);
+    const hasHistory = ftpHistory.length > 0;
+    const ftpDiffers = hasHistory && rideFtp !== currentFTP;
     const savedFtp = rideFtpAtTime(w);
-    const ftpNote = savedFtp && Math.abs(savedFtp - currentFTP) >= 3 ? ` @ FTP ${Math.round(savedFtp)}W then` : '';
+    const ifValue = hasHistory && w.normalizedPower > 0 && rideFtp > 0 ? w.normalizedPower / rideFtp : Number(w.intensityFactor);
+    const ftpNote = ftpDiffers
+      ? ` (FTP then ${rideFtp}W)`
+      : (!hasHistory && savedFtp && Math.abs(savedFtp - currentFTP) >= 3 ? ` (scored at FTP ${Math.round(savedFtp)}W)` : '');
     const parts = [
       `${w.rideType || 'Indoor'}${w.name ? ` "${w.name}"` : ''}`,
       indoor ? getZoneName(w.zone) : null,
       `${w.duration}min`,
       w.normalizedPower != null ? `NP ${w.normalizedPower}W` : 'no power meter',
-      w.intensityFactor != null ? `IF ${Number(w.intensityFactor).toFixed(2)}${ftpNote}` : null,
+      w.intensityFactor != null ? `IF ${ifValue.toFixed(2)}${ftpNote}` : null,
       `TSS ${w.tss}${w.tssSource === 'hr' ? ' (from heart rate)' : ''}`,
       w.hrStats?.avg != null ? `avg HR ${Math.round(w.hrStats.avg)}` : null,
       w.rpe != null ? `RPE ${w.rpe}` : null,
       indoor ? (w.completed === false ? 'did NOT finish all intervals' : 'completed') : null,
     ].filter(Boolean);
     const line = `- ${formatDateWithDay(w.date)}: ${parts.join(', ')}${w.notes ? ` (${w.notes})` : ''}`;
-    const work = ZONES_WITH_REPS.includes(zone) ? inZoneWork(w, zone, currentFTP) : null;
-    return work ? [line, `  Main set: ${describeWork(work, currentFTP)}`] : [line];
+    const work = ZONES_WITH_REPS.includes(zone) ? inZoneWork(w, zone, rideFtp) : null;
+    return work ? [line, `  Main set: ${describeWork(work, rideFtp, ftpDiffers ? rideFtp : null)}`] : [line];
   });
 
   // --- Interval progression: in-zone reps at %FTP, last 3 per zone, oldest first ---
@@ -287,7 +301,7 @@ export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loa
     }
     const items = inWindow.map(w => {
       if (z.id === 'endurance') return `${shortDate(w.date)} ${w.duration}min${w.intensityFactor != null ? ` @ IF ${Number(w.intensityFactor).toFixed(2)}` : ''}`;
-      const work = inZoneWork(w, z.id, currentFTP);
+      const work = inZoneWork(w, z.id, ftpFor(w));
       return `${shortDate(w.date)} ${work ? compactWork(work) : `none in zone${w.intervalData?.label ? ` (ride was ${w.intervalData.label})` : ''}`}`;
     });
     return `- ${z.name}: ${items.join(' → ')}`;
@@ -298,7 +312,7 @@ export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loa
   const zoneSeconds = {};
   ZONES.forEach(z => { zoneSeconds[z.id] = 0; });
   rides.filter(w => w.date >= fourWeeksAgoStr).forEach(w => {
-    const zones = timeInZones(w, currentFTP);
+    const zones = timeInZones(w, ftpFor(w));
     if (zones) Object.entries(zones).forEach(([id, secs]) => { zoneSeconds[id] += secs; });
   });
   const trainedSeconds = ZONES.filter(z => z.id !== 'recovery').reduce((s, z) => s + zoneSeconds[z.id], 0);
