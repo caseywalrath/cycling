@@ -1,7 +1,7 @@
 // Per-ride analysis — V2 Phase 5 §5.4. Pure functions; each returns null when the ride
 // doesn't have the data it needs, rather than a misleading number.
 import { bestAveragePower } from './eftp.js';
-import { zoneForRatio, ZONES } from './zones.js';
+import { zoneForRatio, ZONES, ZONE_EXPECTED_RPE } from './zones.js';
 
 // Durations (seconds) bestsForRide() will compute from a stream when the ride has no
 // pre-computed `ride.bests` (older rides, or a ride attached before Phase 5). 10s bins are
@@ -112,22 +112,58 @@ export const efficiencyFactor = (ride) => {
   return Math.round((ride.normalizedPower / avgHr) * 100) / 100;
 };
 
-// The RPE a rider would be expected to report for a given intensity factor — used to flag
-// rides that felt harder (or easier) than the numbers suggest.
-export const expectedRpe = (intensityFactor) => {
+// The RPE a rider would be expected to report for an intensity factor alone (whole-ride IF).
+// Used for rides with no zone: outdoor rides, and indoor rides not yet filed under a zone.
+// Graded so there is no cliff: 0.84 and 0.86 differ by one point, not two.
+export const expectedRpeFromIf = (intensityFactor) => {
   if (intensityFactor == null) return null;
   if (intensityFactor < 0.65) return 3;
   if (intensityFactor < 0.75) return 4;
-  if (intensityFactor < 0.85) return 5;
+  if (intensityFactor < 0.82) return 5;
+  if (intensityFactor < 0.90) return 6;
   if (intensityFactor < 0.95) return 7;
   if (intensityFactor < 1.05) return 8;
   return 9;
 };
 
+// Long rides feel harder at the same power. Rides of 2 h+ add one point, 3.5 h+ add two, but only
+// to rides whose base expectation is 6 or less (a long ride at threshold is not a plain +1).
+export const LONG_RIDE_MINUTES = 120;
+export const VERY_LONG_RIDE_MINUTES = 210;
+const DURATION_BUMP_MAX_BASE = 6;
+
+// The RPE a rider would be expected to report for a whole ride: the single model behind the
+// ring on the Log Ride sheet, the "Feels harder than usual" alert and Copy for Claude.
+//  - indoor ride filed under a zone: that zone's expected RPE (the main set is what it felt like)
+//  - otherwise: from the ride's IF
+// plus the long-ride bump. null when the ride gives nothing to go on.
+export const expectedRpe = (ride) => {
+  if (!ride) return null;
+  const zoneRpe = ride.rideType !== 'Outdoor' && ride.zone ? ZONE_EXPECTED_RPE[ride.zone] : null;
+  const base = zoneRpe ?? expectedRpeFromIf(ride.intensityFactor);
+  if (base == null) return null;
+  if (base > DURATION_BUMP_MAX_BASE) return base;
+  const minutes = Number(ride.duration) || 0;
+  const bump = minutes >= VERY_LONG_RIDE_MINUTES ? 2 : minutes >= LONG_RIDE_MINUTES ? 1 : 0;
+  return Math.min(10, base + bump);
+};
+
 // Reported RPE minus expected RPE, or null if either is missing.
 export const rpeMismatch = (ride) => {
   if (!ride || ride.rpe == null) return null;
-  const expected = expectedRpe(ride.intensityFactor);
+  const expected = expectedRpe(ride);
   if (expected == null) return null;
   return ride.rpe - expected;
 };
+
+// How the last `count` rated rides compare with what was expected: [{ ride, expected, gap }],
+// newest first. Rides with no rating are left out, so a forgotten rating can't skew anything.
+export const RPE_RECENT_RIDES = 5;
+export const RPE_BIG_GAP = 2;
+export const recentRpeGaps = (history, count = RPE_RECENT_RIDES) =>
+  (history || [])
+    .filter(w => w.rpe != null && expectedRpe(w) != null)
+    .slice()
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .slice(0, count)
+    .map(w => ({ ride: w, expected: expectedRpe(w), gap: w.rpe - expectedRpe(w) }));

@@ -1,10 +1,32 @@
 import { parseDateLocal, toLocalDateStr, formatDateWithDay } from './dates.js';
 import { ZONES, ZONE_BOUNDS, ZONE_COGGAN_LEVEL, getZoneName, zoneWattRange } from './zones.js';
-import { timeInZones, aerobicDecoupling } from './analysis.js';
+import { timeInZones, aerobicDecoupling, expectedRpe, recentRpeGaps, RPE_BIG_GAP } from './analysis.js';
 import { workReps, rideFtpAtTime, ZONE_SET_TOLERANCE } from './progression.js';
 import { getTrainingStatus, estimateLthr } from './load.js';
 import { EFTP_20MIN_FACTOR } from './eftp.js';
 import { ftpOnDate, describeFtpHistory } from './ftpHistory.js';
+
+// "RPE 8 (expected 7, +1)", "RPE 7 (expected 7)", "RPE not rated" (Session 29). The expected value
+// is the same one the Log Ride ring and the "Feels harder than usual" alert use.
+const rpeText = (w) => {
+  if (w.rpe == null) return 'RPE not rated';
+  const expected = expectedRpe(w);
+  if (expected == null) return `RPE ${w.rpe}`;
+  const gap = w.rpe - expected;
+  return `RPE ${w.rpe} (expected ${expected}${gap === 0 ? '' : `, ${gap > 0 ? '+' : ''}${gap}`})`;
+};
+
+// "RPE vs expected, last 5 rated rides: +0.4 avg, 1 ride +2 or more" (fewer rides early on), or null
+// with no rated rides.
+const rpeSummaryLine = (history) => {
+  const gaps = recentRpeGaps(history);
+  if (gaps.length === 0) return null;
+  const avg = Math.round((gaps.reduce((sum, g) => sum + g.gap, 0) / gaps.length) * 10) / 10;
+  const big = gaps.filter(g => g.gap >= RPE_BIG_GAP).length;
+  const label = `last ${gaps.length} rated ${gaps.length === 1 ? 'ride' : 'rides'}`;
+  const bigText = big === 0 ? 'none' : `${big} ${big === 1 ? 'ride' : 'rides'}`;
+  return `RPE vs expected, ${label}: ${avg > 0 ? '+' : ''}${avg} avg, ${bigText} +${RPE_BIG_GAP} or more`;
+};
 
 // Whole days from today to the event date (negative once it has passed), or null when no
 // event date is set. Moved from App.jsx (getDaysUntilEvent) in V2 Phase 3.
@@ -255,6 +277,8 @@ export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loa
     return `- ${shortDate(wk.start)}${partial}: ${wk.hours.toFixed(1)}h, ${wk.tss} TSS (${plural(wk.rides, 'ride')})`;
   });
 
+  const rpeLine = rpeSummaryLine(rides);
+
   // --- Recent rides ---
   const recentCutoff = toLocalDateStr(new Date(today.getTime() - RECENT_RIDES_DAYS * DAY_MS));
   const recent = newestFirst.filter(w => w.date >= recentCutoff).slice(0, RECENT_RIDES_MAX);
@@ -279,7 +303,7 @@ export const buildAnalysisText = ({ history, currentFTP, currentEftp, event, loa
       w.intensityFactor != null ? `IF ${ifValue.toFixed(2)}${ftpNote}` : null,
       `TSS ${w.tss}${w.tssSource === 'hr' ? ' (from heart rate)' : ''}`,
       w.hrStats?.avg != null ? `avg HR ${Math.round(w.hrStats.avg)}` : null,
-      w.rpe != null ? `RPE ${w.rpe}` : null,
+      rpeText(w),
       indoor ? (w.completed === false ? 'did NOT finish all intervals' : 'completed') : null,
     ].filter(Boolean);
     const line = `- ${formatDateWithDay(w.date)}: ${parts.join(', ')}${w.notes ? ` (${w.notes})` : ''}`;
@@ -360,7 +384,7 @@ TrainerDay has no sweet-spot level; its "SS" workouts target this app's Sweet Sp
 ${weekLines.join('\n')}
 
 **Recent rides** (last ${RECENT_RIDES_DAYS} days)
-${recentLines.length > 0 ? recentLines.join('\n') : '- none'}
+${recentLines.length > 0 ? recentLines.join('\n') : '- none'}${rpeLine ? `\n${rpeLine}` : ''}
 
 **Interval progression** (in-zone reps only, last 3 per zone, oldest first)
 ${progressionLines.join('\n')}

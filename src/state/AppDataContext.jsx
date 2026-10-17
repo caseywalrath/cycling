@@ -68,7 +68,9 @@ export const getDefaultFormData = () => {
     // lets a file import's calculated level apply.
     workoutLevel: null,
     workoutLevelSource: null,
-    rpe: 5,
+    // Session 29: no rating until the rider taps one (null = not rated), so a forgotten rating
+    // isn't saved as a 5.
+    rpe: null,
     completed: true,
     duration: '',
     normalizedPower: '',
@@ -701,7 +703,7 @@ export function AppDataProvider({ children }) {
       // V2 Phase 7: legacy rides stored an RPE-like constant here; only a real level pre-fills.
       workoutLevel: workout.workoutLevelSource ? workout.workoutLevel : null,
       workoutLevelSource: workout.workoutLevelSource === 'manual' ? 'manual' : null,
-      rpe: workout.rpe != null ? workout.rpe : 5,
+      rpe: workout.rpe ?? null,
       completed: workout.completed !== false,
       duration: workout.duration,
       normalizedPower: workout.normalizedPower,
@@ -810,6 +812,13 @@ export function AppDataProvider({ children }) {
   };
 
   // Returns { ok, message } for a toast.
+  // Session 29: set or clear (null) a ride's RPE from its Ride page. Progression levels are not
+  // re-run; Settings > recalculate levels uses the stored value.
+  const handleRateRide = (rideId, rpe) => {
+    setHistory(prev => prev.map(w => w.id === rideId ? { ...w, rpe } : w));
+    markDataChanged();
+  };
+
   const handleRedetectRide = (rideId) => {
     const ride = history.find(w => w.id === rideId);
     if (!ride || !ride.stream) return { ok: false, message: 'This ride has no saved power data.' };
@@ -1206,6 +1215,7 @@ export function AppDataProvider({ children }) {
     closeRideForm,
     deleteRide: handleDeleteWorkout,
     importRideFile, applyRideImport, attachRideFile,
+    rateRide: handleRateRide,
     redetectRide: handleRedetectRide, redetectCandidates, redetectAll: handleRedetectAll,
     saveEvent: handleSaveEvent, deleteEvent: handleDeleteEvent,
     saveProfile, resetLevels, saveFtpHistory,

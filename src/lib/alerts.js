@@ -2,7 +2,7 @@ import { EFTP_PROMPT_MARGIN } from './eftp.js';
 import { getDaysUntilEvent, latestRide } from './summary.js';
 import { dailyLoadSeries, rampRate as computeRampRate } from './load.js';
 import { newBestsForRide, observedMaxHr } from './records.js';
-import { rpeMismatch } from './analysis.js';
+import { recentRpeGaps, RPE_BIG_GAP } from './analysis.js';
 import { parseDateLocal } from './dates.js';
 
 // Today tab alerts. A pure function so later phases can add alert types.
@@ -127,17 +127,9 @@ export const buildAlerts = (state, derived, today = new Date()) => {
     }
   }
 
-  // Feels harder than usual: 2+ of the last 5 power rides felt harder than their intensity
-  // suggests. Dismiss hides it until a new ride is logged.
-  const powerRides = history
-    .filter(w => w.intensityFactor != null && w.rpe != null)
-    .slice()
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-    .slice(0, 5);
-  const mismatchCount = powerRides.filter(w => {
-    const m = rpeMismatch(w);
-    return m != null && m >= 2;
-  }).length;
+  // Feels harder than usual: 2+ of the last 5 rated rides felt harder than expected (see
+  // expectedRpe in analysis.js). Unrated rides are skipped. Dismiss hides it until a new ride is logged.
+  const mismatchCount = recentRpeGaps(history).filter(g => g.gap >= RPE_BIG_GAP).length;
   if (mismatchCount >= 2) {
     const latestId = latest ? latest.id : null;
     if (dismissals['feels-harder'] !== latestId) {
