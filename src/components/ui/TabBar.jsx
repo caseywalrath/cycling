@@ -8,9 +8,9 @@ const Icon = ({ id }) => {
     case 'today':
       return (<svg {...common}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>);
     case 'rides':
-      return (<svg {...common}><circle cx="5.5" cy="17" r="3.5" /><circle cx="18.5" cy="17" r="3.5" /><path d="M5.5 17l4-8h6l3 8M9.5 9l3.5 8 2.5-5.5M13 6h3" /></svg>);
+      return (<svg {...common}><circle cx="5" cy="16.5" r="3.5" /><circle cx="19" cy="16.5" r="3.5" /><path d="M5 16.5L9 9h6.5M9 9l3 7.5L15.5 9 19 16.5M7.5 7.5h3" /></svg>);
     case 'progress':
-      return (<svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>);
+      return (<svg {...common}><path d="M5 20v-5M11 20v-8M17 20V9" strokeWidth="3" /><path d="M3 9l5-4 4 3 8-6M16 2h4v4" strokeWidth="1.6" /></svg>);
     case 'settings':
       return (<svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" /></svg>);
     default:

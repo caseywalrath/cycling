@@ -2,11 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { getZoneName, getZoneColor } from '../lib/zones.js';
 import { buildAlerts } from '../lib/alerts.js';
 import { getDaysUntilEvent, weekComparison, latestRide, copyToClipboard } from '../lib/summary.js';
-import { shortDayDate, formatMinutes } from '../lib/format.js';
+import { shortDayDate } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
 import { navigate } from '../state/useHashRoute.js';
 import { Screen, Card, SectionHeader, StatTile, Button, EmptyState, useToast } from '../components/ui/index.js';
+import { RideStats } from '../components/RideRow.jsx';
+import ZoneMixBar, { useRideZoneTotals } from '../components/ZoneMixBar.jsx';
 
 // Today tab (V2 Phase 3). Top to bottom: header (wordmark + FTP line), status card,
 // alerts, this week, latest ride, event, Copy for Claude. The "＋ Log Ride" button floats
@@ -89,6 +91,7 @@ export default function TodayScreen() {
   );
   const week = useMemo(() => weekComparison(history), [history]);
   const latest = useMemo(() => latestRide(history), [history]);
+  const latestZones = useRideZoneTotals(latest);
   const daysToEvent = getDaysUntilEvent(event);
 
   const handleAlertAction = (alert, actionId) => {
@@ -240,12 +243,12 @@ export default function TodayScreen() {
               <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-yellow-900/40 text-yellow-400">Needs zone</span>
             )}
           </div>
-          <div className="text-sm text-gray-400 mt-0.5 tabular-nums">
-            {shortDayDate(latest.date)} · {formatMinutes(latest.duration)} · TSS {latest.tss ?? '—'}
-          </div>
+          <div className="text-sm text-gray-400 mt-0.5">{shortDayDate(latest.date)}</div>
           {latest.intervalData?.label && (
             <div className="text-sm text-yellow-400 font-mono mt-1">{latest.intervalData.label}</div>
           )}
+          <RideStats ride={latest} />
+          <ZoneMixBar zoneTotals={latestZones} className="h-1.5 mt-3" />
         </Card>
       ) : (
         <Card>

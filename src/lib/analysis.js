@@ -40,6 +40,14 @@ export const timeInZones = (ride, ftp) => {
   return totals;
 };
 
+// Average heart rate over a ride's stream, ignoring dropouts. Null when there's no HR.
+export const avgHrFromStream = (ride) => {
+  const hr = ride?.stream?.hr;
+  if (!hr || !hr.length) return null;
+  const vals = hr.filter(v => v != null);
+  return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : null;
+};
+
 const meanOf = (arr) => {
   const vals = arr.filter(v => v != null);
   if (vals.length === 0) return null;

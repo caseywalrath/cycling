@@ -2,13 +2,14 @@ import React, { useRef, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Area, Line, ReferenceArea, Legend } from 'recharts';
 import { formatDateWithDay, parseDateLocal } from '../lib/dates.js';
 import { ZONES, getZoneColor, getZoneName } from '../lib/zones.js';
-import { bestsForRide, timeInZones, aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe } from '../lib/analysis.js';
+import { bestsForRide, timeInZones, aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, avgHrFromStream } from '../lib/analysis.js';
 import { bestEffortComparison } from '../lib/records.js';
 import {
   smoothingSeconds, describeSmoothing, rideChartPoints, readSmoothingChoice, writeSmoothingChoice,
 } from '../lib/rideChart.js';
 import { formatMinutes } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
+import ZoneMixBar from '../components/ZoneMixBar.jsx';
 import { useShell } from '../state/ShellContext.js';
 import { goBack } from '../state/useHashRoute.js';
 import RpeButtons from '../components/RpeButtons.jsx';
@@ -65,12 +66,7 @@ export default function WorkoutDetailPage({ rideId }) {
 
   const isOutdoor = detailRide.rideType === 'Outdoor';
   const rideExpectedRpe = expectedRpe(detailRide);
-  const avgHr = detailRide.stream?.hr?.length
-    ? (() => {
-        const vals = detailRide.stream.hr.filter(v => v != null);
-        return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : null;
-      })()
-    : null;
+  const avgHr = avgHrFromStream(detailRide);
 
   // V2 Phase 5: a ride can have HR with no power (stream.power === null) — chart HR only.
   const streamLength = detailRide.stream ? (detailRide.stream.power?.length ?? detailRide.stream.hr.length) : 0;
@@ -364,13 +360,7 @@ export default function WorkoutDetailPage({ rideId }) {
           {rideFtp !== currentFTP && (
             <p className="text-xs text-gray-500 mb-2" data-ride-ftp-note>Zones at {rideFtp}W, your FTP on this date.</p>
           )}
-          <div className="flex w-full h-3 rounded-full overflow-hidden">
-            {ZONES.map(z => {
-              const secs = zoneTotals[z.id] || 0;
-              if (secs === 0) return null;
-              return <div key={z.id} style={{ width: `${(secs / totalZoneSeconds) * 100}%`, backgroundColor: z.color }} />;
-            })}
-          </div>
+          <ZoneMixBar zoneTotals={zoneTotals} className="h-3" />
           <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
             {ZONES.map(z => {
               const secs = zoneTotals[z.id] || 0;

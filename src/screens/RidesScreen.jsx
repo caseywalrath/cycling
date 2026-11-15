@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ridesNeedingZone } from '../lib/alerts.js';
 import { parseDateLocal } from '../lib/dates.js';
+import { formatMinutes } from '../lib/format.js';
 import { useAppData } from '../state/AppDataContext.jsx';
 import { useShell } from '../state/ShellContext.js';
 import { navigate } from '../state/useHashRoute.js';
@@ -110,8 +111,11 @@ export default function RidesScreen({ route }) {
             <div className="space-y-4">
               {shown.map(([key, rides]) => (
                 <div key={key}>
-                  <div className="sticky z-10 py-1.5 text-sm font-semibold text-gray-400 bg-gray-900/95 backdrop-blur" style={{ top: 'env(safe-area-inset-top)' }}>
+                  <div className="sticky z-10 py-1.5 flex items-baseline justify-between text-sm font-semibold text-gray-400 bg-gray-900/95 backdrop-blur" style={{ top: 'env(safe-area-inset-top)' }}>
                     {monthLabel(key)}
+                    <span className="text-xs font-normal tabular-nums" data-month-total>
+                      {formatMinutes(rides.reduce((s, r) => s + (r.duration || 0), 0))} · TSS {Math.round(rides.reduce((s, r) => s + (r.tss || 0), 0))}
+                    </span>
                   </div>
                   <div className="space-y-2">
                     {rides.map(ride => <RideRow key={ride.id} ride={ride} />)}
