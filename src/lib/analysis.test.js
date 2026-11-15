@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bestsForRide, timeInZones, aerobicDecoupling, efficiencyFactor, expectedRpe, expectedRpeFromIf, rpeMismatch, recentRpeGaps } from './analysis.js';
+import { bestsForRide, timeInZones, aerobicDecoupling, efficiencyFactor, expectedRpe, expectedRpeFromIf, rpeMismatch, recentRpeGaps, avgHrFromStream } from './analysis.js';
 
 describe('bestsForRide', () => {
   it('prefers ride.bests (1s) when present', () => {
@@ -144,5 +144,20 @@ describe('recentRpeGaps', () => {
     const history = Array.from({ length: 8 }, (_, i) => r(i, `2026-09-0${i + 1}`, 4));
     expect(recentRpeGaps(history)).toHaveLength(5);
     expect(recentRpeGaps(history, 2).map(g => g.ride.id)).toEqual([7, 6]);
+  });
+});
+
+describe('avgHrFromStream', () => {
+  it('returns null when there is no stream', () => {
+    expect(avgHrFromStream({})).toBeNull();
+  });
+  it('returns null when every HR value is null', () => {
+    expect(avgHrFromStream({ stream: { hr: [null, null] } })).toBeNull();
+  });
+  it('ignores dropouts when averaging', () => {
+    expect(avgHrFromStream({ stream: { hr: [100, null, 110] } })).toBe(105);
+  });
+  it('rounds the average to a whole number', () => {
+    expect(avgHrFromStream({ stream: { hr: [100, 101] } })).toBe(101);
   });
 });
