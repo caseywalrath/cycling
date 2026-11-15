@@ -1,5 +1,20 @@
 # Changelog
 
+## Session 31 - New Rides and Progress Tab Icons (2026-11-15)
+
+### What you'll see on your iPhone
+- **Rides tab icon.** A cleaner road bike with a diamond frame and a saddle, with more space between the lines so it reads clearly at tab size.
+- **Progress tab icon.** Three solid bars of rising height with a trend arrow climbing over them.
+
+### Not changed
+- Today and Settings icons, tab labels, colours and behaviour. No data is touched.
+
+### Under the hood
+- `src/components/ui/TabBar.jsx`: only the `rides` and `progress` SVG shapes in `Icon` were replaced.
+
+### Checks
+- `npm run build` passes. `tools/ride-list-check.mjs` passes with no page errors. A screenshot of the real tab bar at iPhone width shows both icons. Not tried on a real iPhone.
+
 ## Session 30 - Zone Bars on Ride Cards (2026-11-15)
 
 Every ride card now shows at a glance how its time was spread across the training zones, with the key numbers laid out in a row.
