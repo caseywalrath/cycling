@@ -1,5 +1,48 @@
 # Changelog
 
+## Session 30 - Zone Bars on Ride Cards (2026-11-15)
+
+Every ride card now shows at a glance how its time was spread across the training zones, with the key numbers laid out in a row.
+
+### What you'll see on your iPhone
+- **A zone bar on each ride.** A thin bar under each ride in the Rides list, and on the Latest ride card on Today, is split into the zone colours by time spent in each zone. A ride with no power data (heart-rate-only or typed in by hand) shows no bar.
+- **A four-number row.** Each ride shows Time, NP (indoor) or Distance (outdoor), Avg HR and TSS, each with a small label underneath. Avg HR shows "—" when the ride has no heart-rate data.
+- **A zone pill on each ride row.** An outlined label on the right of the ride's name: the zone name, "Outdoor", or "Needs zone" in yellow. Before, the zone name was only small text on the second line.
+- **Month totals.** Each month heading in the Rides list now shows that month's total time and TSS on the right. The totals follow the filter and search you have on, so filtering to "Outdoor" shows the outdoor totals.
+- **Ride page.** The time-in-zones bar looks the same as before, with a 1px gap between colours. Avg HR is worked out the same way, so the numbers do not change.
+
+### Not changed
+- **Zones and TSS.** How zones, time in zone and TSS are worked out is unchanged.
+- **Saved data.** No ride is rewritten. Nothing is stored that wasn't before.
+- **Progression levels.** No level moves.
+- **Progress tab.** The progression level bars there are untouched. Weekly hours bars at the top of Rides were not added.
+
+### Under the hood
+- New `src/components/ZoneMixBar.jsx`: the bar, plus a `useRideZoneTotals(ride)` hook that works out a ride's zone totals against the FTP on that ride's date. It is a separate file from `ZoneBar.jsx` (the Progress level bar), which is not changed.
+- `src/lib/analysis.js`: new `avgHrFromStream(ride)`, used by the Ride page and by the new stat row.
+- `src/components/RideRow.jsx`: rebuilt layout (pill, stat row, bar); exports `RideStats`, which Today also uses.
+- `src/screens/TodayScreen.jsx`: Latest ride card shows the stat row and bar.
+- `src/screens/RidesScreen.jsx`: month heading totals.
+- `src/screens/WorkoutDetailPage.jsx`: uses `ZoneMixBar` and `avgHrFromStream`.
+- New `tools/ride-list-check.mjs`: drives the Rides list and Today in a browser at iPhone width.
+- Tests: `src/lib/analysis.test.js` gets 4 new tests for `avgHrFromStream` (no stream, all-null HR, a gap in the HR data, rounding).
+
+### Checks
+- `npm test`: 177 pass (was 173).
+- `npm run build`: passes.
+- `tools/v2-check.mjs`: no differences vs baseline. (It does not compare ride-card text.)
+- `tools/ftp-history-check.mjs`: 16 PASS.
+- `tools/ride-chart-check.mjs`: 19 PASS.
+- `tools/rpe-check.mjs`: 25 PASS.
+- New `tools/ride-list-check.mjs`: 26 PASS. Covers the zone bars (present only on rides with power, segment widths within 1% of the real time-in-zone split), the pills, the stat row, the month totals, the Today card, no horizontal scroll, and no page errors.
+- No horizontal scroll at 390px on Rides or Today.
+- Screenshots were reviewed.
+
+### Anything skipped?
+- `npm run lint` could not run. This repository has no ESLint config file (`.eslintrc` or similar), so the lint script has nothing to check against. That was already the case before this session and was not changed here.
+- In the Rides screenshot, the first card's bar was hidden behind the floating Log Ride button and the bottom tab bar in the capture. The other cards' bars were visible and checked.
+- Not checked on a real iPhone. Checks ran in a desktop browser at iPhone width.
+
 ## Session 29 - Honest Effort Ratings (2026-10-17)
 
 Based on a literature review of RPE in cycling (rate the whole session, 0–10 "CR10" scale; effort rises with ride length and sustained climbing, not just power), checked against what the app actually did.

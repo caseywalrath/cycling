@@ -55,7 +55,14 @@ src/
     RecordsCard.jsx          # V2 Phase 6: personal bests table, longest/climbing/highest-TSS, YTD
     ActivityCalendar.jsx     # monthly calendar (Rides tab): zone-coloured ride dots, week-TSS
                              #   column, day taps (V2 Phase 4)
-    RideRow.jsx              # one ride row in the Rides list (V2 Phase 4; replaces RideHistoryList)
+    RideRow.jsx              # one ride row in the Rides list (V2 Phase 4; replaces RideHistoryList).
+                             #   Session 30: zone/Outdoor/Needs-zone pill, `RideStats` stat row
+                             #   (exported, also used by Today's Latest ride), and a ZoneMixBar
+    ZoneMixBar.jsx           # Session 30: one thin bar split into zone colours by time in each zone
+                             #   (from timeInZones). Used by RideRow, Today's Latest ride and the Ride
+                             #   page. `useRideZoneTotals(ride)` gives a ride's zone totals against the
+                             #   FTP on its own date. Not ZoneBar.jsx: that is the Progress tab's
+                             #   progression level bar, and it is not changed
     PostLogSummarySheet.jsx  # level before → after, trickle, TSS/IF/RPE ("Not rated" when blank)
     RpeButtons.jsx           # Session 29: the 1–10 effort picker (Log Ride sheet + Ride page)
   screens/
@@ -84,7 +91,8 @@ src/
                              #   estimateLthr, hrTss, dailyLoadSeries, rampRate (Phase 5)
     analysis.js              #   Phase 5: per-ride analysis — bestsForRide, timeInZones,
                              #   aerobicDecoupling, decouplingBand, efficiencyFactor, expectedRpe, expectedRpeFromIf,
-                             #   rpeMismatch, recentRpeGaps (Session 29)
+                             #   rpeMismatch, recentRpeGaps (Session 29), avgHrFromStream (Session 30:
+                             #   a ride's average HR from its stream, null-safe; the Ride page uses it too)
     records.js                #   Phase 5: across-rides analysis — powerCurve, personalBests,
                              #   newBestsForRide, bestEffortComparison (Session 28), records, observedMaxHr
     rideChart.js             #   Session 28: Ride page chart smoothing — smoothingSeconds, smoothSeries,
@@ -103,6 +111,7 @@ tools/
   ftp-history-check.mjs      # Session 27: drives Settings → FTP history, re-score + undo, ride-page note
   ride-chart-check.mjs       # Session 28: drives the Ride page — chart smoothing choices, best-effort bars
   rpe-check.mjs              # Session 29: drives RPE — unrated start, clear, ring, Ride page rating, export lines
+  ride-list-check.mjs        # Session 30: drives the Rides list and Today — zone bars, pills, stat row, month totals
 public/                      # PWA icons, apple-touch-icon.png
 .github/workflows/deploy.yml # GitHub Actions → GitHub Pages
 vite.config.js               # Vite + PWA config (base: /cycling/)
@@ -302,8 +311,11 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
        box) / **Dismiss** — either answer stores the value.
 4. **This week:** Monday → today vs last Monday → same weekday (`weekComparison`): hours, TSS,
    rides with ▲/▼, and a 7-dot Mon–Sun row coloured by zone (grey outdoor), today ringed.
-5. **Latest ride** (`latestRide`: latest date): name, zone/Outdoor/Needs-zone pill, date,
-   duration, TSS, interval label. Tap → `#/ride/<id>` if it has a stream, else the edit sheet.
+5. **Latest ride** (`latestRide`: latest date; Session 30 layout): name with a zone/Outdoor/Needs-zone
+   pill, the date, the `RideStats` row (Time · NP or Distance · Avg HR · TSS), the interval label, and
+   a thin `ZoneMixBar` (`data-zone-mix-bar`) split by time in each zone, from `useRideZoneTotals`
+   (against the FTP on the ride's date). No bar when the ride has no power data. Tap → `#/ride/<id>`
+   if it has a stream, else the edit sheet.
 6. **Event:** name, date, "36 days to go" / "Today!" / "Event complete" (+ Set next event), and
    the Fitness (CTL) → target bar (moved here from the old Fitness Progress card). No date:
    "No event set · Add one".
@@ -321,10 +333,15 @@ Every screen uses the UI kit; later phases must too, rather than hand-rolling st
    date already filled in. A future empty date isn't tappable.
 2. **Filter chips** (`Chip`): All · Indoor · Outdoor · Needs zone (`ridesNeedingZone`, excludes
    `historical` rides), plus a search box matching ride name/notes.
-3. **Ride list** (`RideRow`, replaces the old `RideHistoryList` cards): a 4px zone-coloured left
-   edge, name, short date, duration · TSS, and a second line — the interval label (indoor) or
-   distance/elevation (outdoor), or "Needs a zone" in yellow. Tapping a row opens the Ride page.
-   Grouped by calendar month with a sticky month header, most recent first, loaded 3 months at a
+3. **Ride list** (`RideRow`, Session 30 layout): each card has the name on the left and an outlined
+   pill on the right (`data-ride-pill`: the zone name, "Outdoor", or "Needs zone" in yellow). Under
+   the name, the short date on the left and the interval label (indoor) or elevation (outdoor) on the
+   right. Then the `RideStats` row (`data-ride-stats`: Time · NP or Distance · Avg HR · TSS; Avg HR
+   shows "—" without HR data) and a thin `ZoneMixBar` (`data-zone-mix-bar`) at the bottom. Rides with
+   no power data show no bar. Tapping a row opens the Ride page.
+   Grouped by calendar month with a sticky month header, most recent first. Each header also shows
+   that month's total time and TSS on the right (`data-month-total`), summed over the rides currently
+   shown, so it follows the filter and search. Loaded 3 months at a
    time with a "Show older rides" button so 150+ rides stay fast to render.
 
 ### Progress (`screens/ProgressScreen.jsx`, V2 Phase 6 redesign)
@@ -412,8 +429,8 @@ CHANGELOG).
   ride — yellow = new best, blue = within 5%, grey = below, no bar when there was nothing to
   compare with — and tapping one shows a detail line, `[data-best-detail]`, e.g. "5m: 300W is
   97% of your 90-day best of 310W (Sep 20)"; a footnote when the bests come from the coarser 10s
-  stream instead of 1Hz data); a **time in zones** stacked bar with minutes per zone
-  (`timeInZones`, needs a power stream; Session 27: against the FTP on the ride's own date, with a
+  stream instead of 1Hz data); a **time in zones** bar (`ZoneMixBar`, Session 30: one thin bar split into zone colours, with a
+  1px gap between colours; the legend of minutes per zone sits beneath it) (`timeInZones`, needs a power stream; Session 27: against the FTP on the ride's own date, with a
   "Zones at 240W, your FTP on this date." note — `[data-ride-ftp-note]` — when that isn't today's FTP); **heart-rate drift**
   (`aerobicDecoupling` + `decouplingBand`, steady rides only); **efficiency** (`efficiencyFactor`,
   "Higher over time = fitter").
